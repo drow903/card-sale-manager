@@ -1,0 +1,17 @@
+node_modules/
+release/
+
+.builder-cache/
+.electron-cache/
+.local-app-data/
+.roaming-app-data/
+
+.*-data/
+.qa-current/
+.match-qa-images/
+
+qa-*.png
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

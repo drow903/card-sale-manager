@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; style-src 'self'; script-src 'self'" />
+    <title>Card Sale Manager</title>
+    <link rel="icon" href="assets/favicon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="assets/favicon.svg" alt="" />
+          <div><strong>Card Sale</strong><span>Manager</span></div>
+        </div>
+        <nav aria-label="Main navigation">
+          <button class="nav-item active" data-view="sale"><span>01</span> Sale workspace</button>
+          <button class="nav-item" data-view="claims"><span>02</span> Claims desk</button>
+          <button class="nav-item" data-view="orders"><span>03</span> Buyer orders</button>
+          <button class="nav-item" data-view="packing"><span>04</span> Packing</button>
+        </nav>
+        <div class="sale-switcher">
+          <label for="saleSelect">Active sale</label>
+          <select id="saleSelect"></select>
+          <button id="newSaleBtn" class="secondary full">+ New sale</button>
+        </div>
+        <div class="save-status"><span id="saveDot"></span><span id="saveText">Saved locally</span></div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="viewEyebrow">SALE WORKSPACE</p>
+            <h1 id="viewTitle">September vintage sale</h1>
+          </div>
+          <div class="top-actions">
+            <button id="addImagesBtn" class="secondary">Add images</button>
+            <button id="importBtn" class="primary">Import spreadsheet</button>
+          </div>
+        </header>
+
+        <section id="saleView" class="view active">
+          <div class="stats" id="saleStats"></div>
+          <div class="workspace-grid">
+            <section class="panel listings-panel">
+              <div class="panel-header">
+                <div><h2>Sale listings</h2><p>Every row becomes one ready-to-post line item.</p></div>
+                <div class="segmented" aria-label="Listing filters">
+                  <button class="active" data-filter="all">All</button>
+                  <button data-filter="available">Available</button>
+                  <button data-filter="claimed">Claimed</button>
+                  <button data-filter="with-image">With image</button>
+                  <button data-filter="missing-image">Missing image</button>
+                  <button data-filter="copied">Copied</button>
+                </div>
+              </div>
+              <div class="toolbar">
+                <label class="search"><span>⌕</span><input id="cardSearch" type="search" placeholder="Search cards, numbers, conditions…" /></label>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Ref</th><th>Card</th><th>Grade</th><th>Claim price</th><th>Status</th><th></th></tr></thead>
+                  <tbody id="listingRows"></tbody>
+                </table>
+                <div id="listingEmpty" class="empty-state hidden">
+                  <div class="empty-icon">▤</div><h3>Import your first card list</h3>
+                  <p>Excel, CSV and TSV files are supported. Headers are matched automatically.</p>
+                  <button class="primary" data-action="import">Choose spreadsheet</button>
+                </div>
+              </div>
+            </section>
+
+            <aside class="panel post-queue">
+              <div class="panel-header compact">
+                <div><h2>Post queue</h2><p>Drag an image into your Facebook sale.</p></div>
+                <span class="count-pill" id="imageCount">0</span>
+              </div>
+              <div id="imageQueue" class="image-queue"></div>
+              <div class="queue-actions">
+                <button id="autoMatchBtn" class="primary full">Auto-match card images</button>
+                <button id="imageFolderSettingsBtn" class="secondary full">Image lookup folders</button>
+                <button id="addFolderBtn" class="secondary full">Add image folder</button>
+                <p id="lookupFolderLabel" class="folder-label">No lookup folder selected</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="claimsView" class="view">
+          <div class="claims-layout">
+            <section class="panel claim-list-panel">
+              <div class="panel-header"><div><h2>Assign buyers</h2><p>Every card in the sale workspace appears here automatically.</p></div></div>
+              <div class="toolbar"><label class="search"><span>⌕</span><input id="claimSearch" type="search" placeholder="Search cards or buyers…" /></label></div>
+              <datalist id="buyerNames"></datalist>
+              <div class="table-wrap claim-table-wrap"><table><thead><tr><th>Ref</th><th>Card</th><th>List / cost</th><th>Offer price</th><th>Buyer</th><th></th></tr></thead><tbody id="claimRows"></tbody></table></div>
+            </section>
+            <section class="panel">
+              <div class="panel-header"><div><h2>Recent claims</h2><p>Newest activity appears first.</p></div></div>
+              <div id="claimTimeline" class="timeline"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="ordersView" class="view">
+          <div class="orders-layout">
+            <section class="panel buyer-list-panel">
+              <div class="panel-header compact"><div><h2>Buyers</h2><p id="buyerCount">0 active orders</p></div></div>
+              <div id="buyerList" class="buyer-list"></div>
+            </section>
+            <section class="panel order-detail" id="orderDetail"></section>
+          </div>
+        </section>
+
+        <section id="packingView" class="view">
+          <div class="packing-header">
+            <div><h2>Ready to pack</h2><p>Verify every card against its sale reference before closing the package.</p></div>
+            <select id="packingBuyer"></select>
+          </div>
+          <div id="packingContent"></div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="importDialog">
+      <form method="dialog" class="dialog-card large">
+        <div class="dialog-header"><div><p class="eyebrow">SPREADSHEET IMPORT</p><h2>Map your card columns</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <p class="dialog-copy">We matched the columns we recognize. Adjust anything that looks wrong, then choose how each listing should read.</p>
+        <div id="mappingGrid" class="mapping-grid"></div>
+        <label class="template-label">Listing format
+          <input id="listingTemplate" value="{year} {brand} {player} #{number} {grade} ({flaws}) - ${claimPrice}" />
+          <small>Available fields: {ref}, {year}, {brand}, {player}, {number}, {flaws}, {grade}, {claimPrice}</small>
+        </label>
+        <div id="importPreview" class="format-preview"></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirmImportBtn" value="default" class="primary">Import cards</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="newSaleDialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-header"><div><p class="eyebrow">NEW SALE</p><h2>Start a sale</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <label>Sale name<input id="newSaleName" placeholder="September vintage sale" required /></label>
+        <div class="two-columns"><label>PWE shipping<input id="newSalePweShipping" type="number" min="0" step="0.01" value="1.00" /></label><label>PMWT shipping<input id="newSalePmwtShipping" type="number" min="0" step="0.01" value="5.00" /></label></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="createSaleBtn" value="default" class="primary">Create sale</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="matchDialog">
+      <form method="dialog" class="dialog-card match-dialog-card">
+        <div class="dialog-header"><div><p class="eyebrow">IMAGE MATCH REVIEW</p><h2>Check uncertain matches</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <div id="matchSummary" class="match-summary"></div>
+        <div class="match-toolbar"><label class="search"><span>⌕</span><input id="matchSearch" type="search" placeholder="Filter by card, flaw, or filename…" /></label><div class="segmented"><button type="button" class="active" data-match-filter="all">Pending</button><button type="button" data-match-filter="suggested">Suggested</button><button type="button" data-match-filter="unmatched">Unmatched</button><button type="button" data-match-filter="confirmed">Confirmed</button></div></div>
+        <div id="matchReviewList" class="match-review-list"></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="applyMatchesBtn" value="default" class="primary">Done for now</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="folderSettingsDialog">
+      <form method="dialog" class="dialog-card large">
+        <div class="dialog-header"><div><p class="eyebrow">IMAGE LOOKUP</p><h2>Choose where images are searched</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <section class="folder-section"><div><h3>Primary folder</h3><p>The main folder that contains your year folders.</p></div><div id="primaryFolderRow"></div><button type="button" id="choosePrimaryFolderBtn" class="secondary">Choose primary folder</button></section>
+        <section class="folder-section"><div><h3>Additional folders</h3><p>These folders are searched along with the primary folder.</p></div><div id="additionalFolderList" class="folder-list"></div><button type="button" id="addLookupFolderBtn" class="secondary">+ Add folder</button></section>
+        <section class="folder-section"><div><h3>Excluded folders</h3><p>Images inside these folders are ignored, even when they are under a search folder.</p></div><div id="excludedFolderList" class="folder-list"></div><button type="button" id="addExcludedFolderBtn" class="secondary">+ Exclude folder</button></section>
+        <div class="dialog-actions"><button value="default" class="primary">Done</button></div>
+      </form>
+    </dialog>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script src="renderer.js"></script>
+  </body>
+</html>
