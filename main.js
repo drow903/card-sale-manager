@@ -1,4 +1,5 @@
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } = require("electron");
+app.disableHardwareAcceleration();
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
@@ -67,6 +68,25 @@ function getJson(url) {
   });
 }
 
+function getText(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { headers: { "User-Agent": `Mozilla/5.0 Card-Sale-Manager/${app.getVersion()}` }, timeout: 15000 }, (response) => {
+      if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location && redirects < 4) {
+        response.resume();
+        resolve(getText(new URL(response.headers.location, url).toString(), redirects + 1));
+        return;
+      }
+      if (response.statusCode !== 200) { response.resume(); reject(new Error(`Facebook returned status ${response.statusCode}.`)); return; }
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { body += chunk; if (body.length > 5 * 1024 * 1024) request.destroy(new Error("The Facebook page was too large.")); });
+      response.on("end", () => resolve(body));
+    });
+    request.on("timeout", () => request.destroy(new Error("The Facebook request timed out.")));
+    request.on("error", reject);
+  });
+}
+
 async function checkForUpdate() {
   try {
     const release = await getJson(`https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`);
@@ -115,17 +135,28 @@ function createWindow() {
   mainWindow.loadFile("index.html");
   if (process.env.CARD_SALE_CAPTURE_PATH) {
     mainWindow.webContents.once("did-finish-load", async () => {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      if (process.env.CARD_SALE_CAPTURE_VIEW === "match-review") {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
+      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "buyers", "health", "parser", "quick-edit", "closing", "copied", "folders"].find((view) => captureName.includes(view)) || "");
+      if (captureView === "match-review") {
         await mainWindow.webContents.executeJavaScript("autoMatchImages()");
         await new Promise((resolve) => setTimeout(resolve, 2500));
-      } else if (process.env.CARD_SALE_CAPTURE_VIEW === "claims") {
+      } else if (captureView === "claims") {
         await mainWindow.webContents.executeJavaScript("showView('claims')");
-      } else if (process.env.CARD_SALE_CAPTURE_VIEW === "copied") {
+      } else if (captureView === "copied") {
         await mainWindow.webContents.executeJavaScript("activeSale().cards[0].hiddenAfterCopy = true; state.filter = 'copied'; document.querySelectorAll('[data-filter]').forEach((button) => button.classList.toggle('active', button.dataset.filter === 'copied')); renderListings()");
-      } else if (process.env.CARD_SALE_CAPTURE_VIEW === "folders") {
+      } else if (captureView === "folders") {
         await mainWindow.webContents.executeJavaScript("renderFolderSettings(); document.querySelector('#folderSettingsDialog').showModal()");
+      } else if (captureView === "parser") {
+        await mainWindow.webContents.executeJavaScript("document.querySelector('#parseClaimsBtn').click(); document.querySelector('#claimComments').value='John Smith: mine 1\\nJane Doe: take #2\\nNoise that cannot be parsed'; document.querySelector('#previewClaimsBtn').click()");
+      } else if (captureView === "quick-edit") {
+        await mainWindow.webContents.executeJavaScript("showView('sale'); openQuickEdit(activeSale().cards[0].id)");
+      } else if (captureView === "closing") {
+        await mainWindow.webContents.executeJavaScript("showView('sale'); openCloseSale()");
+      } else if (["dashboard", "orders", "packing", "live", "buyers", "health"].includes(captureView)) {
+        await mainWindow.webContents.executeJavaScript(`showView(${JSON.stringify(captureView)})`);
       }
+      await new Promise((resolve) => setTimeout(resolve, 150));
       const image = await mainWindow.webContents.capturePage();
       await fs.promises.writeFile(process.env.CARD_SALE_CAPTURE_PATH, image.toPNG());
       app.quit();
@@ -214,6 +245,55 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle("app:version", () => app.getVersion());
+  ipcMain.handle("app:download-template", async () => {
+    const result = await dialog.showSaveDialog(mainWindow, { title: "Save the card import template", defaultPath: "Card-Sale-Manager-Import-Template.xlsx", filters: [{ name: "Excel workbook", extensions: ["xlsx"] }] });
+    if (result.canceled || !result.filePath) return false;
+    await fs.promises.copyFile(path.join(__dirname, "assets", "Card-Sale-Manager-Import-Template.xlsx"), result.filePath);
+    return true;
+  });
+  ipcMain.handle("app:open-data-folder", async () => {
+    await fs.promises.mkdir(path.dirname(dataPath()), { recursive: true });
+    return shell.openPath(path.dirname(dataPath()));
+  });
+  ipcMain.handle("app:open-folder", async (_event, folderPath) => {
+    const value = String(folderPath || "");
+    if (!value || !path.isAbsolute(value) || !fs.existsSync(value)) return "Folder not found.";
+    return shell.openPath(value);
+  });
+  ipcMain.handle("facebook:open", async (_event, target) => {
+    const value = String(target || "");
+    let parsed;
+    try { parsed = new URL(value); } catch { return false; }
+    if (parsed.protocol !== "https:" || !/(^|\.)facebook\.com$/i.test(parsed.hostname)) return false;
+    await shell.openExternal(value);
+    return true;
+  });
+  ipcMain.handle("tracking:open", async (_event, target) => {
+    const value = String(target || ""); let parsed;
+    try { parsed = new URL(value); } catch { return false; }
+    const allowed = ["tools.usps.com", "www.ups.com", "www.fedex.com"];
+    if (parsed.protocol !== "https:" || !allowed.includes(parsed.hostname.toLowerCase())) return false;
+    await shell.openExternal(value); return true;
+  });
+  ipcMain.handle("facebook:fetch-public", async (_event, target) => {
+    const value = String(target || "");
+    let parsed;
+    try { parsed = new URL(value); } catch { return { ok: false, message: "Enter a valid Facebook link." }; }
+    if (parsed.protocol !== "https:" || !/(^|\.)facebook\.com$/i.test(parsed.hostname)) return { ok: false, message: "Only facebook.com links are supported." };
+    try {
+      const html = await getText(value);
+      if (/log in|login_form|checkpoint/i.test(html)) return { ok: false, message: "Facebook requires a login for this post. Open it and paste the comments instead." };
+      const text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&quot;/g, '"').replace(/&#039;|&apos;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+      return { ok: true, text: text.slice(0, 250000) };
+    } catch (error) { return { ok: false, message: error.message || "Could not read that Facebook post." }; }
+  });
+  ipcMain.handle("print:packing-slip", async (_event, payload) => {
+    const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+    const title = String(payload?.title || "Packing slip").replace(/[<>]/g, "");
+    const body = String(payload?.html || "");
+    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><title>${title}</title><style>body{font:14px Arial;padding:32px;color:#172333}h1{font-size:24px}table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #ddd;text-align:left}.total{font-size:18px;font-weight:bold;text-align:right;margin-top:20px}</style></head><body>${body}</body></html>`)}`);
+    return new Promise((resolve) => printWindow.webContents.print({ silent: false, printBackground: true }, (success, reason) => { printWindow.close(); resolve({ success, reason }); }));
+  });
 
   ipcMain.handle("images:scan-folder", async (_event, input) => {
     const folders = (typeof input === "string" ? [input] : input?.folders || []).filter(Boolean);

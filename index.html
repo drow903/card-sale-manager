@@ -20,12 +20,23 @@
           <button class="nav-item" data-view="claims"><span>02</span> Claims desk</button>
           <button class="nav-item" data-view="orders"><span>03</span> Buyer orders</button>
           <button class="nav-item" data-view="packing"><span>04</span> Packing</button>
+          <button class="nav-item" data-view="dashboard"><span>05</span> Profit dashboard</button>
+          <button class="nav-item" data-view="live"><span>06</span> Live Sale Mode</button>
+          <button class="nav-item" data-view="buyers"><span>07</span> Buyer profiles</button>
+          <button class="nav-item" data-view="health"><span>08</span> Health check</button>
         </nav>
         <div class="sale-switcher">
           <label for="saleSelect">Active sale</label>
           <select id="saleSelect"></select>
           <button id="newSaleBtn" class="secondary full">+ New sale</button>
           <button id="deleteSaleBtn" class="sidebar-danger full">Delete sale</button>
+          <button id="restoreSaleBtn" class="sidebar-link full">Restore earlier version</button>
+          <button id="salePresetsBtn" class="sidebar-link full">Sale presets</button>
+          <button id="shortcutsBtn" class="sidebar-link full">Keyboard shortcuts</button>
+          <button id="downloadTemplateBtn" class="sidebar-link full">Download import template</button>
+          <button id="openDataFolderBtn" class="sidebar-link full">Open data folder</button>
+          <button id="openImageFolderBtn" class="sidebar-link full">Open image folder</button>
+          <div class="display-controls"><button id="fontSmallerBtn" title="Smaller text">A−</button><button id="fontLargerBtn" title="Larger text">A+</button><button id="densityBtn">Compact</button></div>
           <button id="checkUpdateBtn" class="sidebar-link full">Check for updates</button>
           <small id="appVersion" class="app-version"></small>
         </div>
@@ -61,7 +72,8 @@
               </div>
               <div class="toolbar">
                 <label class="search"><span>⌕</span><input id="cardSearch" type="search" placeholder="Search cards, numbers, conditions…" /></label>
-                <div class="bulk-actions"><label class="select-all"><input id="selectAllListings" type="checkbox" /> Select visible</label><span id="listingSelectionCount">0 selected</span><button id="deleteSelectedCardsBtn" class="secondary danger-button" disabled>Delete selected</button></div>
+                <label class="inline-control">Order<select id="listingSort"><option value="spreadsheet">Spreadsheet</option><option value="year">Year</option><option value="player">Player</option><option value="price-asc">Price low–high</option><option value="price-desc">Price high–low</option><option value="custom">Custom</option></select></label>
+                <div class="bulk-actions"><label class="select-all"><input id="selectAllListings" type="checkbox" /> Select visible</label><span id="listingSelectionCount">0 selected</span><button id="bulkEditBtn" class="secondary" disabled>Bulk edit</button><button id="carryoverBtn" class="secondary">Carry over unsold</button><button id="closeSaleBtn" class="secondary">Close sale</button><button id="deleteSelectedCardsBtn" class="secondary danger-button" disabled>Delete selected</button></div>
               </div>
               <div class="table-wrap">
                 <table>
@@ -95,7 +107,7 @@
         <section id="claimsView" class="view">
           <div class="claims-layout">
             <section class="panel claim-list-panel">
-              <div class="panel-header"><div><h2>Assign buyers</h2><p>Every card in the sale workspace appears here automatically.</p></div></div>
+              <div class="panel-header"><div><h2>Assign buyers</h2><p>Every card in the sale workspace appears here automatically.</p></div><button id="parseClaimsBtn" class="secondary">Parse Facebook claims</button></div>
               <div class="toolbar"><label class="search"><span>⌕</span><input id="claimSearch" type="search" placeholder="Search cards or buyers…" /></label></div>
               <datalist id="buyerNames"></datalist>
               <div class="table-wrap claim-table-wrap"><table><thead><tr><th>Ref</th><th>Card</th><th>List / cost</th><th>Claim</th><th>Offer</th><th>Offer price</th><th>Buyer</th><th></th></tr></thead><tbody id="claimRows"></tbody></table></div>
@@ -124,8 +136,27 @@
           </div>
           <div id="packingContent"></div>
         </section>
+
+        <section id="dashboardView" class="view">
+          <div id="profitStats" class="stats"></div>
+          <div class="dashboard-grid"><section class="panel"><div class="panel-header"><div><h2>Sale profitability</h2><p>Private purchase and profit information.</p></div></div><div id="profitBreakdown" class="dashboard-content"></div></section><section class="panel"><div class="panel-header"><div><h2>Repeat buyer interests</h2><p>Players, brands and years purchased most often.</p></div></div><div id="buyerInsights" class="dashboard-content"></div></section><section class="panel aging-panel"><div class="panel-header"><div><h2>Inventory aging</h2><p>Unsold inventory grouped by time held.</p></div></div><div id="inventoryAging" class="dashboard-content"></div></section></div>
+        </section>
+
+        <section id="liveView" class="view">
+          <div id="liveSaleContent" class="live-sale-card"></div>
+        </section>
+
+        <section id="buyersView" class="view">
+          <div class="profile-layout"><section class="panel"><div class="panel-header compact"><div><h2>Buyer directory</h2><p>History, tags, preferences and notes.</p></div></div><label class="profile-search search"><span>⌕</span><input id="buyerProfileSearch" type="search" placeholder="Search buyers or tags…" /></label><div id="buyerProfileList" class="buyer-list"></div></section><section id="buyerProfileDetail" class="panel profile-detail"></section></div>
+        </section>
+
+        <section id="healthView" class="view">
+          <div id="healthSummary" class="stats"></div><section class="panel"><div class="panel-header"><div><h2>Sale health check</h2><p>Review anything that could interrupt posting, claiming, payment or packing.</p></div><button id="refreshHealthBtn" class="secondary">Refresh</button></div><div id="healthIssues" class="health-list"></div></section>
+        </section>
       </main>
     </div>
+
+    <aside id="quickEditDrawer" class="quick-drawer" aria-hidden="true"><div class="drawer-header"><div><p class="eyebrow">QUICK EDIT</p><h2 id="quickEditTitle">Edit card</h2></div><button id="closeQuickEditBtn" class="icon-btn" aria-label="Close">×</button></div><div class="drawer-body"><input id="quickEditCardId" type="hidden" /><div class="two-columns"><label>Year<input id="quickYear" /></label><label>Brand<input id="quickBrand" /></label></div><label>Player<input id="quickPlayer" /></label><div class="two-columns"><label>Number<input id="quickNumber" /></label><label>Grade<input id="quickGrade" /></label></div><label>Flaw(s)<textarea id="quickFlaws" rows="3"></textarea></label><div class="two-columns"><label>Claim price<input id="quickPrice" type="number" min="0" step="0.01" /></label><label>Purchase price<input id="quickPurchasePrice" type="number" min="0" step="0.01" /></label></div><label>Purchase date<input id="quickPurchaseDate" placeholder="MMDDYYYY" /></label><div id="quickEditPreview" class="format-preview"></div></div><div class="drawer-actions"><button id="saveQuickEditBtn" class="primary">Save changes</button></div></aside>
 
     <dialog id="importDialog">
       <form method="dialog" class="dialog-card large">
@@ -137,9 +168,49 @@
           <small>Available fields: {ref}, {year}, {brand}, {player}, {number}, {flaws}, {grade}, {claimPrice}</small>
         </label>
         <div id="importPreview" class="format-preview"></div>
+        <div id="importReview" class="import-review"></div>
         <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirmImportBtn" value="default" class="primary">Import cards</button></div>
       </form>
     </dialog>
+
+    <dialog id="bulkEditDialog">
+      <form method="dialog" class="dialog-card large">
+        <div class="dialog-header"><div><p class="eyebrow">BULK EDIT</p><h2>Edit selected cards</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <p id="bulkEditCount" class="dialog-copy"></p>
+        <div class="mapping-grid"><label>Year<input id="bulkYear" placeholder="Leave blank to keep" /></label><label>Brand<input id="bulkBrand" placeholder="Leave blank to keep" /></label><label>Grade<input id="bulkGrade" placeholder="Leave blank to keep" /></label><label>Flaw(s)<input id="bulkFlaws" placeholder="Leave blank to keep" /></label></div>
+        <div class="two-columns"><label>Set exact claim price<input id="bulkPrice" type="number" min="0" step="0.01" placeholder="Leave blank to keep" /></label><label>Adjust price by percent<input id="bulkPricePercent" type="number" step="0.1" placeholder="Example: -10 or 5" /></label></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="applyBulkEditBtn" type="button" class="primary">Apply changes</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="carryoverDialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-header"><div><p class="eyebrow">UNSOLD CARDS</p><h2>Carry cards into another sale</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <p id="carryoverCount" class="dialog-copy"></p><label>Destination<select id="carryoverDestination"></select></label><label>Or create a new sale<input id="carryoverNewSale" placeholder="New sale name" /></label>
+        <label>Price adjustment (%)<input id="carryoverPricePercent" type="number" step="0.1" value="0" /></label>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="applyCarryoverBtn" type="button" class="primary">Carry over cards</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="claimParserDialog">
+      <form method="dialog" class="dialog-card large">
+        <div class="dialog-header"><div><p class="eyebrow">FACEBOOK CLAIMS</p><h2>Parse claims and offers</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <label>Facebook post link (public posts only)<div class="input-button-row"><input id="facebookPostUrl" type="url" placeholder="https://www.facebook.com/..." /><button id="fetchFacebookBtn" type="button" class="secondary">Try link</button><button id="openFacebookBtn" type="button" class="secondary">Open post</button></div></label>
+        <label>Comments<textarea id="claimComments" rows="8" placeholder="Paste comments, one per line. Examples: John Smith: claim 24   or   Jane Doe offer #18 $12"></textarea></label>
+        <div class="parser-toolbar"><button id="previewClaimsBtn" type="button" class="secondary">Preview matches</button><label>Recognized claim words<input id="claimWordsInput" placeholder="claim, claimed, take, taken, mine, sold" /></label></div><div id="claimParseResults" class="parse-results"></div><section id="unrecognizedComments" class="unrecognized-queue"></section>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="applyParsedClaimsBtn" type="button" class="primary" disabled>Apply matched claims</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="restoreDialog">
+      <form method="dialog" class="dialog-card large"><div class="dialog-header"><div><p class="eyebrow">SALE HISTORY</p><h2>Restore an earlier version</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><div id="versionList" class="version-list"></div><div class="dialog-actions"><button value="cancel" class="primary">Done</button></div></form>
+    </dialog>
+
+    <dialog id="closeSaleDialog"><form method="dialog" class="dialog-card large"><div class="dialog-header"><div><p class="eyebrow">SALE CLOSING ASSISTANT</p><h2>Close out this sale</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><div id="closeSaleSummary" class="closing-summary"></div><label>Unsold cards<select id="closeSaleUnsoldAction"><option value="keep">Keep in this sale</option><option value="new">Carry into a new sale</option></select></label><label id="closeSaleNameLabel" class="hidden">New sale name<input id="closeSaleName" /></label><label>Unsold price adjustment (%)<input id="closeSalePercent" type="number" step="0.1" value="0" /></label><label class="check-label"><input id="closeSaleMarkShipped" type="checkbox" /> Mark fully packed orders as shipped</label><div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="finishCloseSaleBtn" type="button" class="primary">Finish closing sale</button></div></form></dialog>
+
+    <dialog id="salePresetsDialog"><form method="dialog" class="dialog-card large"><div class="dialog-header"><div><p class="eyebrow">SALE PRESETS</p><h2>Reusable sale settings</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><div class="two-columns"><label>Saved preset<select id="presetSelect"></select></label><label>Preset name<input id="presetName" placeholder="Vintage Facebook sale" /></label></div><label>Listing format<input id="presetTemplate" /></label><div class="two-columns"><label>PWE shipping<input id="presetPwe" type="number" min="0" step="0.01" /></label><label>PMWT shipping<input id="presetPmwt" type="number" min="0" step="0.01" /></label></div><label>Claim words<input id="presetClaimWords" placeholder="claim, take, mine, sold" /><small>Separate words with commas. “Offer” is always recognized.</small></label><div class="dialog-actions"><button id="deletePresetBtn" type="button" class="secondary danger-button">Delete preset</button><button id="applyPresetBtn" type="button" class="secondary">Apply to sale</button><button id="savePresetBtn" type="button" class="primary">Save preset</button></div></form></dialog>
+
+    <dialog id="shortcutsDialog"><form method="dialog" class="dialog-card"><div class="dialog-header"><div><p class="eyebrow">KEYBOARD-FIRST CONTROLS</p><h2>Shortcuts</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><div class="shortcut-list"><div><kbd>Ctrl</kbd> + <kbd>K</kbd><span>Search current sale</span></div><div><kbd>Ctrl</kbd> + <kbd>I</kbd><span>Import spreadsheet</span></div><div><kbd>Ctrl</kbd> + <kbd>L</kbd><span>Open Live Sale Mode</span></div><div><kbd>Ctrl</kbd> + <kbd>Enter</kbd><span>Copy current live listing</span></div><div><kbd>←</kbd> / <kbd>→</kbd><span>Previous or next live card</span></div><div><kbd>E</kbd><span>Quick-edit selected or current live card</span></div><div><kbd>Ctrl</kbd> + <kbd>Z</kbd><span>Undo last supported action</span></div><div><kbd>?</kbd><span>Show this guide</span></div></div><div class="dialog-actions"><button value="cancel" class="primary">Done</button></div></form></dialog>
 
     <dialog id="newSaleDialog">
       <form method="dialog" class="dialog-card">

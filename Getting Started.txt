@@ -35,8 +35,20 @@ CARD SALE MANAGER — GETTING STARTED
     Duplicate cards are labeled (1 of x), and date-coded filenames break ties.
 14. The app checks for GitHub releases when it opens. Use Check for updates in
     the sidebar at any time.
+15. Use Live Sale Mode for a keyboard-first posting workflow. Press ? inside
+    the app to see all available shortcuts.
+16. The Facebook claim parser recognizes configurable words such as claim,
+    claimed, take, taken, mine, and sold. Lines it cannot match remain in the
+    unrecognized-comment queue for review.
+17. Buyer Profiles stores tags, notes, addresses, purchase history, and likely
+    repeat-buyer matches. Profit Dashboard includes private inventory aging.
+18. Before finishing a sale, use Health Check and the Sale Closing Assistant to
+    review missing images, incomplete orders, unpaid buyers, and unsold cards.
+19. Sale Presets saves reusable shipping prices, listing formats, and claim words.
+    Use Edit beside any listing for the quick-edit drawer.
 
-Data is saved automatically on this computer.
+Data is saved automatically on this computer. The sidebar displays the latest
+successful autosave time.
 
 DEFAULT LISTING FORMAT
 

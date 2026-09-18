@@ -8,9 +8,12 @@ release/
 
 .*-data/
 .qa-current/
+.qa-*/
 .match-qa-images/
+release-*/
 
 qa-*.png
+*-check.png
 *.log
 *.tmp
 .DS_Store

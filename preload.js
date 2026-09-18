@@ -19,6 +19,13 @@ contextBridge.exposeInMainWorld("cardSale", {
   chooseLookupFolders: (title) => ipcRenderer.invoke("dialog:lookup-folders", title),
   scanImageFolder: (baseFolder) => ipcRenderer.invoke("images:scan-folder", baseFolder),
   startDrag: (filePath) => ipcRenderer.invoke("file:start-drag", filePath),
+  downloadTemplate: () => ipcRenderer.invoke("app:download-template"),
+  openDataFolder: () => ipcRenderer.invoke("app:open-data-folder"),
+  openFolder: (folderPath) => ipcRenderer.invoke("app:open-folder", folderPath),
+  openFacebook: (url) => ipcRenderer.invoke("facebook:open", url),
+  openTracking: (url) => ipcRenderer.invoke("tracking:open", url),
+  fetchFacebookPost: (url) => ipcRenderer.invoke("facebook:fetch-public", url),
+  printPackingSlip: (payload) => ipcRenderer.invoke("print:packing-slip", payload),
   checkForUpdate: () => ipcRenderer.invoke("app:check-update"),
   openUpdate: (url) => ipcRenderer.invoke("app:open-update", url),
   version: () => ipcRenderer.invoke("app:version")

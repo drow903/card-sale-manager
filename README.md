@@ -15,6 +15,12 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Provides PWE and PMWT shipping options.
 - Generates buyer summaries and tracking messages.
 - Keeps sale data stored locally on the computer.
+- Includes Live Sale Mode, a Facebook claim-comment parser, and an unrecognized-comment review queue.
+- Provides sale closing, carryover, health-check, version restore, and undo workflows.
+- Tracks private profit and inventory aging information.
+- Stores buyer profiles, tags, notes, purchase patterns, and repeat-buyer alerts.
+- Supports sale presets, quick card editing, keyboard shortcuts, packing slips, and carrier tracking links.
+- Saves automatically and displays the most recent successful save time.
 
 ## Import columns
 
