@@ -1,13 +1,13 @@
 {
   "name": "card-sale-manager",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local-first card sale workflow manager",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
     "check": "node --check main.js && node --check preload.js && node --check renderer.js",
-    "dist": "electron-builder --win portable"
+    "dist": "electron-builder --win"
   },
   "dependencies": {
     "xlsx": "^0.18.5"
@@ -17,7 +17,7 @@
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.cardstitcher.salemanagement",
+    "appId": "com.drow903.cardsalemanager",
     "productName": "Card Sale Manager",
     "directories": {
       "output": "release"
@@ -33,8 +33,20 @@
       "package.json"
     ],
     "win": {
-      "target": "portable",
-      "artifactName": "Card-Sale-Manager-${version}.exe"
-    }
+      "target": ["nsis", "portable"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Card-Sale-Manager-${version}-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "Card-Sale-Manager-${version}-Portable.${ext}"
+    },
+    "publish": [{
+      "provider": "github",
+      "owner": "drow903",
+      "repo": "card-sale-manager"
+    }]
   }
 }

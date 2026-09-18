@@ -25,6 +25,9 @@
           <label for="saleSelect">Active sale</label>
           <select id="saleSelect"></select>
           <button id="newSaleBtn" class="secondary full">+ New sale</button>
+          <button id="deleteSaleBtn" class="sidebar-danger full">Delete sale</button>
+          <button id="checkUpdateBtn" class="sidebar-link full">Check for updates</button>
+          <small id="appVersion" class="app-version"></small>
         </div>
         <div class="save-status"><span id="saveDot"></span><span id="saveText">Saved locally</span></div>
       </aside>
@@ -58,10 +61,11 @@
               </div>
               <div class="toolbar">
                 <label class="search"><span>⌕</span><input id="cardSearch" type="search" placeholder="Search cards, numbers, conditions…" /></label>
+                <div class="bulk-actions"><label class="select-all"><input id="selectAllListings" type="checkbox" /> Select visible</label><span id="listingSelectionCount">0 selected</span><button id="deleteSelectedCardsBtn" class="secondary danger-button" disabled>Delete selected</button></div>
               </div>
               <div class="table-wrap">
                 <table>
-                  <thead><tr><th>Ref</th><th>Card</th><th>Grade</th><th>Claim price</th><th>Status</th><th></th></tr></thead>
+                  <thead><tr><th class="select-column"></th><th>Ref</th><th>Card</th><th>Grade</th><th>Claim price</th><th>Status</th><th></th></tr></thead>
                   <tbody id="listingRows"></tbody>
                 </table>
                 <div id="listingEmpty" class="empty-state hidden">
@@ -94,7 +98,7 @@
               <div class="panel-header"><div><h2>Assign buyers</h2><p>Every card in the sale workspace appears here automatically.</p></div></div>
               <div class="toolbar"><label class="search"><span>⌕</span><input id="claimSearch" type="search" placeholder="Search cards or buyers…" /></label></div>
               <datalist id="buyerNames"></datalist>
-              <div class="table-wrap claim-table-wrap"><table><thead><tr><th>Ref</th><th>Card</th><th>List / cost</th><th>Offer price</th><th>Buyer</th><th></th></tr></thead><tbody id="claimRows"></tbody></table></div>
+              <div class="table-wrap claim-table-wrap"><table><thead><tr><th>Ref</th><th>Card</th><th>List / cost</th><th>Claim</th><th>Offer</th><th>Offer price</th><th>Buyer</th><th></th></tr></thead><tbody id="claimRows"></tbody></table></div>
             </section>
             <section class="panel">
               <div class="panel-header"><div><h2>Recent claims</h2><p>Newest activity appears first.</p></div></div>
@@ -151,6 +155,7 @@
         <div class="dialog-header"><div><p class="eyebrow">IMAGE MATCH REVIEW</p><h2>Check uncertain matches</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
         <div id="matchSummary" class="match-summary"></div>
         <div class="match-toolbar"><label class="search"><span>⌕</span><input id="matchSearch" type="search" placeholder="Filter by card, flaw, or filename…" /></label><div class="segmented"><button type="button" class="active" data-match-filter="all">Pending</button><button type="button" data-match-filter="suggested">Suggested</button><button type="button" data-match-filter="unmatched">Unmatched</button><button type="button" data-match-filter="confirmed">Confirmed</button></div></div>
+        <div class="match-bulk"><label class="select-all"><input id="selectAllMatches" type="checkbox" /> Select visible</label><span id="matchSelectionCount">0 selected</span><button type="button" id="confirmSelectedMatchesBtn" class="secondary" disabled>Confirm selected</button><button type="button" id="confirmPerfectMatchesBtn" class="secondary">Confirm all 100% matches</button><button type="button" id="deleteSelectedMatchesBtn" class="secondary danger-button" disabled>Delete selected cards</button></div>
         <div id="matchReviewList" class="match-review-list"></div>
         <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="applyMatchesBtn" value="default" class="primary">Done for now</button></div>
       </form>
@@ -160,9 +165,18 @@
       <form method="dialog" class="dialog-card large">
         <div class="dialog-header"><div><p class="eyebrow">IMAGE LOOKUP</p><h2>Choose where images are searched</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
         <section class="folder-section"><div><h3>Primary folder</h3><p>The main folder that contains your year folders.</p></div><div id="primaryFolderRow"></div><button type="button" id="choosePrimaryFolderBtn" class="secondary">Choose primary folder</button></section>
-        <section class="folder-section"><div><h3>Additional folders</h3><p>These folders are searched along with the primary folder.</p></div><div id="additionalFolderList" class="folder-list"></div><button type="button" id="addLookupFolderBtn" class="secondary">+ Add folder</button></section>
-        <section class="folder-section"><div><h3>Excluded folders</h3><p>Images inside these folders are ignored, even when they are under a search folder.</p></div><div id="excludedFolderList" class="folder-list"></div><button type="button" id="addExcludedFolderBtn" class="secondary">+ Exclude folder</button></section>
+        <section class="folder-section"><div><h3>Additional folders</h3><p>These shared folders are searched for every sale.</p></div><div id="additionalFolderList" class="folder-list"></div><button type="button" id="addLookupFolderBtn" class="secondary">+ Add one or more folders</button></section>
+        <section class="folder-section"><div><h3>Excluded folders</h3><p>Images inside these shared folders are ignored for every sale.</p></div><div id="excludedFolderList" class="folder-list"></div><button type="button" id="addExcludedFolderBtn" class="secondary">+ Exclude one or more folders</button></section>
         <div class="dialog-actions"><button value="default" class="primary">Done</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="updateDialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-header"><div><p class="eyebrow">APP UPDATE</p><h2 id="updateTitle">Checking for updates…</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <p id="updateMessage" class="dialog-copy">Contacting GitHub.</p>
+        <pre id="updateNotes" class="update-notes hidden"></pre>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Not now</button><button type="button" id="downloadUpdateBtn" class="primary hidden">Download update</button></div>
       </form>
     </dialog>
 

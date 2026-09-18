@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld("cardSale", {
   chooseImages: () => ipcRenderer.invoke("dialog:images"),
   chooseImageFolder: () => ipcRenderer.invoke("dialog:image-folder"),
   chooseLookupFolder: () => ipcRenderer.invoke("dialog:lookup-folder"),
+  chooseLookupFolders: (title) => ipcRenderer.invoke("dialog:lookup-folders", title),
   scanImageFolder: (baseFolder) => ipcRenderer.invoke("images:scan-folder", baseFolder),
-  startDrag: (filePath) => ipcRenderer.invoke("file:start-drag", filePath)
+  startDrag: (filePath) => ipcRenderer.invoke("file:start-drag", filePath),
+  checkForUpdate: () => ipcRenderer.invoke("app:check-update"),
+  openUpdate: (url) => ipcRenderer.invoke("app:open-update", url),
+  version: () => ipcRenderer.invoke("app:version")
 });

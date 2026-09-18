@@ -1,6 +1,9 @@
-const { app, BrowserWindow, dialog, ipcMain, nativeImage } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } = require("electron");
 const fs = require("fs");
 const path = require("path");
+const https = require("https");
+
+const UPDATE_REPOSITORY = "drow903/card-sale-manager";
 
 let mainWindow;
 
@@ -14,6 +17,83 @@ if (process.env.CARD_SALE_DATA_DIR) {
 function dataPath() {
   const base = process.env.CARD_SALE_DATA_DIR || app.getPath("userData");
   return path.join(base, "card-sale-manager.json");
+}
+
+function versionParts(value) {
+  const match = String(value || "").trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/);
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function isNewerVersion(candidate, current) {
+  const next = versionParts(candidate);
+  const installed = versionParts(current);
+  if (!next || !installed) return false;
+  return next.some((value, index) => value !== installed[index] && value > installed[index]
+    && next.slice(0, index).every((part, prior) => part === installed[prior]));
+}
+
+function getJson(url) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": `Card-Sale-Manager/${app.getVersion()}`,
+        "X-GitHub-Api-Version": "2022-11-28"
+      },
+      timeout: 15000
+    }, (response) => {
+      if (response.statusCode === 404) {
+        response.resume();
+        resolve(null);
+        return;
+      }
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`GitHub returned status ${response.statusCode}.`));
+        return;
+      }
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        body += chunk;
+        if (body.length > 2 * 1024 * 1024) request.destroy(new Error("Update information was too large."));
+      });
+      response.on("end", () => {
+        try { resolve(JSON.parse(body)); } catch { reject(new Error("GitHub returned unreadable update information.")); }
+      });
+    });
+    request.on("timeout", () => request.destroy(new Error("The update check timed out.")));
+    request.on("error", reject);
+  });
+}
+
+async function checkForUpdate() {
+  try {
+    const release = await getJson(`https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`);
+    if (!release || release.draft || release.prerelease) return { status: "unavailable", currentVersion: app.getVersion() };
+    const tag = String(release.tag_name || "");
+    if (!versionParts(tag)) return { status: "error", message: "The latest GitHub release has an unsupported version number." };
+    const releaseUrl = `https://github.com/${UPDATE_REPOSITORY}/releases/tag/${tag}`;
+    if (release.html_url !== releaseUrl) return { status: "error", message: "GitHub returned an unexpected release address." };
+    const assets = Array.isArray(release.assets) ? release.assets : [];
+    const preferred = assets.find((asset) => /Card-Sale-Manager.*Setup\.exe$/i.test(asset.name || ""))
+      || assets.find((asset) => /Card-Sale-Manager.*Portable\.exe$/i.test(asset.name || ""))
+      || assets.find((asset) => /Card-Sale-Manager.*\.zip$/i.test(asset.name || ""));
+    const downloadUrl = preferred?.browser_download_url || releaseUrl;
+    if (!downloadUrl.startsWith(`https://github.com/${UPDATE_REPOSITORY}/`)) return { status: "error", message: "The update download address was not recognized." };
+    if (!isNewerVersion(tag, app.getVersion())) return { status: "current", currentVersion: app.getVersion() };
+    return {
+      status: "available",
+      currentVersion: app.getVersion(),
+      version: tag.replace(/^v/, ""),
+      notes: String(release.body || "").slice(0, 12000),
+      releaseUrl,
+      downloadUrl,
+      assetName: preferred?.name || "GitHub release"
+    };
+  } catch (error) {
+    return { status: "error", currentVersion: app.getVersion(), message: error.message || "Could not check for updates." };
+  }
 }
 
 function createWindow() {
@@ -116,6 +196,24 @@ app.whenReady().then(() => {
     });
     return result.canceled ? null : result.filePaths[0];
   });
+
+  ipcMain.handle("dialog:lookup-folders", async (_event, title) => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: title || "Choose card-image folders",
+      properties: ["openDirectory", "multiSelections"]
+    });
+    return result.canceled ? [] : result.filePaths;
+  });
+
+  ipcMain.handle("app:check-update", checkForUpdate);
+  ipcMain.handle("app:open-update", async (_event, target) => {
+    const value = String(target || "");
+    const allowedPrefix = `https://github.com/${UPDATE_REPOSITORY}/`;
+    if (!value.startsWith(allowedPrefix)) return false;
+    await shell.openExternal(value);
+    return true;
+  });
+  ipcMain.handle("app:version", () => app.getVersion());
 
   ipcMain.handle("images:scan-folder", async (_event, input) => {
     const folders = (typeof input === "string" ? [input] : input?.folders || []).filter(Boolean);

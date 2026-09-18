@@ -4,12 +4,14 @@ CARD SALE MANAGER — GETTING STARTED
 2. Choose New sale and give the sale a name.
 3. Choose Import spreadsheet and select an Excel, CSV, or TSV file.
 4. Use these spreadsheet columns: Year, Brand, Player, Number, Flaw(s),
-   Grade, Claim Price, and Purchase Price. Purchase Price is kept private and
-   is used to warn you when an accepted offer is below your cost. Confirm the
+   Grade, Claim Price, Purchase Price, and Purchase Date. Purchase fields are
+   kept private. Purchase Price warns when an offer is below cost, while a
+   Purchase Date in MMDDYYYY format helps match duplicate-card filenames. Confirm the
    detected columns and edit the listing format if desired. Sale reference
    numbers are generated automatically.
 5. Choose Image lookup folders to set the primary folder containing your year
-   folders. Add extra search folders or exclude folders that should be ignored.
+   folders. Add or exclude multiple folders at once. These settings carry over
+   to every sale.
 6. Choose Auto-match card images. Every proposed match appears in the review
    screen with the card's flaws. Confirm cards one at a time; each confirmed
    row hides so you can move steadily down the list. Confirmed matches remain
@@ -21,14 +23,18 @@ CARD SALE MANAGER — GETTING STARTED
 9. Drag an image from the post queue into Facebook. The image hides after the
    drag finishes. This is separate from copying the listing; Ctrl+Z restores the
    most recently hidden card or image.
-10. The Claims desk always mirrors every card in the sale workspace. Enter a
-    buyer beside a card to assign it. If the buyer made an offer, enter the
-    accepted offer price first. Offers below Purchase Price are highlighted.
+10. The Claims desk always mirrors every card in the sale workspace. Choose
+    Claim or Offer, enter the buyer, and enter an accepted price for offers.
+    Offers below Purchase Price are highlighted.
 11. Choose PWE or PMWT for each buyer in Buyer orders, then review totals,
     discounts, and payment status.
 12. Delete unwanted cards from the sale workspace. In Packing, verify cards
     individually or choose Check all cards, enter the tracking number, and copy
     the ready-to-send shipping message.
+13. Use row checkboxes for bulk deletion and image-review confirmation.
+    Duplicate cards are labeled (1 of x), and date-coded filenames break ties.
+14. The app checks for GitHub releases when it opens. Use Check for updates in
+    the sidebar at any time.
 
 Data is saved automatically on this computer.
 
