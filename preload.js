@@ -4,6 +4,7 @@ const XLSX = require("xlsx");
 contextBridge.exposeInMainWorld("cardSale", {
   load: () => ipcRenderer.invoke("data:load"),
   save: (payload) => ipcRenderer.invoke("data:save", payload),
+  backup: (reason) => ipcRenderer.invoke("data:backup", reason),
   chooseSpreadsheet: () => ipcRenderer.invoke("dialog:spreadsheet"),
   parseSpreadsheet: (filePath) => {
     const workbook = XLSX.readFile(filePath, { cellDates: false });
@@ -30,6 +31,8 @@ contextBridge.exposeInMainWorld("cardSale", {
   checkForUpdate: () => ipcRenderer.invoke("app:check-update"),
   downloadAndInstallUpdate: (update) => ipcRenderer.invoke("app:download-install-update", update),
   onUpdateProgress: (callback) => { const listener = (_event, details) => callback(details); ipcRenderer.on("app:update-progress", listener); return () => ipcRenderer.removeListener("app:update-progress", listener); },
+  onPrepareClose: (callback) => { const listener = () => callback(); ipcRenderer.on("app:prepare-close", listener); return () => ipcRenderer.removeListener("app:prepare-close", listener); },
+  closeReady: () => ipcRenderer.invoke("app:close-ready"),
   copyText: (value) => ipcRenderer.invoke("clipboard:write", value),
   version: () => ipcRenderer.invoke("app:version")
 });

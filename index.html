@@ -51,6 +51,7 @@
           </div>
           <div class="top-actions">
             <button id="addImagesBtn" class="secondary">Add images</button>
+            <button id="addSingleCardBtn" class="secondary">Add single card</button>
             <button id="importBtn" class="primary">Import spreadsheet</button>
           </div>
         </header>
@@ -82,8 +83,8 @@
                 </table>
                 <div id="listingEmpty" class="empty-state hidden">
                   <div class="empty-icon">▤</div><h3>Import your first card list</h3>
-                  <p>Excel, CSV and TSV files are supported. Headers are matched automatically.</p>
-                  <button class="primary" data-action="import">Choose spreadsheet</button>
+                  <p>Add one card manually or import an Excel, CSV, or TSV list.</p>
+                  <div class="empty-actions"><button class="secondary" data-action="add-card">Add single card</button><button class="primary" data-action="import">Choose spreadsheet</button></div>
                 </div>
               </div>
             </section>
@@ -171,6 +172,15 @@
         <div id="importPreview" class="format-preview"></div>
         <div id="importReview" class="import-review"></div>
         <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirmImportBtn" value="default" class="primary">Import cards</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="addCardDialog">
+      <form method="dialog" class="dialog-card large">
+        <div class="dialog-header"><div><p class="eyebrow">MANUAL ENTRY</p><h2>Add a single card</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <div class="mapping-grid"><label>Year<input id="addCardYear" /></label><label>Brand<input id="addCardBrand" /></label><label>Player<input id="addCardPlayer" required /></label><label>Number<input id="addCardNumber" /></label><label>Grade<input id="addCardGrade" /></label><label>Flaw(s)<input id="addCardFlaws" /></label><label>Claim price<input id="addCardPrice" type="number" min="0" step="0.01" /></label><label>Purchase price<input id="addCardPurchasePrice" type="number" min="0" step="0.01" /></label><label>Purchase date<input id="addCardPurchaseDate" placeholder="MMDDYYYY" /></label></div>
+        <div id="addCardPreview" class="format-preview"></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirmAddCardBtn" type="button" class="primary">Add card</button></div>
       </form>
     </dialog>
 

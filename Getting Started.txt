@@ -2,7 +2,8 @@ CARD SALE MANAGER — GETTING STARTED
 
 1. Double-click Card Sale Manager.exe.
 2. Choose New sale and give the sale a name.
-3. Choose Import spreadsheet and select an Excel, CSV, or TSV file.
+3. Choose Add single card for manual entry, or choose Import spreadsheet and
+   select an Excel, CSV, or TSV file.
 4. Use these spreadsheet columns: Year, Brand, Player, Number, Flaw(s),
    Grade, Claim Price, Purchase Price, and Purchase Date. Purchase fields are
    kept private. Purchase Price warns when an offer is below cost, while a
@@ -12,8 +13,9 @@ CARD SALE MANAGER — GETTING STARTED
 5. Choose Image lookup folders to set the primary folder containing your year
    folders. Add or exclude multiple folders at once. These settings carry over
    to every sale.
-6. Choose Auto-match card images. Every proposed match appears in the review
-   screen with the card's flaws. Confirm cards one at a time; each confirmed
+6. Choose Auto-match card images. Unique 100% matches are attached automatically;
+   genuinely ambiguous matches appear in the review screen with the card's flaws.
+   Confirm cards one at a time; each confirmed
    row hides so you can move steadily down the list. Confirmed matches remain
    available through the Confirmed filter.
 7. Use Add image on any card to attach or replace its image manually.
@@ -47,10 +49,12 @@ CARD SALE MANAGER — GETTING STARTED
 18. Before finishing a sale, use Health Check and the Sale Closing Assistant to
     review missing images, incomplete orders, unpaid buyers, and unsold cards.
 19. Sale Presets saves reusable shipping prices, listing formats, and claim words.
-    Use Edit beside any listing for the quick-edit drawer.
+    Use Edit beside any listing for the quick-edit drawer, or Move to enter an
+    exact card position without dragging.
 
-Data is saved automatically on this computer. The sidebar displays the latest
-successful autosave time.
+Data is saved automatically on this computer and again when the app closes.
+Verified recovery backups are also created before updates and retained locally.
+The sidebar displays the latest successful autosave time.
 
 DEFAULT LISTING FORMAT
 

@@ -8,17 +8,75 @@ const { spawn } = require("child_process");
 const UPDATE_REPOSITORY = "drow903/card-sale-manager";
 
 let mainWindow;
+let allowWindowClose = false;
+let closeFallbackTimer = null;
 
 if (process.env.CARD_SALE_CAPTURE_PATH) app.disableHardwareAcceleration();
 
 if (process.env.CARD_SALE_DATA_DIR) {
   app.setPath("userData", process.env.CARD_SALE_DATA_DIR);
   app.setPath("sessionData", path.join(process.env.CARD_SALE_DATA_DIR, "session"));
+} else {
+  const stableUserData = path.join(app.getPath("appData"), "card-sale-manager");
+  app.setPath("userData", stableUserData);
+  app.setPath("sessionData", path.join(stableUserData, "session"));
 }
 
 function dataPath() {
   const base = process.env.CARD_SALE_DATA_DIR || app.getPath("userData");
   return path.join(base, "card-sale-manager.json");
+}
+
+function backupFolderPath() {
+  return path.join(path.dirname(dataPath()), "backups");
+}
+
+function validateSavedData(value) {
+  if (!value || !Array.isArray(value.sales) || !value.sales.length) throw new Error("Saved data did not contain any sales.");
+  value.sales.forEach((sale) => {
+    if (!sale || !sale.id || !Array.isArray(sale.cards)) throw new Error("Saved data contained an invalid sale.");
+  });
+  return value;
+}
+
+async function createDataBackup(reason = "automatic", minimumAgeMs = 0) {
+  const source = dataPath();
+  try {
+    await fs.promises.access(source);
+    const folder = backupFolderPath();
+    await fs.promises.mkdir(folder, { recursive: true });
+    const safeReason = String(reason).replace(/[^a-z0-9-]+/gi, "-").replace(/^-|-$/g, "") || "automatic";
+    const existing = (await fs.promises.readdir(folder)).filter((name) => name.endsWith(".json")).sort().reverse();
+    if (minimumAgeMs && existing.length) {
+      const newest = await fs.promises.stat(path.join(folder, existing[0]));
+      if (Date.now() - newest.mtimeMs < minimumAgeMs) return path.join(folder, existing[0]);
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const destination = path.join(folder, `${stamp}-${safeReason}.json`);
+    await fs.promises.copyFile(source, destination);
+    JSON.parse(await fs.promises.readFile(destination, "utf8"));
+    const backups = (await fs.promises.readdir(folder)).filter((name) => name.endsWith(".json")).sort().reverse();
+    await Promise.all(backups.slice(20).map((name) => fs.promises.unlink(path.join(folder, name)).catch(() => {})));
+    return destination;
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function loadRecoveryData() {
+  const candidates = [`${dataPath()}.previous`];
+  try {
+    const backups = (await fs.promises.readdir(backupFolderPath())).filter((name) => name.endsWith(".json")).sort().reverse();
+    candidates.push(...backups.map((name) => path.join(backupFolderPath(), name)));
+  } catch {}
+  for (const candidate of candidates) {
+    try {
+      const recovered = validateSavedData(JSON.parse(await fs.promises.readFile(candidate, "utf8")));
+      return { ...recovered, __recovery: { source: candidate } };
+    } catch {}
+  }
+  return null;
 }
 
 function versionParts(value) {
@@ -169,6 +227,16 @@ function createWindow() {
     }
   });
   mainWindow.loadFile("index.html");
+  mainWindow.on("close", (event) => {
+    if (allowWindowClose || mainWindow.isDestroyed()) return;
+    event.preventDefault();
+    mainWindow.webContents.send("app:prepare-close");
+    clearTimeout(closeFallbackTimer);
+    closeFallbackTimer = setTimeout(() => {
+      allowWindowClose = true;
+      if (!mainWindow.isDestroyed()) mainWindow.close();
+    }, 5000);
+  });
   if (process.env.CARD_SALE_CAPTURE_PATH) {
     mainWindow.webContents.once("did-finish-load", async () => {
       await new Promise((resolve) => setTimeout(resolve, 1200));
@@ -203,20 +271,37 @@ function createWindow() {
 app.whenReady().then(() => {
   ipcMain.handle("data:load", async () => {
     try {
-      return JSON.parse(await fs.promises.readFile(dataPath(), "utf8"));
+      const saved = validateSavedData(JSON.parse(await fs.promises.readFile(dataPath(), "utf8")));
+      await createDataBackup("startup", 5 * 60 * 1000);
+      return saved;
     } catch (error) {
+      const recovered = await loadRecoveryData();
+      if (recovered) return recovered;
       if (error.code === "ENOENT") return null;
       throw error;
     }
   });
 
   ipcMain.handle("data:save", async (_event, payload) => {
+    validateSavedData(payload);
     const target = dataPath();
     const temp = `${target}.tmp`;
+    const previous = `${target}.previous`;
     await fs.promises.mkdir(path.dirname(target), { recursive: true });
+    await createDataBackup("pre-save", 15 * 60 * 1000);
     await fs.promises.writeFile(temp, JSON.stringify(payload, null, 2), "utf8");
+    validateSavedData(JSON.parse(await fs.promises.readFile(temp, "utf8")));
+    try { await fs.promises.copyFile(target, previous); } catch (error) { if (error.code !== "ENOENT") throw error; }
     await fs.promises.rename(temp, target);
     return { ok: true, path: target };
+  });
+
+  ipcMain.handle("data:backup", async (_event, reason) => ({ ok: Boolean(await createDataBackup(reason || "manual")) }));
+  ipcMain.handle("app:close-ready", async () => {
+    clearTimeout(closeFallbackTimer);
+    allowWindowClose = true;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+    return true;
   });
 
   ipcMain.handle("dialog:spreadsheet", async () => {
@@ -281,6 +366,7 @@ app.whenReady().then(() => {
     const updateFolder = path.join(app.getPath("temp"), "Card Sale Manager Updates", version);
     const destination = path.join(updateFolder, assetName);
     try {
+      await createDataBackup(`before-update-${version}`);
       await fs.promises.mkdir(updateFolder, { recursive: true });
       await downloadUpdate(url, destination, (details) => event.sender.send("app:update-progress", details));
       const handle = await fs.promises.open(destination, "r");
@@ -366,36 +452,51 @@ app.whenReady().then(() => {
     const supported = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"]);
     const found = [];
     const seen = new Set();
-    let foldersScanned = 0;
     const isExcluded = (folder) => {
       const resolved = path.resolve(folder).toLowerCase();
       return excludedFolders.some((excluded) => resolved === excluded || resolved.startsWith(`${excluded}${path.sep}`));
     };
-    async function walk(folder, root) {
-      if (isExcluded(folder)) return;
-      const entries = await fs.promises.readdir(folder, { withFileTypes: true });
-      foldersScanned += 1;
-      event.sender.send("images:scan-progress", { foldersScanned, found: found.length });
+    const directories = [];
+    const pending = folders.filter((folder) => fs.existsSync(folder) && !isExcluded(folder)).map((folder) => ({ folder, root: folder }));
+    event.sender.send("images:scan-progress", { phase: "counting", directoriesFound: pending.length, percent: 0 });
+    while (pending.length) {
+      const current = pending.shift();
+      if (isExcluded(current.folder)) continue;
+      directories.push(current);
+      const entries = await fs.promises.readdir(current.folder, { withFileTypes: true });
+      entries.filter((entry) => entry.isDirectory()).forEach((entry) => {
+        const child = path.join(current.folder, entry.name);
+        if (!isExcluded(child)) pending.push({ folder: child, root: current.root });
+      });
+      event.sender.send("images:scan-progress", { phase: "counting", directoriesFound: directories.length + pending.length, percent: 0 });
+    }
+    const totalFolders = directories.length;
+    for (let index = 0; index < directories.length; index += 1) {
+      const current = directories[index];
+      const entries = await fs.promises.readdir(current.folder, { withFileTypes: true });
       for (const entry of entries) {
-        const fullPath = path.join(folder, entry.name);
-        if (entry.isDirectory()) await walk(fullPath, root);
-        else if (entry.isFile() && supported.has(path.extname(entry.name).toLowerCase())) {
-          const key = fullPath.toLowerCase();
-          if (seen.has(key) || excludedPaths.has(path.resolve(fullPath).toLowerCase())) continue;
-          seen.add(key);
-          found.push({
-            path: fullPath,
-            name: entry.name,
-            stem: path.basename(entry.name, path.extname(entry.name)),
-            relativePath: path.join(path.basename(root), path.relative(root, fullPath))
-          });
-        }
+        if (!entry.isFile() || !supported.has(path.extname(entry.name).toLowerCase())) continue;
+        const fullPath = path.join(current.folder, entry.name);
+        const key = fullPath.toLowerCase();
+        if (seen.has(key) || excludedPaths.has(path.resolve(fullPath).toLowerCase())) continue;
+        seen.add(key);
+        found.push({
+          path: fullPath,
+          name: entry.name,
+          stem: path.basename(entry.name, path.extname(entry.name)),
+          relativePath: path.join(path.basename(current.root), path.relative(current.root, fullPath))
+        });
       }
+      const foldersScanned = index + 1;
+      event.sender.send("images:scan-progress", {
+        phase: "scanning",
+        foldersScanned,
+        totalFolders,
+        found: found.length,
+        percent: totalFolders ? Math.round((foldersScanned / totalFolders) * 60) : 60
+      });
     }
-    for (const folder of folders) {
-      if (fs.existsSync(folder) && !isExcluded(folder)) await walk(folder, folder);
-    }
-    event.sender.send("images:scan-progress", { foldersScanned, found: found.length, complete: true });
+    event.sender.send("images:scan-progress", { phase: "scanned", foldersScanned: totalFolders, totalFolders, found: found.length, percent: 60 });
     return found;
   });
 

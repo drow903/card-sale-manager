@@ -175,16 +175,23 @@ function buyers() {
   return [...new Set(activeSale().cards.filter((card) => card.buyer).map((card) => card.buyer))].sort((a, b) => a.localeCompare(b));
 }
 
+async function saveNow() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  state.activeSaleId = activeSale().id;
+  await window.cardSale.save(state);
+  const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  $("#saveText").textContent = `All changes saved · ${time}`;
+  $("#saveDot").style.background = "#54c78c";
+}
+
 function saveSoon() {
   $("#saveText").textContent = "Saving…";
   $("#saveDot").style.background = "#f0b44b";
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     try {
-      await window.cardSale.save(state);
-      const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-      $("#saveText").textContent = `All changes saved · ${time}`;
-      $("#saveDot").style.background = "#54c78c";
+      await saveNow();
     } catch (error) {
       $("#saveText").textContent = "Save failed — changes still open";
       $("#saveDot").style.background = "#d4584e";
@@ -222,7 +229,7 @@ function formatLine(card, template = activeSale().template) {
 function render() {
   const sale = activeSale();
   $("#viewTitle").textContent = sale.name;
-  $("#saleSelect").innerHTML = state.sales.map((item) => `<option value="${item.id}" ${item.id === sale.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("");
+  $("#saleSelect").innerHTML = state.sales.map((item) => `<option value="${item.id}" ${item.id === sale.id ? "selected" : ""}>${escapeHtml(item.name)} (${item.cards.length} cards)</option>`).join("");
   renderStats();
   renderListings();
   renderImages();
@@ -251,20 +258,8 @@ function renderStats() {
   $("#saleStats").innerHTML = stats.map(([label, value, sub]) => `<article class="stat"><span class="label">${label}</span><strong>${value}</strong><span class="sub">${sub}</span></article>`).join("");
 }
 
-function renderListings() {
-  const sale = activeSale();
-  sale.sortMode ||= "spreadsheet";
-  $("#listingSort").value = sale.sortMode;
-  const query = state.query.toLowerCase();
-  const cards = sale.cards.filter((card) => {
-    const hidden = Boolean(card.hiddenAfterCopy);
-    const filterMatch = state.filter === "copied" ? hidden : !hidden && (state.filter === "all"
-      || (state.filter === "available" && card.status === "available")
-      || (state.filter === "claimed" && card.status !== "available")
-      || (state.filter === "with-image" && Boolean(card.imagePath))
-      || (state.filter === "missing-image" && !card.imagePath));
-    return filterMatch && Object.values(card).join(" ").toLowerCase().includes(query);
-  }).sort((a, b) => {
+function sortedSaleCards(sale = activeSale(), cards = sale.cards) {
+  return cards.slice().sort((a, b) => {
     if (sale.sortMode === "year") return String(a.year).localeCompare(String(b.year), undefined, { numeric: true }) || String(a.name).localeCompare(String(b.name));
     if (sale.sortMode === "player") return String(a.name).localeCompare(String(b.name)) || Number(a.sourceOrder ?? a.ref) - Number(b.sourceOrder ?? b.ref);
     if (sale.sortMode === "price-asc") return Number(a.price) - Number(b.price);
@@ -272,6 +267,22 @@ function renderListings() {
     if (sale.sortMode === "custom") return Number(a.customOrder ?? a.sourceOrder ?? a.ref) - Number(b.customOrder ?? b.sourceOrder ?? b.ref);
     return Number(a.sourceOrder ?? a.ref) - Number(b.sourceOrder ?? b.ref);
   });
+}
+
+function renderListings() {
+  const sale = activeSale();
+  sale.sortMode ||= "spreadsheet";
+  $("#listingSort").value = sale.sortMode;
+  const query = state.query.toLowerCase();
+  const cards = sortedSaleCards(sale, sale.cards.filter((card) => {
+    const hidden = Boolean(card.hiddenAfterCopy);
+    const filterMatch = state.filter === "copied" ? hidden : !hidden && (state.filter === "all"
+      || (state.filter === "available" && card.status === "available")
+      || (state.filter === "claimed" && card.status !== "available")
+      || (state.filter === "with-image" && Boolean(card.imagePath))
+      || (state.filter === "missing-image" && !card.imagePath));
+    return filterMatch && Object.values(card).join(" ").toLowerCase().includes(query);
+  }));
   const validIds = new Set(sale.cards.map((card) => card.id));
   selectedListingIds = new Set([...selectedListingIds].filter((id) => validIds.has(id)));
   $("#listingRows").innerHTML = cards.map((card) => {
@@ -283,7 +294,7 @@ function renderListings() {
       <td>${escapeHtml(card.condition || "—")}</td>
       <td><strong class="money">${money(card.price)}</strong><small class="cost-note">Cost ${card.purchasePrice !== "" && card.purchasePrice != null ? money(card.purchasePrice) : "—"}</small><small class="cost-note">Purchased ${displayPurchaseDate(card.purchaseDate)}</small></td>
       <td><span class="status ${card.status === "available" ? "available" : "claimed"}">${escapeHtml(statusLabel)}</span></td>
-      <td><div class="row-actions">${card.hiddenAfterCopy ? `<button class="row-action" data-restore-card="${card.id}">Restore</button>` : `<button class="row-action" data-image-card="${card.id}">${card.imagePath ? "Change image" : "Add image"}</button><button class="row-action" data-copy-card="${card.id}">Copy</button>`}<button class="row-action" data-edit-card="${card.id}">Edit</button><button class="row-action danger-link" data-delete-card="${card.id}">Delete</button></div></td>
+      <td><div class="row-actions">${card.hiddenAfterCopy ? `<button class="row-action" data-restore-card="${card.id}">Restore</button>` : `<button class="row-action" data-image-card="${card.id}">${card.imagePath ? "Change image" : "Add image"}</button><button class="row-action" data-copy-card="${card.id}">Copy</button>`}<button class="row-action" data-edit-card="${card.id}">Edit</button><button class="row-action" data-move-card="${card.id}">Move</button><button class="row-action danger-link" data-delete-card="${card.id}">Delete</button></div></td>
     </tr>`;
   }).join("");
   $("#listingEmpty").classList.toggle("hidden", sale.cards.length !== 0);
@@ -313,7 +324,7 @@ function orderedSaleImages(sale = activeSale()) {
   const imageByPath = new Map(sale.images.map((image) => [image.path.toLowerCase(), image]));
   const tiedPaths = new Set();
   const orderedImages = [];
-  sale.cards.forEach((card) => {
+  sortedSaleCards(sale).forEach((card) => {
     if (!card.imagePath) return;
     const key = card.imagePath.toLowerCase();
     const image = imageByPath.get(key);
@@ -557,6 +568,59 @@ function saveQuickEdit() {
   recordAudit("edit", `Updated ${card.ref} · ${card.name}`, { cardId: card.id }); closeQuickEdit(); saveSoon(); render(); toast("Card updated.");
 }
 
+function manualCardDraft() {
+  return {
+    year: $("#addCardYear").value.trim(), set: $("#addCardBrand").value.trim(), name: $("#addCardPlayer").value.trim(),
+    number: $("#addCardNumber").value.trim(), condition: $("#addCardGrade").value.trim(), notes: $("#addCardFlaws").value.trim(),
+    price: Number($("#addCardPrice").value || 0), purchasePrice: $("#addCardPurchasePrice").value === "" ? "" : Number($("#addCardPurchasePrice").value),
+    purchaseDate: normalizePurchaseDate($("#addCardPurchaseDate").value)
+  };
+}
+
+function updateAddCardPreview() {
+  $("#addCardPreview").textContent = formatLine(manualCardDraft());
+}
+
+function openAddCard() {
+  ["#addCardYear", "#addCardBrand", "#addCardPlayer", "#addCardNumber", "#addCardGrade", "#addCardFlaws", "#addCardPrice", "#addCardPurchasePrice", "#addCardPurchaseDate"].forEach((selector) => $(selector).value = "");
+  updateAddCardPreview();
+  $("#addCardDialog").showModal();
+  $("#addCardYear").focus();
+}
+
+function addSingleCard() {
+  const sale = activeSale();
+  const draft = manualCardDraft();
+  if (!draft.name) return toast("Enter the player name.");
+  const nextRef = Math.max(0, ...sale.cards.map((card) => Number(card.ref) || 0)) + 1;
+  const nextOrder = Math.max(0, ...sale.cards.map((card) => Number(card.sourceOrder) || 0)) + 1;
+  const card = { id: uid(), ref: String(nextRef), sourceOrder: nextOrder, customOrder: sale.cards.length + 1, ...draft, imagePath: "", status: "available" };
+  sale.cards.push(card);
+  recordAudit("manual-add", `Added ${card.ref} · ${card.name}`, { cardId: card.id });
+  $("#addCardDialog").close();
+  resetListingView();
+  saveSoon(); render(); toast(`${card.name} added.`);
+}
+
+function moveCardToPosition(cardId) {
+  const sale = activeSale();
+  const card = sale.cards.find((item) => item.id === cardId);
+  if (!card) return;
+  const ordered = sortedSaleCards(sale);
+  const current = ordered.findIndex((item) => item.id === cardId) + 1;
+  const requested = window.prompt(`Move ${card.ref} · ${card.name} to position 1–${ordered.length}:`, String(current));
+  if (requested == null) return;
+  const position = Number(requested);
+  if (!Number.isInteger(position) || position < 1 || position > ordered.length) return toast(`Enter a position from 1 to ${ordered.length}.`);
+  if (position === current) return;
+  snapshotSale(`Before moving ${card.ref} · ${card.name}`);
+  ordered.splice(current - 1, 1);
+  ordered.splice(position - 1, 0, card);
+  ordered.forEach((item, index) => item.customOrder = index + 1);
+  sale.sortMode = "custom";
+  saveSoon(); renderListings(); toast(`${card.name} moved to position ${position}.`);
+}
+
 function openCloseSale() {
   const sale = activeSale(); const unsold = sale.cards.filter((card) => card.status === "available"); const unpaid = buyers().filter((buyer) => !["paid", "packed", "shipped"].includes(orderFor(buyer).status)); const unpacked = buyers().filter((buyer) => cardsForBuyer(buyer).some((card) => !card.packed));
   $("#closeSaleSummary").innerHTML = `<article><strong>${sale.cards.length - unsold.length}</strong><span>sold</span></article><article><strong>${unsold.length}</strong><span>unsold</span></article><article class="${unpaid.length ? "warning" : ""}"><strong>${unpaid.length}</strong><span>unpaid buyers</span></article><article class="${unpacked.length ? "warning" : ""}"><strong>${unpacked.length}</strong><span>orders not fully packed</span></article>`;
@@ -653,11 +717,15 @@ function confirmImport(event) {
     const value = (field) => mapping[field] ? row[mapping[field]] : "";
     const card = { id: uid(), ref: String(start + index + 1), sourceOrder: start + index + 1, customOrder: start + index + 1, year: value("year"), set: value("set"), number: value("number"), name: value("name"), condition: value("condition"), price: Number(String(value("price")).replace(/[$,]/g, "")) || 0, purchasePrice: value("purchasePrice") === "" ? "" : Number(String(value("purchasePrice")).replace(/[$,]/g, "")) || 0, purchaseDate: normalizePurchaseDate(value("purchaseDate")), notes: value("notes"), imagePath: "", status: "available" };
     const remembered = state.manualMatchMemory?.[normalizedCardKey(card)];
-    if (remembered) card.imagePath = remembered;
+    if (remembered) card.rememberedImagePath = remembered;
     return card;
   });
   sale.cards.push(...imported);
-  imported.filter((card) => card.imagePath).forEach((card) => attachImage(card, card.imagePath, true));
+  imported.forEach((card) => {
+    const remembered = card.rememberedImagePath;
+    delete card.rememberedImagePath;
+    if (remembered) attachImage(card, remembered, true);
+  });
   recordAudit("import", `Imported ${imported.length} cards`);
   $("#importDialog").close();
   pendingSheet = null;
@@ -735,6 +803,26 @@ function scoreImage(card, image) {
   return { image, score, reasons };
 }
 
+function proposedImageMatch(card, images) {
+  let candidates = images.map((image) => scoreImage(card, image)).filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || String(a.image.path).localeCompare(String(b.image.path), undefined, { numeric: true }));
+  const sameYearCandidates = candidates.filter((candidate) => candidate.reasons.includes("year folder"));
+  if (sameYearCandidates.length) candidates = sameYearCandidates;
+  candidates = candidates.slice(0, 6);
+  const top = candidates[0];
+  const next = candidates[1];
+  const hasDefinitiveFilename = top?.reasons.includes("exact card number") || top?.reasons.includes("full player name") || (top?.reasons.includes("card number") && top?.reasons.includes("surname"));
+  const samePlayerSameYear = candidates.filter((candidate) => candidate.reasons.includes("year folder") && candidate.reasons.some((reason) => ["full player name", "exact surname", "surname", "player name"].includes(reason)));
+  const ambiguous = Boolean(top && next && samePlayerSameYear.length > 1 && top.score === next.score);
+  return {
+    card,
+    candidates,
+    automatic: Boolean(top && top.score >= 100 && hasDefinitiveFilename && !ambiguous),
+    conflict: ambiguous,
+    conflictReason: ambiguous ? "Multiple equally strong files match this player in the same year folder. Choose the correct file manually." : ""
+  };
+}
+
 function imageOwner(imagePath, exceptCardId = "") {
   const key = String(imagePath || "").toLowerCase();
   return activeSale().cards.find((card) => card.id !== exceptCardId && String(card.imagePath || "").toLowerCase() === key);
@@ -777,12 +865,14 @@ async function autoMatchImages() {
   const progressText = $("#lookupProgressText");
   button.disabled = true;
   progress.classList.remove("hidden");
-  progress.classList.add("indeterminate");
-  progressBar.style.width = "35%";
-  progressText.textContent = "Starting image lookup…";
+  progress.classList.remove("indeterminate");
+  progressBar.style.width = "0%";
+  progressText.textContent = "Counting image folders…";
   const stopProgress = window.cardSale.onImageScanProgress((details) => {
-    progressText.textContent = details.complete ? `Found ${details.found} available image${details.found === 1 ? "" : "s"}` : `Scanning folder ${details.foldersScanned} · ${details.found} images found`;
-    if (details.complete) { progress.classList.remove("indeterminate"); progressBar.style.width = "100%"; }
+    const percent = Math.max(0, Math.min(60, Number(details.percent || 0)));
+    progressBar.style.width = `${percent}%`;
+    if (details.phase === "counting") progressText.textContent = `Counting folders… ${details.directoriesFound || 0} found`;
+    else progressText.textContent = `Scanning folder ${details.foldersScanned || 0} of ${details.totalFolders || 0} · ${details.found || 0} images found`;
   });
   let images;
   try {
@@ -796,14 +886,15 @@ async function autoMatchImages() {
     button.disabled = false;
   }
   if (!images.length) { progress.classList.add("hidden"); return toast("No unconfirmed supported images were found."); }
-  const proposed = cards.map((card) => {
-    const candidates = images.map((image) => scoreImage(card, image)).filter((item) => item.score > 0).sort((a, b) => b.score - a.score || String(a.image.path).localeCompare(String(b.image.path), undefined, { numeric: true })).slice(0, 6);
-    const top = candidates[0];
-    const next = candidates[1];
-    const hasDefinitiveFilename = top?.reasons.includes("exact card number") || top?.reasons.includes("full player name") || (top?.reasons.includes("card number") && top?.reasons.includes("surname"));
-    const automatic = Boolean(top && top.score >= 100 && hasDefinitiveFilename && (!next || top.score - next.score >= 18));
-    return { card, candidates, automatic };
-  });
+  const proposed = [];
+  for (let index = 0; index < cards.length; index += 1) {
+    const card = cards[index];
+    proposed.push(proposedImageMatch(card, images));
+    const percent = 60 + Math.round(((index + 1) / cards.length) * 35);
+    progressBar.style.width = `${percent}%`;
+    progressText.textContent = `Matching card ${index + 1} of ${cards.length}`;
+    if (index % 8 === 7) await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
 
   const topPathCounts = new Map();
   proposed.forEach((match) => {
@@ -815,6 +906,8 @@ async function autoMatchImages() {
     if (key && topPathCounts.get(key) > 1) {
       match.automatic = false;
       match.conflict = true;
+      match.conflictReason = "This same image was suggested for more than one listing. Choose the correct file manually.";
+      match.selected = "";
     }
   });
 
@@ -824,25 +917,36 @@ async function autoMatchImages() {
   proposed.sort((a, b) => (b.candidates[0]?.score || 0) - (a.candidates[0]?.score || 0)).forEach((match) => {
     const topPath = match.candidates[0]?.image.path;
     if (match.automatic && topPath && !used.has(topPath.toLowerCase())) {
-      automatic.push({ card: match.card, candidate: match.candidates[0], candidates: match.candidates });
-      used.add(topPath.toLowerCase());
+      if (attachImage(match.card, topPath, true)) {
+        automatic.push({ card: match.card, candidate: match.candidates[0] });
+        state.manualMatchMemory ||= {};
+        state.manualMatchMemory[normalizedCardKey(match.card)] = topPath;
+        used.add(topPath.toLowerCase());
+      } else {
+        match.automatic = false;
+        match.conflict = true;
+        match.selected = "";
+        review.push(match);
+      }
     } else {
       match.candidates = match.candidates.filter((candidate) => !used.has(candidate.image.path.toLowerCase()));
+      if (match.conflict) match.selected = "";
       review.push(match);
     }
   });
 
-  const reviewItems = [
-    ...automatic.map((match) => ({ card: match.card, candidates: match.candidates || [match.candidate], automatic: true, selected: match.candidate.image.path, confirmed: false })),
-    ...review.map((match) => ({ ...match, confirmed: false }))
-  ];
+  const reviewItems = review.map((match) => ({ ...match, confirmed: false }));
   pendingMatches = { review: reviewItems, scanned: images.length, filter: "all", query: "" };
+  progressBar.style.width = "100%";
+  progressText.textContent = `Complete · ${automatic.length} exact match${automatic.length === 1 ? "" : "es"} attached automatically`;
+  if (automatic.length) saveSoon();
   progress.classList.add("hidden");
   selectedMatchIds.clear();
   $("#matchSearch").value = "";
   $$('[data-match-filter]').forEach((button) => button.classList.toggle("active", button.dataset.matchFilter === "all"));
   renderMatchReview();
-  $("#matchDialog").showModal();
+  if (reviewItems.length) $("#matchDialog").showModal();
+  else { render(); toast(`${automatic.length} exact image match${automatic.length === 1 ? "" : "es"} attached automatically.`); }
 }
 
 function renderMatchReview() {
@@ -865,7 +969,7 @@ function renderMatchReview() {
     const selectedPath = match.selected !== undefined ? match.selected : (selectTop ? top.image.path : "");
     return `<article class="match-row ${match.conflict ? "match-conflict" : ""}" data-match-card="${match.card.id}">
       <label class="match-select-box"><input type="checkbox" data-select-match="${match.card.id}" ${selectedMatchIds.has(match.card.id) ? "checked" : ""} /> Select</label>
-      <div class="match-card-name"><strong>${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.year)} ${escapeHtml(match.card.set)} #${escapeHtml(match.card.number)} ${escapeHtml(match.card.name)} ${escapeHtml(duplicateInfo(match.card).label)}</strong><span>Flaws: ${escapeHtml(match.card.notes && !/^none$/i.test(match.card.notes) ? match.card.notes : "None listed")}</span><span>Purchase date: ${displayPurchaseDate(match.card.purchaseDate)}</span>${match.conflict ? `<span class="match-warning">Review required: another card received this same suggestion.</span>` : ""}</div>
+      <div class="match-card-name"><strong>${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.year)} ${escapeHtml(match.card.set)} #${escapeHtml(match.card.number)} ${escapeHtml(match.card.name)} ${escapeHtml(duplicateInfo(match.card).label)}</strong><span>Flaws: ${escapeHtml(match.card.notes && !/^none$/i.test(match.card.notes) ? match.card.notes : "None listed")}</span><span>Purchase date: ${displayPurchaseDate(match.card.purchaseDate)}</span>${match.conflict ? `<span class="match-warning">${escapeHtml(match.conflictReason || "Choose the correct image manually.")}</span>` : ""}</div>
       <div class="candidate-picker"><img data-match-preview src="${selectedPath ? fileUrl(selectedPath) : "assets/favicon.svg"}" alt="" /><div><select data-match-select ${match.confirmed ? "disabled" : ""}><option value="">Leave unmatched</option>${match.candidates.map((candidate) => `<option value="${escapeHtml(candidate.image.path)}" ${selectedPath === candidate.image.path ? "selected" : ""}>${escapeHtml(candidate.image.relativePath)} — ${Math.max(0, Math.min(100, candidate.score))}% match</option>`).join("")}</select><div class="confidence-note">${top ? `Best clue: ${escapeHtml(top.reasons.join(", ") || "partial filename")}` : "No likely filename found"}</div></div></div>
       <div class="match-confirm">${match.confirmed ? `<span class="status available">Confirmed</span><button type="button" class="row-action" data-reopen-match="${match.card.id}">Reopen</button>` : `<button type="button" class="primary" data-confirm-match="${match.card.id}">${selectedPath ? "Confirm match" : "Confirm no image"}</button>`}</div>
     </article>`;
@@ -1251,12 +1355,18 @@ function applyCarryover() {
   snapshotSale(`Before receiving ${cards.length} carryover cards`, destination);
   const percent = Number($("#carryoverPricePercent").value || 0);
   const start = destination.cards.length;
+  const usedDestinationImages = new Set(destination.cards.filter((card) => card.imagePath).map((card) => card.imagePath.toLowerCase()));
   cards.forEach((card, index) => {
     const copy = clone(card);
     copy.id = uid(); copy.ref = String(start + index + 1); copy.sourceOrder = start + index + 1; copy.customOrder = start + index + 1;
     copy.price = Math.max(0, Math.round(Number(copy.price) * (1 + percent / 100) * 100) / 100);
     copy.status = "available";
     ["buyer", "claimPrice", "offerPrice", "claimedAt", "claimUpdatedAt", "claimType", "claimNote", "packed", "hiddenAfterCopy", "completedBy", "completedAt"].forEach((key) => delete copy[key]);
+    if (copy.imagePath) {
+      const imageKey = copy.imagePath.toLowerCase();
+      if (usedDestinationImages.has(imageKey)) copy.imagePath = "";
+      else usedDestinationImages.add(imageKey);
+    }
     destination.cards.push(copy);
     if (copy.imagePath && !destination.images.some((image) => image.path.toLowerCase() === copy.imagePath.toLowerCase())) destination.images.push({ id: uid(), path: copy.imagePath, name: copy.imagePath.split(/[\\/]/).pop() });
   });
@@ -1311,6 +1421,10 @@ function bindEvents() {
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
   $("#importBtn").addEventListener("click", importSpreadsheet);
   $$('[data-action="import"]').forEach((button) => button.addEventListener("click", importSpreadsheet));
+  $("#addSingleCardBtn").addEventListener("click", openAddCard);
+  $$('[data-action="add-card"]').forEach((button) => button.addEventListener("click", openAddCard));
+  $("#confirmAddCardBtn").addEventListener("click", addSingleCard);
+  $("#addCardDialog").addEventListener("input", (event) => { if (event.target.matches("input")) updateAddCardPreview(); });
   $("#addImagesBtn").addEventListener("click", () => addImages("files"));
   $("#addFolderBtn").addEventListener("click", () => addImages("folder"));
   $("#autoMatchBtn").addEventListener("click", autoMatchImages);
@@ -1338,11 +1452,13 @@ function bindEvents() {
     const deleteId = event.target.dataset.deleteCard;
     const restoreId = event.target.dataset.restoreCard;
     const editId = event.target.dataset.editCard;
+    const moveId = event.target.dataset.moveCard;
     if (copyId) copyAndHideCard(copyId);
     if (imageId) chooseManualImage(imageId);
     if (deleteId) deleteCard(deleteId);
     if (restoreId) restoreCard(restoreId);
     if (editId) openQuickEdit(editId);
+    if (moveId) moveCardToPosition(moveId);
   });
   $("#listingRows").addEventListener("change", (event) => {
     const id = event.target.dataset.selectListing;
@@ -1549,8 +1665,19 @@ function bindEvents() {
     if (!availableUpdate || !window.confirm(`Install Card Sale Manager ${availableUpdate.version} now? The app will close automatically when the installer starts.`)) return;
     const button = $("#downloadUpdateBtn");
     button.disabled = true;
-    button.textContent = "Downloading…";
+    button.textContent = "Protecting sales…";
     $("#updateProgress").classList.remove("hidden");
+    try {
+      await saveNow();
+      await window.cardSale.backup(`before-update-${availableUpdate.version}`);
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Download & install";
+      $("#updateTitle").textContent = "Update stopped to protect your sales";
+      $("#updateMessage").textContent = "The app could not verify a current save and recovery backup, so the update was not started.";
+      return;
+    }
+    button.textContent = "Downloading…";
     const result = await window.cardSale.downloadAndInstallUpdate(availableUpdate);
     if (!result.ok) {
       button.disabled = false;
@@ -1575,7 +1702,10 @@ function bindEvents() {
 
 async function init() {
   const saved = await window.cardSale.load();
+  let recoveryNotice = "";
   if (saved?.sales?.length) {
+    if (saved.__recovery?.source) recoveryNotice = "The main save could not be read, so Card Sale Manager restored the newest recovery backup.";
+    delete saved.__recovery;
     state = { ...saved, filter: "all", query: "", claimQuery: "", selectedBuyer: "" };
     const legacyTemplates = new Set([
       "{ref} - {year} {set} #{number} {name} - {condition} - ${price}",
@@ -1603,6 +1733,7 @@ async function init() {
       sale.additionalLookupFolders ||= [];
       sale.excludedLookupFolders ||= [];
       sale.orders ||= {};
+      sale.images ||= [];
       sale.versions ||= [];
       sale.audit ||= [];
       sale.unrecognizedComments ||= [];
@@ -1627,12 +1758,17 @@ async function init() {
     ]).sort((a, b) => a.at.localeCompare(b.at));
   }
   claimWords(); presets(); bindEvents(); resetListingView(); applyDisplayPreferences(); render();
+  window.cardSale.onPrepareClose(async () => {
+    try { await saveNow(); await window.cardSale.backup("close"); } catch {}
+    await window.cardSale.closeReady();
+  });
   window.cardSale.onUpdateProgress((details) => {
     const percent = details.percent == null ? 10 : details.percent;
     $("#updateProgressBar").style.width = `${percent}%`;
     $("#updateProgressText").textContent = details.installing ? "Installing update…" : (details.percent == null ? "Downloading update…" : `Downloading update… ${details.percent}%`);
   });
   $("#appVersion").textContent = `Version ${await window.cardSale.version()}`;
+  if (recoveryNotice) toast(recoveryNotice);
   checkForUpdates(false);
 }
 

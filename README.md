@@ -4,7 +4,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 
 ## Features
 
-- Imports Excel, CSV, and TSV card lists.
+- Imports Excel, CSV, and TSV card lists or adds individual cards manually.
 - Formats each card into a copy-ready sale listing.
 - Matches local images using year folders, player names, card numbers, seven- or eight-digit purchase-date codes, and duplicate sequence numbers.
 - Supports manual image attachment and native drag-out to Facebook.
@@ -12,6 +12,8 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Supports bulk card deletion, bulk image confirmation, and duplicate-card labels.
 - Keeps image lookup and exclusion folders shared across sales.
 - Checks GitHub releases when the app opens and, after confirmation, downloads and installs signed release installers automatically.
+- Creates verified rolling recovery backups, saves again on close, and refuses to update until current sales are safely backed up.
+- Supports exact numeric card positioning in addition to custom drag-and-drop ordering.
 - Provides PWE and PMWT shipping options.
 - Generates buyer summaries and tracking messages.
 - Keeps sale data stored locally on the computer.
