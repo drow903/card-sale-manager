@@ -1,4 +1,6 @@
 node_modules/
+.pnpm-store-local/
+.build-v070/
 release/
 
 .builder-cache/

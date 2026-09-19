@@ -1,6 +1,6 @@
 {
   "name": "card-sale-manager",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Local-first card sale workflow manager",
   "main": "main.js",
   "type": "commonjs",
@@ -10,6 +10,7 @@
     "dist": "electron-builder --win"
   },
   "dependencies": {
+    "qrcode": "1.5.4",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -29,11 +30,17 @@
       "index.html",
       "styles.css",
       "assets/**/*",
+      "node_modules/qrcode/**/*",
+      "node_modules/dijkstrajs/**/*",
+      "node_modules/pngjs/**/*",
       "node_modules/xlsx/**/*",
       "package.json"
     ],
     "win": {
-      "target": ["nsis", "portable"]
+      "target": [
+        "nsis",
+        "portable"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -43,10 +50,12 @@
     "portable": {
       "artifactName": "Card-Sale-Manager-${version}-Portable.${ext}"
     },
-    "publish": [{
-      "provider": "github",
-      "owner": "drow903",
-      "repo": "card-sale-manager"
-    }]
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "drow903",
+        "repo": "card-sale-manager"
+      }
+    ]
   }
 }

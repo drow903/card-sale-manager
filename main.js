@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const https = require("https");
 const { spawn } = require("child_process");
+const QRCode = require("qrcode");
 
 const UPDATE_REPOSITORY = "drow903/card-sale-manager";
 
@@ -257,6 +258,14 @@ function createWindow() {
         await mainWindow.webContents.executeJavaScript("showView('sale'); openQuickEdit(activeSale().cards[0].id)");
       } else if (captureView === "closing") {
         await mainWindow.webContents.executeJavaScript("showView('sale'); openCloseSale()");
+      } else if (captureView === "packing-designer") {
+        await mainWindow.webContents.executeJavaScript("showView('packing'); openPackingDesigner()");
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } else if (captureView === "packing-designer-qr") {
+        await mainWindow.webContents.executeJavaScript("showView('packing'); openPackingDesigner(); document.querySelector('#packingSocialLink').value='https://example.com/card-sale'; updatePackingPreview()");
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      } else if (captureView === "packing-bulk") {
+        await mainWindow.webContents.executeJavaScript("showView('packing'); packingBulkSelection = new Set(buyers()); renderPackingBulk(); document.querySelector('#packingBulkDialog').showModal()");
       } else if (["dashboard", "orders", "packing", "live", "buyers", "health"].includes(captureView)) {
         await mainWindow.webContents.executeJavaScript(`showView(${JSON.stringify(captureView)})`);
       }
@@ -439,8 +448,46 @@ app.whenReady().then(() => {
     const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
     const title = String(payload?.title || "Packing slip").replace(/[<>]/g, "");
     const body = String(payload?.html || "");
-    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><title>${title}</title><style>body{font:14px Arial;padding:32px;color:#172333}h1{font-size:24px}table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #ddd;text-align:left}.total{font-size:18px;font-weight:bold;text-align:right;margin-top:20px}</style></head><body>${body}</body></html>`)}`);
+    const styles = String(payload?.styles || "");
+    const pageSize = ["letter", "half", "two-up", "label", "compact"].includes(payload?.pageSize) ? payload.pageSize : "letter";
+    const pageCss = pageSize === "half" ? "5.5in 8.5in" : pageSize === "label" ? "4in 6in" : pageSize === "compact" ? "4.25in 5.5in" : "letter";
+    const documentHtml = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>@page{size:${pageCss};margin:0}html,body{margin:0;background:#fff;color:#172333}*{box-sizing:border-box}${styles}</style></head><body>${body}</body></html>`;
+    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(documentHtml)}`);
     return new Promise((resolve) => printWindow.webContents.print({ silent: false, printBackground: true }, (success, reason) => { printWindow.close(); resolve({ success, reason }); }));
+  });
+
+  ipcMain.handle("packing:export-pdf", async (_event, payload) => {
+    const title = String(payload?.title || "Packing slips").replace(/[<>]/g, "");
+    const result = await dialog.showSaveDialog(mainWindow, { title: "Save packing slips as PDF", defaultPath: `${title}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
+    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+    const pdfWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+    const styles = String(payload?.styles || "");
+    const body = String(payload?.html || "");
+    const pageSize = ["letter", "half", "two-up", "label", "compact"].includes(payload?.pageSize) ? payload.pageSize : "letter";
+    const pageCss = pageSize === "half" ? "5.5in 8.5in" : pageSize === "label" ? "4in 6in" : pageSize === "compact" ? "4.25in 5.5in" : "letter";
+    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>@page{size:${pageCss};margin:0}html,body{margin:0;background:#fff;color:#172333}*{box-sizing:border-box}${styles}</style></head><body>${body}</body></html>`)}`);
+    const pdf = await pdfWindow.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
+    pdfWindow.close();
+    await fs.promises.writeFile(result.filePath, pdf);
+    return { success: true, filePath: result.filePath };
+  });
+
+  ipcMain.handle("packing:choose-logo", async () => {
+    const result = await dialog.showOpenDialog(mainWindow, { title: "Choose a branding logo", properties: ["openFile"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "svg"] }] });
+    return result.canceled ? "" : result.filePaths[0];
+  });
+
+  ipcMain.handle("packing:file-data-url", async (_event, filePath) => {
+    if (!filePath || !fs.existsSync(filePath)) return "";
+    const ext = path.extname(filePath).slice(1).toLowerCase();
+    const mime = ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", svg: "image/svg+xml", bmp: "image/bmp" })[ext] || "application/octet-stream";
+    return `data:${mime};base64,${(await fs.promises.readFile(filePath)).toString("base64")}`;
+  });
+
+  ipcMain.handle("packing:qr-data-url", async (_event, value, color = "#172333") => {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    return QRCode.toDataURL(text, { errorCorrectionLevel: "M", margin: 1, width: 220, color: { dark: /^#[0-9a-f]{6}$/i.test(color) ? color : "#172333", light: "#ffffffff" } });
   });
 
   ipcMain.handle("images:scan-folder", async (event, input) => {

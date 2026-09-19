@@ -7,6 +7,18 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => 
 const fileUrl = (value) => value ? encodeURI(`file:///${value.replace(/\\/g, "/")}`) : "";
 const DEFAULT_TEMPLATE = "{year} {brand} {player} #{number} {grade} ({flaws}) - ${claimPrice}";
 const DEFAULT_CLAIM_WORDS = ["claim", "claimed", "take", "taken", "mine", "sold"];
+const PACKING_SECTIONS = [
+  ["header", "Brand header"], ["buyer", "Buyer and order"], ["message", "Thank-you message"],
+  ["items", "Card list"], ["totals", "Totals"], ["policy", "Return policy"],
+  ["qr", "QR code and links"], ["footer", "Footer"]
+];
+const DEFAULT_PACKING_DESIGN = {
+  name: "Standard branded slip", pageSize: "letter", accent: "#d9693d", brandName: "Card Sale Manager", contact: "", logoPath: "",
+  socialLink: "", paymentLink: "", feedbackLink: "", upcomingLink: "", qrType: "social", qrUrl: "",
+  header: "Thanks for joining the sale!", thanks: "Thank you for your purchase. I appreciate your business!", returnPolicy: "Please contact me if anything in your order needs attention.", footer: "Packed with care.",
+  showAddress: true, showOrderNumber: true, showPayment: true, showShipping: true, showPrices: true, showDetails: true, showThumbnails: false, includeLabel: false,
+  sectionOrder: PACKING_SECTIONS.map(([id]) => id)
+};
 
 const starterSale = {
   id: uid(),
@@ -34,6 +46,10 @@ let availableUpdate = null;
 let parsedClaimMatches = [];
 let liveIndex = 0;
 let profileQuery = "";
+let packingDesignerDraft = null;
+let packingBulkSelection = new Set();
+const packingPreviewSheet = typeof CSSStyleSheet !== "undefined" ? new CSSStyleSheet() : null;
+if (packingPreviewSheet && typeof document !== "undefined" && document.adoptedStyleSheets) document.adoptedStyleSheets = [...document.adoptedStyleSheets, packingPreviewSheet];
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -96,11 +112,29 @@ function inventoryAgeDays(card) {
 }
 
 function applyDisplayPreferences() {
-  state.preferences ||= { fontScale: 1, compact: false };
+  state.preferences ||= { fontScale: 1, compact: false, theme: "system", reducedMotion: false };
+  state.preferences.theme ||= "system";
   document.documentElement.style.setProperty("--font-scale", state.preferences.fontScale || 1);
+  document.documentElement.dataset.theme = state.preferences.theme;
+  document.documentElement.dataset.reducedMotion = String(Boolean(state.preferences.reducedMotion));
   document.body.classList.toggle("compact-mode", Boolean(state.preferences.compact));
   const density = $("#densityBtn");
   if (density) density.textContent = state.preferences.compact ? "Comfortable" : "Compact";
+  const theme = $("#themeBtn");
+  if (theme) theme.textContent = `Theme: ${state.preferences.theme[0].toUpperCase()}${state.preferences.theme.slice(1)}`;
+  const motion = $("#motionBtn");
+  if (motion) motion.textContent = state.preferences.reducedMotion ? "Motion: Reduced" : "Motion: On";
+}
+
+function ensurePackingSettings() {
+  state.packingTemplates ||= [];
+  state.preferences ||= {};
+  state.preferences.packingDesign ||= clone(DEFAULT_PACKING_DESIGN);
+  const design = state.preferences.packingDesign;
+  Object.entries(DEFAULT_PACKING_DESIGN).forEach(([key, value]) => { if (design[key] == null) design[key] = clone(value); });
+  design.sectionOrder = [...new Set([...(design.sectionOrder || []), ...PACKING_SECTIONS.map(([id]) => id)])].filter((id) => PACKING_SECTIONS.some(([section]) => section === id));
+  state.packingPrintHistory ||= [];
+  return design;
 }
 
 function activeSale() {
@@ -429,6 +463,7 @@ function renderOrderDetail() {
           <div class="total-line grand"><span>Total</span><span>${money(total)}</span></div>
         </div>
         ${flags.length ? `<div class="order-flags">${flags.map((flag) => `<span>⚑ ${escapeHtml(flag)}</span>`).join("")}</div>` : ""}
+        <div class="slip-status"><strong>Packing slip</strong><span>${order.packingSlipPrintCount ? `Printed ${order.packingSlipPrintCount}× · ${new Date(order.packingSlipPrintedAt).toLocaleString()}` : "Not printed"}</span></div>
         ${repeatMatches.length ? `<div class="repeat-alert"><strong>Repeat-buyer alert</strong><span>${repeatMatches.length} available card${repeatMatches.length === 1 ? "" : "s"} match this buyer’s history.</span><button class="row-action" data-open-buyer-profile="${escapeHtml(buyer)}">View profile</button></div>` : ""}
         <label>Payment method<select id="orderPaymentMethod"><option value="">Not recorded</option>${["Cash", "PayPal", "Venmo", "Other"].map((method) => `<option ${order.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
         <label>Mailing address<textarea id="buyerAddress" rows="3">${escapeHtml(profile.address || "")}</textarea></label>
@@ -452,6 +487,7 @@ function renderPacking() {
   select.innerHTML = names.map((buyer) => `<option value="${escapeHtml(buyer)}" ${buyer === current ? "selected" : ""}>${escapeHtml(buyer)}</option>`).join("");
   const buyer = select.value || names[0];
   if (!buyer) {
+    $("#packingWarnings").innerHTML = "";
     $("#packingContent").innerHTML = `<div class="panel empty-state"><h3>No orders to pack</h3><p>Paid and unpaid orders will appear here.</p></div>`;
     return;
   }
@@ -459,7 +495,23 @@ function renderPacking() {
   const packed = cards.filter((card) => card.packed).length;
   const percent = cards.length ? Math.round((packed / cards.length) * 100) : 0;
   const order = orderFor(buyer);
-  $("#packingContent").innerHTML = `<section class="packing-card"><div class="packing-progress"><div><h2>${escapeHtml(buyer)}</h2><p>${packed} of ${cards.length} cards verified · ${escapeHtml(order.shippingMethod)}${buyerProfile(buyer).address ? "" : " · Missing address"}</p><div class="progress-track"><div class="progress-bar" style="width:${percent}%"></div></div></div><div class="packing-actions"><button class="secondary" id="printPackingSlipBtn">Print packing slip</button><button class="secondary" id="checkAllCardsBtn">${packed === cards.length ? "Uncheck all" : "Check all cards"}</button><button class="primary" id="completePackingBtn" ${packed !== cards.length ? "disabled" : ""}>Complete package</button></div></div><div class="pack-list">${cards.map((card) => `<label class="pack-item ${card.packed ? "checked" : ""}"><input type="checkbox" data-pack-card="${card.id}" ${card.packed ? "checked" : ""} /><span><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><small>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)} · ${card.claimType === "offer" ? "Offer" : "Claim"}</small></span><strong>${money(card.claimPrice ?? card.price)}</strong></label>`).join("")}</div><div class="tracking-panel"><label>Tracking number<input id="trackingNumber" value="${escapeHtml(order.trackingNumber || "")}" placeholder="Enter USPS or carrier tracking number" /></label><div class="tracking-actions"><button class="secondary" id="copyTrackingMessageBtn" ${order.trackingNumber ? "" : "disabled"}>Copy shipping message</button><button class="secondary" id="openTrackingBtn" data-open-tracking="${escapeHtml(trackingUrl(order.trackingNumber))}" ${order.trackingNumber ? "" : "disabled"}>Track package ↗</button></div></div></section>`;
+  const profile = buyerProfile(buyer);
+  const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
+  const total = subtotal + shippingAmount(order) - Number(order.discount || 0);
+  const warnings = [!profile.address && "Missing address", !["paid", "packed", "shipped"].includes(order.status) && "Unpaid balance", ["paid", "packed", "shipped"].includes(order.status) && !order.paymentMethod && "Payment method missing", cards.some((card) => !card.packed) && "Packing incomplete"].filter(Boolean);
+  $("#packingWarnings").innerHTML = warnings.length ? warnings.map((warning) => `<span>${escapeHtml(warning)}</span>`).join("") : `<span class="valid-text">Order ready</span>`;
+  const firstImage = cards.find((card) => card.imagePath)?.imagePath;
+  const printed = Number(order.packingSlipPrintCount || 0);
+  $("#packingContent").innerHTML = `<section class="packing-card"><div class="packing-progress"><div><h2>${escapeHtml(buyer)}</h2><p>${packed} of ${cards.length} cards verified · ${escapeHtml(order.shippingMethod)}${profile.address ? "" : " · Missing address"}${printed ? ` · Slip printed ${printed}×` : ""}</p><div class="progress-track"><div class="progress-bar" style="width:${percent}%"></div></div></div><div class="packing-actions"><button class="secondary" id="printPackingSlipBtn">${printed ? "Reprint" : "Print"} packing slip</button><button class="secondary" id="checkAllCardsBtn">${packed === cards.length ? "Uncheck all" : "Check all cards"}</button><button class="primary" id="completePackingBtn" ${packed !== cards.length ? "disabled" : ""}>Complete package</button></div></div><div class="packing-order-summary">${firstImage ? `<img src="${fileUrl(firstImage)}" alt="First card in order" />` : `<div class="placeholder-thumb">No image</div>`}<div><strong>${escapeHtml(activeSale().name)}</strong><p>${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p><div class="packing-order-stats"><span><strong>${cards.length}</strong><br>cards</span><span><strong>${money(total)}</strong><br>order total</span><span><strong>${escapeHtml(order.status || "awaiting")}</strong><br>status</span></div></div></div><div class="pack-list">${cards.map((card) => `<label class="pack-item ${card.packed ? "checked" : ""}" data-pack-row="${card.id}"><input type="checkbox" data-pack-card="${card.id}" ${card.packed ? "checked" : ""} /><span><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><small>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)} · ${card.claimType === "offer" ? "Offer" : "Claim"}</small></span><strong>${money(card.claimPrice ?? card.price)}</strong></label>`).join("")}</div><div class="packing-notes"><label>Internal packing notes<textarea id="packingInternalNotes" placeholder="Private notes — never printed">${escapeHtml(order.packingNotes || "")}</textarea></label><label>Buyer-facing slip note<textarea id="packingBuyerNote" placeholder="Optional note printed on this buyer’s slip">${escapeHtml(order.packingSlipNote || "")}</textarea></label></div><div class="tracking-panel"><label>Tracking number<input id="trackingNumber" value="${escapeHtml(order.trackingNumber || "")}" placeholder="Enter USPS or carrier tracking number" /></label><div class="tracking-actions"><button class="secondary" id="copyTrackingMessageBtn" ${order.trackingNumber ? "" : "disabled"}>Copy shipping message</button><button class="secondary" id="openTrackingBtn" data-open-tracking="${escapeHtml(trackingUrl(order.trackingNumber))}" ${order.trackingNumber ? "" : "disabled"}>Track package ↗</button></div></div></section>`;
+  const legacyProgress = $(".packing-card .progress-track");
+  if (legacyProgress) {
+    const meter = document.createElement("progress");
+    meter.className = "packing-progress-meter";
+    meter.max = 100;
+    meter.value = percent;
+    meter.textContent = `${percent}%`;
+    legacyProgress.replaceWith(meter);
+  }
 }
 
 function renderDashboard() {
@@ -1271,14 +1323,158 @@ function buyerMessage(type, buyer) {
   return order.trackingNumber ? trackingMessage(buyer) : `Hi ${firstName} — your cards have shipped! Thanks again for your purchase.`;
 }
 
-async function printPackingSlip(buyer) {
+const PACKING_PRINT_STYLES = `
+  body{font:14px "Segoe UI",Arial,sans-serif;color:#172333;background:#fff}
+  .slip-page{min-height:100vh;padding:.42in;page-break-after:always;display:flex;flex-direction:column;background:#fff}
+  .slip-page:last-child{page-break-after:auto}.slip-brand{display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid var(--accent);padding-bottom:14px}.slip-brand-main{display:flex;align-items:center;gap:14px}.slip-logo{max-width:92px;max-height:70px;object-fit:contain}.slip-brand h1{font:700 27px Georgia,serif;margin:0}.slip-brand p,.slip-muted{margin:4px 0 0;color:#607080}.slip-header{font-size:18px;font-weight:800;color:var(--accent);margin:20px 0 8px}.slip-order{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0;padding:14px;background:#f3f6f8;border-radius:10px}.slip-order h2{margin:0 0 5px;font:700 21px Georgia,serif}.slip-order p{margin:3px 0}.slip-message{padding:12px 14px;border-left:4px solid var(--accent);background:#fff7f1;margin:4px 0 16px}.slip-table{width:100%;border-collapse:collapse}.slip-table th{text-align:left;text-transform:uppercase;font-size:10px;letter-spacing:.06em;color:#607080;border-bottom:2px solid #d9e0e6;padding:8px 6px}.slip-table td{padding:9px 6px;border-bottom:1px solid #e2e7eb;vertical-align:middle}.slip-table .price{text-align:right;font-weight:800}.slip-thumb{width:42px;height:42px;object-fit:cover;border-radius:5px}.slip-card-detail{font-size:11px;color:#607080;margin-top:2px}.slip-totals{margin:15px 0 10px auto;width:min(290px,100%)}.slip-total-line{display:flex;justify-content:space-between;padding:4px 0}.slip-total-line.grand{font-size:19px;font-weight:900;border-top:2px solid var(--accent);padding-top:9px;margin-top:5px}.slip-policy{font-size:11px;color:#607080;border-top:1px solid #d9e0e6;padding-top:10px;margin-top:12px}.slip-links{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center;margin-top:15px;padding:12px;border-radius:10px;background:#f3f6f8}.slip-links img{width:92px;height:92px}.slip-footer{margin-top:auto;text-align:center;color:#607080;font-size:11px;padding-top:16px}.shipping-label-page{justify-content:center;align-items:center}.shipping-label{width:100%;border:2px solid #172333;border-radius:12px;padding:.35in}.shipping-label h1{font-size:17px;text-transform:uppercase}.shipping-label address{font-size:22px;line-height:1.45;font-style:normal;margin-top:25px}.slip-note{font-style:italic;margin-top:10px;color:#465767}
+  @media print{.slip-page{break-after:page}.slip-page:last-child{break-after:auto}}
+`;
+
+function packingQrValue(design) {
+  if (design.qrType === "none") return "";
+  return ({ social: design.socialLink, payment: design.paymentLink, feedback: design.feedbackLink, upcoming: design.upcomingLink, custom: design.qrUrl })[design.qrType] || design.qrUrl || "";
+}
+
+async function buildPackingSlip(buyer, design = ensurePackingSettings()) {
+  const sale = activeSale();
   const cards = cardsForBuyer(buyer);
   const order = orderFor(buyer);
   const profile = buyerProfile(buyer);
-  const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price), 0);
-  const total = subtotal + shippingAmount(order) - Number(order.discount || 0);
-  const html = `<h1>${escapeHtml(activeSale().name)} — Packing slip</h1><h2>${escapeHtml(buyer)}</h2><p>${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p><table><thead><tr><th>Ref</th><th>Card</th><th>Price</th></tr></thead><tbody>${cards.map((card) => `<tr><td>${escapeHtml(card.ref)}</td><td>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)}</td><td>${money(card.claimPrice ?? card.price)}</td></tr>`).join("")}</tbody></table><p class="total">${escapeHtml(order.shippingMethod)} · Total ${money(total)}</p>`;
-  await window.cardSale.printPackingSlip({ title: `${buyer} packing slip`, html });
+  order.orderNumber ||= `${String(sale.name || "SALE").replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase()}-${String(buyers().indexOf(buyer) + 1).padStart(3, "0")}`;
+  const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
+  const shipping = shippingAmount(order);
+  const discount = Number(order.discount || 0);
+  const total = subtotal + shipping - discount;
+  const logoData = design.logoPath ? await window.cardSale.packingFileDataUrl(design.logoPath) : "";
+  const qrValue = packingQrValue(design);
+  const qrData = qrValue ? await window.cardSale.packingQrDataUrl(qrValue, design.accent) : "";
+  const thumbData = design.showThumbnails ? await Promise.all(cards.map((card) => card.imagePath ? window.cardSale.packingFileDataUrl(card.imagePath) : Promise.resolve(""))) : [];
+  const brand = `<section class="slip-brand"><div class="slip-brand-main">${logoData ? `<img class="slip-logo" src="${logoData}" alt="" />` : ""}<div><h1>${escapeHtml(design.brandName || sale.name)}</h1><p>${escapeHtml(design.contact || "")}</p></div></div><div class="slip-muted">${escapeHtml(sale.name)}</div></section>${design.header ? `<div class="slip-header">${escapeHtml(design.header)}</div>` : ""}`;
+  const buyerBlock = `<section class="slip-order"><div><h2>${escapeHtml(buyer)}</h2>${design.showAddress ? `<p>${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p>` : ""}</div><div>${design.showOrderNumber ? `<p><strong>Order:</strong> ${escapeHtml(order.orderNumber)}</p>` : ""}${design.showPayment ? `<p><strong>Payment:</strong> ${escapeHtml(order.paymentMethod || "Not recorded")}</p>` : ""}${design.showShipping ? `<p><strong>Shipping:</strong> ${escapeHtml(order.shippingMethod || "")}</p>` : ""}<p><strong>Cards:</strong> ${cards.length}</p></div></section>`;
+  const message = design.thanks || order.packingSlipNote ? `<section class="slip-message">${escapeHtml(design.thanks || "")}${order.packingSlipNote ? `<div class="slip-note">${escapeHtml(order.packingSlipNote)}</div>` : ""}</section>` : "";
+  const items = `<table class="slip-table"><thead><tr>${design.showThumbnails ? "<th></th>" : ""}<th>Ref</th><th>Card</th>${design.showPrices ? "<th class=\"price\">Price</th>" : ""}</tr></thead><tbody>${cards.map((card, index) => `<tr>${design.showThumbnails ? `<td>${thumbData[index] ? `<img class="slip-thumb" src="${thumbData[index]}" alt="" />` : ""}</td>` : ""}<td><strong>${escapeHtml(card.ref)}</strong></td><td><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong>${design.showDetails ? `<div class="slip-card-detail">${[card.condition, card.notes && String(card.notes).toLowerCase() !== "none" ? card.notes : ""].filter(Boolean).map(escapeHtml).join(" · ")}</div>` : ""}</td>${design.showPrices ? `<td class="price">${money(card.claimPrice ?? card.price)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
+  const totals = design.showPrices ? `<section class="slip-totals"><div class="slip-total-line"><span>Cards</span><strong>${money(subtotal)}</strong></div><div class="slip-total-line"><span>${escapeHtml(order.shippingMethod || "Shipping")}</span><strong>${money(shipping)}</strong></div>${discount ? `<div class="slip-total-line"><span>Discount</span><strong>−${money(discount)}</strong></div>` : ""}<div class="slip-total-line grand"><span>Total</span><span>${money(total)}</span></div></section>` : "";
+  const policy = design.returnPolicy ? `<section class="slip-policy"><strong>Questions or concerns?</strong><br>${escapeHtml(design.returnPolicy)}</section>` : "";
+  const qr = qrData || design.socialLink ? `<section class="slip-links"><div><strong>Stay connected</strong>${design.socialLink ? `<p>${escapeHtml(design.socialLink)}</p>` : ""}${qrValue ? `<p class="slip-muted">Scan to open ${escapeHtml(design.qrType === "social" ? "our page" : design.qrType)}.</p>` : ""}</div>${qrData ? `<img src="${qrData}" alt="QR code" />` : ""}</section>` : "";
+  const footer = design.footer ? `<footer class="slip-footer">${escapeHtml(design.footer)}</footer>` : "";
+  const sectionHtml = { header: brand, buyer: buyerBlock, message, items, totals, policy, qr, footer };
+  let html = `<article class="slip-page">${design.sectionOrder.map((id) => sectionHtml[id] || "").join("")}</article>`;
+  if (design.includeLabel && profile.address) html += `<article class="slip-page shipping-label-page"><section class="shipping-label"><h1>Ship to</h1><address><strong>${escapeHtml(buyer)}</strong><br>${escapeHtml(profile.address).replace(/\n/g, "<br>")}</address><p>${escapeHtml(order.shippingMethod || "")} · ${cards.length} card${cards.length === 1 ? "" : "s"} · ${escapeHtml(order.orderNumber)}</p></section></article>`;
+  return { html, total, cards: cards.length, orderNumber: order.orderNumber };
+}
+
+function recordPackingPrint(buyer, action, details = {}) {
+  const order = orderFor(buyer);
+  const at = new Date().toISOString();
+  order.packingSlipPrintCount = Number(order.packingSlipPrintCount || 0) + 1;
+  order.packingSlipPrintedAt = at;
+  state.packingPrintHistory.unshift({ id: uid(), at, buyer, saleId: activeSale().id, action, count: order.packingSlipPrintCount, ...details });
+  if (state.packingPrintHistory.length > 250) state.packingPrintHistory.length = 250;
+  recordAudit("packing-slip", `${action === "pdf" ? "Exported" : "Printed"} packing slip for ${buyer}`, { buyer });
+}
+
+async function outputPackingSlips(names, action = "print", design = ensurePackingSettings(), testOnly = false) {
+  if (!names.length) return toast("Choose at least one buyer.");
+  const slips = await Promise.all(names.map((buyer) => buildPackingSlip(buyer, design)));
+  const accent = /^#[0-9a-f]{6}$/i.test(design.accent) ? design.accent : "#d9693d";
+  const twoUpStyles = design.pageSize === "two-up" ? `.slip-page{min-height:5.5in;height:5.5in;padding:.24in;page-break-after:auto;overflow:hidden}.slip-page:nth-child(2n){page-break-after:always}.slip-brand h1{font-size:21px}.slip-order{margin:9px 0;padding:9px}.slip-table td{padding:5px}.slip-links{margin-top:7px;padding:7px}.slip-links img{width:68px;height:68px}` : "";
+  const payload = { title: names.length === 1 ? `${names[0]} packing slip` : `${activeSale().name} packing slips`, html: slips.map((slip) => slip.html).join(""), styles: `${PACKING_PRINT_STYLES.replaceAll("var(--accent)", accent)}${twoUpStyles}`, pageSize: design.pageSize };
+  const result = action === "pdf" ? await window.cardSale.exportPackingPdf(payload) : await window.cardSale.printPackingSlip(payload);
+  if (!result?.success) return result?.canceled ? null : toast("The packing slips were not printed.");
+  if (!testOnly) names.forEach((buyer) => recordPackingPrint(buyer, action, { pageSize: design.pageSize }));
+  saveSoon(); renderPacking();
+  toast(action === "pdf" ? "Combined packing-slip PDF saved." : `${names.length} packing slip${names.length === 1 ? "" : "s"} sent to the printer.`);
+  return result;
+}
+
+async function printPackingSlip(buyer) { return outputPackingSlips([buyer]); }
+
+function readPackingDesignerForm() {
+  const draft = packingDesignerDraft || clone(ensurePackingSettings());
+  const field = (id) => $(id).value.trim();
+  Object.assign(draft, {
+    name: field("#packingTemplateName") || "Packing slip template", pageSize: $("#packingPageSize").value, accent: $("#packingAccent").value,
+    brandName: field("#packingBrandName"), contact: field("#packingContact"), socialLink: field("#packingSocialLink"), qrType: $("#packingQrType").value, qrUrl: field("#packingQrUrl"),
+    paymentLink: field("#packingPaymentLink"), feedbackLink: field("#packingFeedbackLink"), upcomingLink: field("#packingUpcomingLink"), header: field("#packingHeader"), thanks: field("#packingThanks"), returnPolicy: field("#packingReturnPolicy"), footer: field("#packingFooter"),
+    showAddress: $("#packingShowAddress").checked, showOrderNumber: $("#packingShowOrderNumber").checked, showPayment: $("#packingShowPayment").checked, showShipping: $("#packingShowShipping").checked,
+    showPrices: $("#packingShowPrices").checked, showDetails: $("#packingShowDetails").checked, showThumbnails: $("#packingShowThumbnails").checked, includeLabel: $("#packingIncludeLabel").checked
+  });
+  packingDesignerDraft = draft;
+  return draft;
+}
+
+function populatePackingDesigner(design = ensurePackingSettings(), selectedId = "") {
+  packingDesignerDraft = clone(design);
+  $("#packingTemplateSelect").innerHTML = `<option value="">Current active design</option>${state.packingTemplates.map((template) => `<option value="${template.id}" ${template.id === selectedId ? "selected" : ""}>${escapeHtml(template.name)}</option>`).join("")}`;
+  const values = { packingTemplateName: design.name, packingPageSize: design.pageSize, packingAccent: design.accent, packingBrandName: design.brandName, packingContact: design.contact, packingSocialLink: design.socialLink, packingQrType: design.qrType, packingQrUrl: design.qrUrl, packingPaymentLink: design.paymentLink, packingFeedbackLink: design.feedbackLink, packingUpcomingLink: design.upcomingLink, packingHeader: design.header, packingThanks: design.thanks, packingReturnPolicy: design.returnPolicy, packingFooter: design.footer };
+  Object.entries(values).forEach(([id, value]) => { $(`#${id}`).value = value || ""; });
+  const checks = { packingShowAddress: design.showAddress, packingShowOrderNumber: design.showOrderNumber, packingShowPayment: design.showPayment, packingShowShipping: design.showShipping, packingShowPrices: design.showPrices, packingShowDetails: design.showDetails, packingShowThumbnails: design.showThumbnails, packingIncludeLabel: design.includeLabel };
+  Object.entries(checks).forEach(([id, value]) => { $(`#${id}`).checked = Boolean(value); });
+  $("#packingLogoStatus").textContent = design.logoPath || "No logo selected";
+  $("#deletePackingTemplateBtn").disabled = !selectedId;
+  renderPackingSectionOrder();
+  updatePackingPreview();
+}
+
+function renderPackingSectionOrder() {
+  const design = packingDesignerDraft || ensurePackingSettings();
+  $("#packingSectionOrder").innerHTML = design.sectionOrder.map((id) => `<div class="section-order-item" draggable="true" data-packing-section="${id}"><span>☰ ${escapeHtml(PACKING_SECTIONS.find(([key]) => key === id)?.[1] || id)}</span><small>Drag to reorder</small></div>`).join("");
+}
+
+async function updatePackingPreview() {
+  const buyer = $("#packingBuyer").value || buyers()[0];
+  if (!buyer || !$("#packingSlipPreview")) return;
+  const design = readPackingDesignerForm();
+  const previewAccent = /^#[0-9a-f]{6}$/i.test(design.accent) ? design.accent : "#d9693d";
+  packingPreviewSheet?.replaceSync(`#packingSlipPreview{--accent:${previewAccent}}`);
+  $("#packingPreviewBuyer").textContent = buyer;
+  const slip = await buildPackingSlip(buyer, design);
+  $("#packingSlipPreview").innerHTML = slip.html;
+}
+
+function openPackingDesigner() {
+  ensurePackingSettings();
+  populatePackingDesigner(ensurePackingSettings());
+  $("#packingDesignerDialog").showModal();
+}
+
+function packingFilteredBuyers() {
+  const status = $("#packingBulkStatus")?.value || "all";
+  const shipping = $("#packingBulkShipping")?.value || "all";
+  const printed = $("#packingBulkPrinted")?.value || "all";
+  const requireAddress = Boolean($("#packingBulkRequireAddress")?.checked);
+  const sort = $("#packingBulkSort")?.value || "buyer";
+  const list = buyers().filter((buyer) => {
+    const order = orderFor(buyer); const cards = cardsForBuyer(buyer); const fullyPacked = cards.length && cards.every((card) => card.packed);
+    if (status === "paid" && order.status !== "paid") return false;
+    if (status === "unpaid" && ["paid", "packed", "shipped"].includes(order.status)) return false;
+    if (status === "packed" && !fullyPacked) return false;
+    if (status === "unpacked" && fullyPacked) return false;
+    if (shipping !== "all" && order.shippingMethod !== shipping) return false;
+    if (printed === "unprinted" && order.packingSlipPrintCount) return false;
+    if (printed === "reprints" && !order.packingSlipPrintCount) return false;
+    return !requireAddress || Boolean(buyerProfile(buyer).address);
+  });
+  return list.sort((a, b) => {
+    if (sort === "shipping") return String(orderFor(a).shippingMethod).localeCompare(String(orderFor(b).shippingMethod)) || a.localeCompare(b);
+    if (sort === "packing") return cardsForBuyer(b).filter((card) => card.packed).length - cardsForBuyer(a).filter((card) => card.packed).length;
+    if (sort === "claim") return String(cardsForBuyer(a).map((card) => card.claimedAt).filter(Boolean).sort()[0] || "").localeCompare(String(cardsForBuyer(b).map((card) => card.claimedAt).filter(Boolean).sort()[0] || ""));
+    return a.localeCompare(b);
+  });
+}
+
+function renderPackingBulk() {
+  const names = packingFilteredBuyers();
+  packingBulkSelection = new Set([...packingBulkSelection].filter((name) => names.includes(name)));
+  $("#packingBulkCount").textContent = `${packingBulkSelection.size} selected · ${names.length} shown`;
+  $("#packingBulkSelectAll").checked = names.length > 0 && names.every((name) => packingBulkSelection.has(name));
+  $("#packingBulkBuyers").innerHTML = names.length ? names.map((buyer) => { const order = orderFor(buyer); const cards = cardsForBuyer(buyer); const packed = cards.filter((card) => card.packed).length; return `<label class="packing-buyer-row"><input type="checkbox" data-packing-buyer="${escapeHtml(buyer)}" ${packingBulkSelection.has(buyer) ? "checked" : ""} /><span><strong>${escapeHtml(buyer)}</strong><small>${cards.length} cards · ${packed}/${cards.length} packed${buyerProfile(buyer).address ? "" : " · Missing address"}</small></span><span>${escapeHtml(order.shippingMethod)}</span><span>${order.packingSlipPrintCount ? `Printed ${order.packingSlipPrintCount}×` : "New"}</span></label>`; }).join("") : `<div class="empty-state"><p>No orders match these filters.</p></div>`;
+}
+
+function renderPackingHistory() {
+  const saleId = activeSale().id;
+  const history = (state.packingPrintHistory || []).filter((item) => item.saleId === saleId);
+  $("#packingPrintHistory").innerHTML = history.length ? history.map((item) => `<article><strong>${escapeHtml(item.buyer)}</strong><span>${item.action === "pdf" ? "PDF" : item.count > 1 ? "Reprint" : "Printed"}</span><small>${new Date(item.at).toLocaleString()} · ${escapeHtml(item.pageSize || "letter")}</small><small>Print #${item.count}</small></article>`).join("") : `<div class="empty-state"><h3>No slips printed yet</h3><p>Successful prints and PDF exports will be recorded here.</p></div>`;
 }
 
 async function checkForUpdates(manual = false) {
@@ -1604,7 +1800,12 @@ function bindEvents() {
     if (event.target.dataset.openBuyerProfile) { state.profileBuyer = event.target.dataset.openBuyerProfile; showView("buyers"); renderBuyerProfiles(); }
   });
   $("#packingBuyer").addEventListener("change", renderPacking);
-  $("#packingContent").addEventListener("input", (event) => { if (event.target.id === "trackingNumber") { const buyer = $("#packingBuyer").value; orderFor(buyer).trackingNumber = event.target.value.trim(); const button = $("#copyTrackingMessageBtn"); const track = $("#openTrackingBtn"); if (button) button.disabled = !orderFor(buyer).trackingNumber; if (track) { track.disabled = !orderFor(buyer).trackingNumber; track.dataset.openTracking = trackingUrl(orderFor(buyer).trackingNumber); } saveSoon(); } });
+  $("#packingContent").addEventListener("input", (event) => {
+    const buyer = $("#packingBuyer").value;
+    if (event.target.id === "trackingNumber") { orderFor(buyer).trackingNumber = event.target.value.trim(); const button = $("#copyTrackingMessageBtn"); const track = $("#openTrackingBtn"); if (button) button.disabled = !orderFor(buyer).trackingNumber; if (track) { track.disabled = !orderFor(buyer).trackingNumber; track.dataset.openTracking = trackingUrl(orderFor(buyer).trackingNumber); } saveSoon(); }
+    if (event.target.id === "packingInternalNotes") { orderFor(buyer).packingNotes = event.target.value; saveSoon(); }
+    if (event.target.id === "packingBuyerNote") { orderFor(buyer).packingSlipNote = event.target.value; saveSoon(); }
+  });
   $("#packingContent").addEventListener("change", (event) => { const id = event.target.dataset.packCard; if (id) { const card = activeSale().cards.find((item) => item.id === id); card.packed = event.target.checked; saveSoon(); renderPacking(); } });
   $("#packingContent").addEventListener("click", (event) => {
     const buyer = $("#packingBuyer").value;
@@ -1614,6 +1815,36 @@ function bindEvents() {
     if (event.target.id === "printPackingSlipBtn") printPackingSlip(buyer);
     if (event.target.dataset.openTracking) window.cardSale.openTracking(event.target.dataset.openTracking);
   });
+  $("#packingCustomizeBtn").addEventListener("click", openPackingDesigner);
+  $("#packingBulkBtn").addEventListener("click", () => { packingBulkSelection = new Set(buyers()); renderPackingBulk(); $("#packingBulkDialog").showModal(); });
+  $("#packingPrintHistoryBtn").addEventListener("click", () => { renderPackingHistory(); $("#packingHistoryDialog").showModal(); });
+  $("#packingJumpSearch").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    const query = event.target.value.trim().toLowerCase(); if (!query) return;
+    const match = buyers().map((buyer) => ({ buyer, card: cardsForBuyer(buyer).find((card) => [card.ref, card.number, card.name, card.year, card.set].some((value) => String(value || "").toLowerCase().includes(query))) })).find((item) => item.card || item.buyer.toLowerCase().includes(query));
+    if (!match) return toast("No packing order matches that search.");
+    $("#packingBuyer").value = match.buyer; renderPacking();
+    if (match.card) { const row = $(`[data-pack-row="${match.card.id}"]`); row?.scrollIntoView({ block: "center", behavior: state.preferences?.reducedMotion ? "auto" : "smooth" }); row?.classList.add("focus-flash"); }
+  });
+
+  $("#packingDesignerDialog").addEventListener("input", (event) => { if (event.target.matches("input, textarea, select")) updatePackingPreview(); });
+  $("#packingTemplateSelect").addEventListener("change", (event) => { const template = state.packingTemplates.find((item) => item.id === event.target.value); populatePackingDesigner(template || ensurePackingSettings(), event.target.value); });
+  $("#choosePackingLogoBtn").addEventListener("click", async () => { const logoPath = await window.cardSale.choosePackingLogo(); if (!logoPath) return; packingDesignerDraft.logoPath = logoPath; $("#packingLogoStatus").textContent = logoPath; updatePackingPreview(); });
+  $("#clearPackingLogoBtn").addEventListener("click", () => { packingDesignerDraft.logoPath = ""; $("#packingLogoStatus").textContent = "No logo selected"; updatePackingPreview(); });
+  $("#packingSectionOrder").addEventListener("dragstart", (event) => { const item = event.target.closest("[data-packing-section]"); if (!item) return; item.classList.add("dragging"); event.dataTransfer.setData("text/plain", item.dataset.packingSection); });
+  $("#packingSectionOrder").addEventListener("dragend", (event) => event.target.closest("[data-packing-section]")?.classList.remove("dragging"));
+  $("#packingSectionOrder").addEventListener("dragover", (event) => event.preventDefault());
+  $("#packingSectionOrder").addEventListener("drop", (event) => { event.preventDefault(); const source = event.dataTransfer.getData("text/plain"); const target = event.target.closest("[data-packing-section]")?.dataset.packingSection; if (!source || !target || source === target) return; const order = packingDesignerDraft.sectionOrder; order.splice(order.indexOf(source), 1); order.splice(order.indexOf(target), 0, source); renderPackingSectionOrder(); updatePackingPreview(); });
+  $("#savePackingTemplateBtn").addEventListener("click", () => { const design = readPackingDesignerForm(); const selectedId = $("#packingTemplateSelect").value; const existing = state.packingTemplates.find((item) => item.id === selectedId); if (existing) Object.assign(existing, clone(design)); else state.packingTemplates.push({ id: uid(), ...clone(design) }); const id = existing?.id || state.packingTemplates.at(-1).id; saveSoon(); populatePackingDesigner(state.packingTemplates.find((item) => item.id === id), id); toast("Packing-slip template saved."); });
+  $("#applyPackingTemplateBtn").addEventListener("click", () => { state.preferences.packingDesign = clone(readPackingDesignerForm()); saveSoon(); $("#packingDesignerDialog").close(); toast("Packing-slip design is active."); });
+  $("#deletePackingTemplateBtn").addEventListener("click", () => { const id = $("#packingTemplateSelect").value; const index = state.packingTemplates.findIndex((item) => item.id === id); if (index < 0) return; state.packingTemplates.splice(index, 1); saveSoon(); populatePackingDesigner(ensurePackingSettings()); toast("Packing-slip template deleted."); });
+  $("#printPackingTestBtn").addEventListener("click", () => { const buyer = $("#packingBuyer").value || buyers()[0]; if (buyer) outputPackingSlips([buyer], "print", readPackingDesignerForm(), true); });
+
+  ["#packingBulkStatus", "#packingBulkShipping", "#packingBulkSort", "#packingBulkPrinted", "#packingBulkRequireAddress"].forEach((selector) => $(selector).addEventListener("change", renderPackingBulk));
+  $("#packingBulkSelectAll").addEventListener("change", (event) => { packingFilteredBuyers().forEach((buyer) => event.target.checked ? packingBulkSelection.add(buyer) : packingBulkSelection.delete(buyer)); renderPackingBulk(); });
+  $("#packingBulkBuyers").addEventListener("change", (event) => { const buyer = event.target.dataset.packingBuyer; if (!buyer) return; event.target.checked ? packingBulkSelection.add(buyer) : packingBulkSelection.delete(buyer); renderPackingBulk(); });
+  $("#printPackingBulkBtn").addEventListener("click", async () => { const names = packingFilteredBuyers().filter((buyer) => packingBulkSelection.has(buyer)); if (await outputPackingSlips(names)) $("#packingBulkDialog").close(); });
+  $("#exportPackingPdfBtn").addEventListener("click", async () => { const names = packingFilteredBuyers().filter((buyer) => packingBulkSelection.has(buyer)); if (await outputPackingSlips(names, "pdf")) $("#packingBulkDialog").close(); });
   $("#liveSaleContent").addEventListener("click", (event) => {
     if (event.target.dataset.liveCopy) copyAndHideCard(event.target.dataset.liveCopy).then(() => { liveIndex = Math.min(liveIndex, Math.max(0, liveCards().length - 1)); renderLiveSale(); });
     if (event.target.dataset.liveImageCard) chooseManualImage(event.target.dataset.liveImageCard);
@@ -1661,6 +1892,8 @@ function bindEvents() {
   $("#fontSmallerBtn").addEventListener("click", () => { state.preferences ||= {}; state.preferences.fontScale = Math.max(.85, Number(state.preferences.fontScale || 1) - .05); applyDisplayPreferences(); saveSoon(); });
   $("#fontLargerBtn").addEventListener("click", () => { state.preferences ||= {}; state.preferences.fontScale = Math.min(1.25, Number(state.preferences.fontScale || 1) + .05); applyDisplayPreferences(); saveSoon(); });
   $("#densityBtn").addEventListener("click", () => { state.preferences ||= {}; state.preferences.compact = !state.preferences.compact; applyDisplayPreferences(); saveSoon(); });
+  $("#themeBtn").addEventListener("click", () => { const themes = ["system", "light", "dark", "contrast"]; state.preferences.theme = themes[(themes.indexOf(state.preferences.theme || "system") + 1) % themes.length]; applyDisplayPreferences(); saveSoon(); });
+  $("#motionBtn").addEventListener("click", () => { state.preferences.reducedMotion = !state.preferences.reducedMotion; applyDisplayPreferences(); saveSoon(); });
   $("#downloadUpdateBtn").addEventListener("click", async () => {
     if (!availableUpdate || !window.confirm(`Install Card Sale Manager ${availableUpdate.version} now? The app will close automatically when the installer starts.`)) return;
     const button = $("#downloadUpdateBtn");
@@ -1723,7 +1956,9 @@ async function init() {
     lookupSettings();
     state.buyerProfiles ||= {};
     state.manualMatchMemory ||= {};
-    state.preferences ||= { fontScale: 1, compact: false };
+    state.preferences ||= { fontScale: 1, compact: false, theme: "system", reducedMotion: false };
+    state.preferences.theme ||= "system";
+    state.preferences.reducedMotion ??= false;
     state.preferences.claimWords ||= [...DEFAULT_CLAIM_WORDS];
     state.salePresets ||= [];
     state.sales.forEach((sale) => {
@@ -1749,7 +1984,7 @@ async function init() {
         if (imageKey && usedImages.has(imageKey)) card.imagePath = "";
         else if (imageKey) usedImages.add(imageKey);
       });
-      Object.values(sale.orders).forEach((order) => { order.shippingMethod ||= Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT"; });
+      Object.values(sale.orders).forEach((order) => { order.shippingMethod ||= Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT"; order.packingNotes ||= ""; order.packingSlipNote ||= ""; order.packingSlipPrintCount ||= 0; });
     });
     Object.values(state.buyerProfiles).forEach((profile) => profile.tags ||= []);
     undoStack = state.sales.flatMap((sale) => [
@@ -1757,7 +1992,8 @@ async function init() {
       ...sale.images.filter((image) => image.hiddenAfterDrag).map((image) => ({ saleId: sale.id, imageId: image.id, at: image.hiddenAt || "" }))
     ]).sort((a, b) => a.at.localeCompare(b.at));
   }
-  claimWords(); presets(); bindEvents(); resetListingView(); applyDisplayPreferences(); render();
+  if (![...$("#packingPageSize").options].some((option) => option.value === "two-up")) $("#packingPageSize").add(new Option("Two half-slips per letter page", "two-up"));
+  claimWords(); presets(); ensurePackingSettings(); bindEvents(); resetListingView(); applyDisplayPreferences(); render();
   window.cardSale.onPrepareClose(async () => {
     try { await saveNow(); await window.cardSale.backup("close"); } catch {}
     await window.cardSale.closeReady();

@@ -51,6 +51,18 @@ CARD SALE MANAGER — GETTING STARTED
 19. Sale Presets saves reusable shipping prices, listing formats, and claim words.
     Use Edit beside any listing for the quick-edit drawer, or Move to enter an
     exact card position without dragging.
+20. In Packing, choose Customize slips to open the Packing Slip Studio. Add a
+    logo, brand name, colors, messages, links, and a QR destination; choose the
+    fields to show; drag sections into a preferred order; preview the result;
+    and save reusable designs. QR codes are generated locally.
+21. Choose Print all slips to filter orders by payment, packing, shipping, or
+    prior print status. Select any buyers, then print them in one job or save a
+    combined PDF. Successful output is recorded in Print history, and reprints
+    are clearly labeled. Available formats include letter, half-sheet, two-up,
+    4 x 6 label, and compact inserts.
+22. The Theme button cycles between System, Light, Dark, and High Contrast. The Motion button
+    reduces animation. These preferences are remembered, but printed packing
+    slips always use a clean white background.
 
 Data is saved automatically on this computer and again when the app closes.
 Verified recovery backups are also created before updates and retained locally.
