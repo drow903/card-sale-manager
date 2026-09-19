@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("cardSale", {
   chooseLookupFolder: () => ipcRenderer.invoke("dialog:lookup-folder"),
   chooseLookupFolders: (title) => ipcRenderer.invoke("dialog:lookup-folders", title),
   scanImageFolder: (baseFolder) => ipcRenderer.invoke("images:scan-folder", baseFolder),
+  onImageScanProgress: (callback) => { const listener = (_event, details) => callback(details); ipcRenderer.on("images:scan-progress", listener); return () => ipcRenderer.removeListener("images:scan-progress", listener); },
   startDrag: (filePath) => ipcRenderer.invoke("file:start-drag", filePath),
   downloadTemplate: () => ipcRenderer.invoke("app:download-template"),
   openDataFolder: () => ipcRenderer.invoke("app:open-data-folder"),
@@ -27,6 +28,8 @@ contextBridge.exposeInMainWorld("cardSale", {
   fetchFacebookPost: (url) => ipcRenderer.invoke("facebook:fetch-public", url),
   printPackingSlip: (payload) => ipcRenderer.invoke("print:packing-slip", payload),
   checkForUpdate: () => ipcRenderer.invoke("app:check-update"),
-  openUpdate: (url) => ipcRenderer.invoke("app:open-update", url),
+  downloadAndInstallUpdate: (update) => ipcRenderer.invoke("app:download-install-update", update),
+  onUpdateProgress: (callback) => { const listener = (_event, details) => callback(details); ipcRenderer.on("app:update-progress", listener); return () => ipcRenderer.removeListener("app:update-progress", listener); },
+  copyText: (value) => ipcRenderer.invoke("clipboard:write", value),
   version: () => ipcRenderer.invoke("app:version")
 });

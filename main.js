@@ -1,8 +1,9 @@
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
 app.disableHardwareAcceleration();
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
+const { spawn } = require("child_process");
 
 const UPDATE_REPOSITORY = "drow903/card-sale-manager";
 
@@ -96,12 +97,11 @@ async function checkForUpdate() {
     const releaseUrl = `https://github.com/${UPDATE_REPOSITORY}/releases/tag/${tag}`;
     if (release.html_url !== releaseUrl) return { status: "error", message: "GitHub returned an unexpected release address." };
     const assets = Array.isArray(release.assets) ? release.assets : [];
-    const preferred = assets.find((asset) => /Card-Sale-Manager.*Setup\.exe$/i.test(asset.name || ""))
-      || assets.find((asset) => /Card-Sale-Manager.*Portable\.exe$/i.test(asset.name || ""))
-      || assets.find((asset) => /Card-Sale-Manager.*\.zip$/i.test(asset.name || ""));
-    const downloadUrl = preferred?.browser_download_url || releaseUrl;
-    if (!downloadUrl.startsWith(`https://github.com/${UPDATE_REPOSITORY}/`)) return { status: "error", message: "The update download address was not recognized." };
     if (!isNewerVersion(tag, app.getVersion())) return { status: "current", currentVersion: app.getVersion() };
+    const preferred = assets.find((asset) => /Card-Sale-Manager.*Setup\.exe$/i.test(asset.name || ""));
+    if (!preferred) return { status: "unavailable", currentVersion: app.getVersion(), version: tag.replace(/^v/, ""), releaseUrl, message: "This release does not include an automatic Windows installer." };
+    const downloadUrl = preferred.browser_download_url;
+    if (!downloadUrl.startsWith(`https://github.com/${UPDATE_REPOSITORY}/`)) return { status: "error", message: "The update download address was not recognized." };
     return {
       status: "available",
       currentVersion: app.getVersion(),
@@ -109,11 +109,47 @@ async function checkForUpdate() {
       notes: String(release.body || "").slice(0, 12000),
       releaseUrl,
       downloadUrl,
-      assetName: preferred?.name || "GitHub release"
+      assetName: preferred.name
     };
   } catch (error) {
     return { status: "error", currentVersion: app.getVersion(), message: error.message || "Could not check for updates." };
   }
+}
+
+function allowedUpdateUrl(value) {
+  let parsed;
+  try { parsed = new URL(value); } catch { return false; }
+  if (parsed.protocol !== "https:") return false;
+  const host = parsed.hostname.toLowerCase();
+  if (host === "github.com") return parsed.pathname.startsWith(`/${UPDATE_REPOSITORY}/releases/download/`);
+  return host === "objects.githubusercontent.com" || host === "release-assets.githubusercontent.com";
+}
+
+function downloadUpdate(url, destination, progress, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (!allowedUpdateUrl(url)) return reject(new Error("The update download address was not recognized."));
+    const request = https.get(url, { headers: { "User-Agent": `Card-Sale-Manager/${app.getVersion()}` }, timeout: 30000 }, (response) => {
+      if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location && redirects < 6) {
+        response.resume();
+        return resolve(downloadUpdate(new URL(response.headers.location, url).toString(), destination, progress, redirects + 1));
+      }
+      if (response.statusCode !== 200) { response.resume(); return reject(new Error(`The update download returned status ${response.statusCode}.`)); }
+      const total = Number(response.headers["content-length"] || 0);
+      if (total > 600 * 1024 * 1024) { response.resume(); return reject(new Error("The update installer is unexpectedly large.")); }
+      let received = 0;
+      const output = fs.createWriteStream(destination, { flags: "w" });
+      response.on("data", (chunk) => {
+        received += chunk.length;
+        if (received > 600 * 1024 * 1024) request.destroy(new Error("The update installer is unexpectedly large."));
+        progress({ received, total, percent: total ? Math.min(100, Math.round((received / total) * 100)) : null });
+      });
+      response.pipe(output);
+      output.on("finish", () => output.close(() => resolve(destination)));
+      output.on("error", reject);
+    });
+    request.on("timeout", () => request.destroy(new Error("The update download timed out.")));
+    request.on("error", reject);
+  });
 }
 
 function createWindow() {
@@ -237,6 +273,31 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("app:check-update", checkForUpdate);
+  ipcMain.handle("app:download-install-update", async (event, update) => {
+    const url = String(update?.downloadUrl || "");
+    const version = String(update?.version || "");
+    const assetName = path.basename(String(update?.assetName || ""));
+    if (!versionParts(version) || !/^Card-Sale-Manager.*Setup\.exe$/i.test(assetName) || !allowedUpdateUrl(url)) return { ok: false, message: "The update information was not valid." };
+    const updateFolder = path.join(app.getPath("temp"), "Card Sale Manager Updates", version);
+    const destination = path.join(updateFolder, assetName);
+    try {
+      await fs.promises.mkdir(updateFolder, { recursive: true });
+      await downloadUpdate(url, destination, (details) => event.sender.send("app:update-progress", details));
+      const handle = await fs.promises.open(destination, "r");
+      const signature = Buffer.alloc(2);
+      await handle.read(signature, 0, 2, 0);
+      await handle.close();
+      if (signature.toString("ascii") !== "MZ") throw new Error("The downloaded file was not a valid Windows installer.");
+      event.sender.send("app:update-progress", { percent: 100, installing: true });
+      const installer = spawn(destination, ["/S", "--updated"], { detached: true, stdio: "ignore" });
+      installer.unref();
+      setTimeout(() => app.quit(), 500);
+      return { ok: true };
+    } catch (error) {
+      try { await fs.promises.unlink(destination); } catch {}
+      return { ok: false, message: error.message || "The update could not be installed." };
+    }
+  });
   ipcMain.handle("app:open-update", async (_event, target) => {
     const value = String(target || "");
     const allowedPrefix = `https://github.com/${UPDATE_REPOSITORY}/`;
@@ -245,6 +306,7 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle("app:version", () => app.getVersion());
+  ipcMain.handle("clipboard:write", (_event, value) => { clipboard.writeText(String(value || "")); return true; });
   ipcMain.handle("app:download-template", async () => {
     const result = await dialog.showSaveDialog(mainWindow, { title: "Save the card import template", defaultPath: "Card-Sale-Manager-Import-Template.xlsx", filters: [{ name: "Excel workbook", extensions: ["xlsx"] }] });
     if (result.canceled || !result.filePath) return false;
@@ -295,14 +357,16 @@ app.whenReady().then(() => {
     return new Promise((resolve) => printWindow.webContents.print({ silent: false, printBackground: true }, (success, reason) => { printWindow.close(); resolve({ success, reason }); }));
   });
 
-  ipcMain.handle("images:scan-folder", async (_event, input) => {
+  ipcMain.handle("images:scan-folder", async (event, input) => {
     const folders = (typeof input === "string" ? [input] : input?.folders || []).filter(Boolean);
     const excludedFolders = (typeof input === "string" ? [] : input?.excludedFolders || [])
       .map((folder) => path.resolve(folder).toLowerCase());
+    const excludedPaths = new Set((typeof input === "string" ? [] : input?.excludedPaths || []).map((file) => path.resolve(file).toLowerCase()));
     if (!folders.length) return [];
     const supported = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"]);
     const found = [];
     const seen = new Set();
+    let foldersScanned = 0;
     const isExcluded = (folder) => {
       const resolved = path.resolve(folder).toLowerCase();
       return excludedFolders.some((excluded) => resolved === excluded || resolved.startsWith(`${excluded}${path.sep}`));
@@ -310,12 +374,14 @@ app.whenReady().then(() => {
     async function walk(folder, root) {
       if (isExcluded(folder)) return;
       const entries = await fs.promises.readdir(folder, { withFileTypes: true });
+      foldersScanned += 1;
+      event.sender.send("images:scan-progress", { foldersScanned, found: found.length });
       for (const entry of entries) {
         const fullPath = path.join(folder, entry.name);
         if (entry.isDirectory()) await walk(fullPath, root);
         else if (entry.isFile() && supported.has(path.extname(entry.name).toLowerCase())) {
           const key = fullPath.toLowerCase();
-          if (seen.has(key)) continue;
+          if (seen.has(key) || excludedPaths.has(path.resolve(fullPath).toLowerCase())) continue;
           seen.add(key);
           found.push({
             path: fullPath,
@@ -329,6 +395,7 @@ app.whenReady().then(() => {
     for (const folder of folders) {
       if (fs.existsSync(folder) && !isExcluded(folder)) await walk(folder, folder);
     }
+    event.sender.send("images:scan-progress", { foldersScanned, found: found.length, complete: true });
     return found;
   });
 

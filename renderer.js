@@ -526,6 +526,8 @@ function renderLiveSale() {
 }
 
 function showView(view) {
+  const refresh = { sale: () => { renderListings(); renderImages(); }, claims: renderClaims, orders: renderOrders, packing: renderPacking, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck };
+  refresh[view]?.();
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `${view}View`));
   const labels = { sale: "SALE WORKSPACE", claims: "CLAIMS DESK", orders: "BUYER ORDERS", packing: "PACKING", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK" };
@@ -685,7 +687,15 @@ function cardLastName(name) {
 }
 
 function imageDateCodes(image) {
-  return String(image?.stem || "").match(/\d{8}/g) || [];
+  return (String(image?.stem || "").match(/(?<!\d)\d{7,8}(?!\d)/g) || [])
+    .map(normalizePurchaseDate)
+    .filter((value) => /^\d{8}$/.test(value));
+}
+
+function imageSequenceNumber(image) {
+  const stem = String(image?.stem || "").trim();
+  const match = stem.match(/(?:^|[^\d])(\d{7,8})(?:[^\d]+(\d+))\s*$/);
+  return match?.[2] ? Number(match[2]) : null;
 }
 
 function scoreImage(card, image) {
@@ -700,7 +710,9 @@ function scoreImage(card, image) {
   const lastName = cardLastName(card.name);
   const purchaseDate = normalizePurchaseDate(card.purchaseDate);
   const dateCodes = imageDateCodes(image);
-  const isDuplicate = duplicateInfo(card).total > 1;
+  const duplicate = duplicateInfo(card);
+  const isDuplicate = duplicate.total > 1;
+  const imageSequence = imageSequenceNumber(image);
   let score = 0;
   const reasons = [];
 
@@ -716,6 +728,10 @@ function scoreImage(card, image) {
   if (/^\d{8}$/.test(purchaseDate) && dateCodes.includes(purchaseDate)) { score += isDuplicate ? 90 : 24; reasons.push("purchase date code"); }
   else if (isDuplicate && /^\d{8}$/.test(purchaseDate) && dateCodes.length) { score -= 80; reasons.push("different date code"); }
   else if (isDuplicate && /^\d{8}$/.test(purchaseDate)) { score -= 18; reasons.push("missing date code"); }
+  if (isDuplicate && dateCodes.includes(purchaseDate) && imageSequence != null) {
+    if (imageSequence === duplicate.index + 1) { score += 75; reasons.push(`duplicate order ${imageSequence}`); }
+    else { score -= 70; reasons.push(`different duplicate order ${imageSequence}`); }
+  }
   return { image, score, reasons };
 }
 
@@ -752,19 +768,54 @@ async function autoMatchImages() {
   settings.primaryFolder = folder;
   saveSoon();
   $("#lookupFolderLabel").textContent = folder;
-  toast("Scanning image folders…");
-  const images = await window.cardSale.scanImageFolder({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders });
-  if (!images.length) return toast("No supported images were found in that folder.");
-
   const cards = sale.cards.filter((card) => !card.imagePath);
-  if (!cards.length) return toast("Every card already has an image.");
+  if (!cards.length) return toast("Every card already has a confirmed image.");
+  const confirmedPaths = new Set(sale.cards.filter((card) => card.imagePath).map((card) => card.imagePath.toLowerCase()));
+  const button = $("#autoMatchBtn");
+  const progress = $("#lookupProgress");
+  const progressBar = $("#lookupProgressBar");
+  const progressText = $("#lookupProgressText");
+  button.disabled = true;
+  progress.classList.remove("hidden");
+  progress.classList.add("indeterminate");
+  progressBar.style.width = "35%";
+  progressText.textContent = "Starting image lookup…";
+  const stopProgress = window.cardSale.onImageScanProgress((details) => {
+    progressText.textContent = details.complete ? `Found ${details.found} available image${details.found === 1 ? "" : "s"}` : `Scanning folder ${details.foldersScanned} · ${details.found} images found`;
+    if (details.complete) { progress.classList.remove("indeterminate"); progressBar.style.width = "100%"; }
+  });
+  let images;
+  try {
+    images = await window.cardSale.scanImageFolder({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders, excludedPaths: [...confirmedPaths] });
+  } catch (error) {
+    progress.classList.add("hidden");
+    toast(error.message || "Image lookup could not finish.");
+    return;
+  } finally {
+    stopProgress();
+    button.disabled = false;
+  }
+  if (!images.length) { progress.classList.add("hidden"); return toast("No unconfirmed supported images were found."); }
   const proposed = cards.map((card) => {
-    const candidates = images.map((image) => scoreImage(card, image)).filter((item) => item.score > 0 && !imageOwner(item.image.path, card.id)).sort((a, b) => b.score - a.score).slice(0, 6);
+    const candidates = images.map((image) => scoreImage(card, image)).filter((item) => item.score > 0).sort((a, b) => b.score - a.score || String(a.image.path).localeCompare(String(b.image.path), undefined, { numeric: true })).slice(0, 6);
     const top = candidates[0];
     const next = candidates[1];
     const hasDefinitiveFilename = top?.reasons.includes("exact card number") || top?.reasons.includes("full player name") || (top?.reasons.includes("card number") && top?.reasons.includes("surname"));
     const automatic = Boolean(top && top.score >= 100 && hasDefinitiveFilename && (!next || top.score - next.score >= 18));
     return { card, candidates, automatic };
+  });
+
+  const topPathCounts = new Map();
+  proposed.forEach((match) => {
+    const key = match.candidates[0]?.image.path?.toLowerCase();
+    if (key) topPathCounts.set(key, (topPathCounts.get(key) || 0) + 1);
+  });
+  proposed.forEach((match) => {
+    const key = match.candidates[0]?.image.path?.toLowerCase();
+    if (key && topPathCounts.get(key) > 1) {
+      match.automatic = false;
+      match.conflict = true;
+    }
   });
 
   const used = new Set(sale.cards.filter((card) => card.imagePath).map((card) => card.imagePath.toLowerCase()));
@@ -786,6 +837,7 @@ async function autoMatchImages() {
     ...review.map((match) => ({ ...match, confirmed: false }))
   ];
   pendingMatches = { review: reviewItems, scanned: images.length, filter: "all", query: "" };
+  progress.classList.add("hidden");
   selectedMatchIds.clear();
   $("#matchSearch").value = "";
   $$('[data-match-filter]').forEach((button) => button.classList.toggle("active", button.dataset.matchFilter === "all"));
@@ -811,9 +863,9 @@ function renderMatchReview() {
     const top = match.candidates[0];
     const selectTop = match.selected !== undefined ? Boolean(match.selected) : Boolean(top && top.score >= 45);
     const selectedPath = match.selected !== undefined ? match.selected : (selectTop ? top.image.path : "");
-    return `<article class="match-row" data-match-card="${match.card.id}">
+    return `<article class="match-row ${match.conflict ? "match-conflict" : ""}" data-match-card="${match.card.id}">
       <label class="match-select-box"><input type="checkbox" data-select-match="${match.card.id}" ${selectedMatchIds.has(match.card.id) ? "checked" : ""} /> Select</label>
-      <div class="match-card-name"><strong>${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.year)} ${escapeHtml(match.card.set)} #${escapeHtml(match.card.number)} ${escapeHtml(match.card.name)} ${escapeHtml(duplicateInfo(match.card).label)}</strong><span>Flaws: ${escapeHtml(match.card.notes && !/^none$/i.test(match.card.notes) ? match.card.notes : "None listed")}</span><span>Purchase date: ${displayPurchaseDate(match.card.purchaseDate)}</span></div>
+      <div class="match-card-name"><strong>${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.year)} ${escapeHtml(match.card.set)} #${escapeHtml(match.card.number)} ${escapeHtml(match.card.name)} ${escapeHtml(duplicateInfo(match.card).label)}</strong><span>Flaws: ${escapeHtml(match.card.notes && !/^none$/i.test(match.card.notes) ? match.card.notes : "None listed")}</span><span>Purchase date: ${displayPurchaseDate(match.card.purchaseDate)}</span>${match.conflict ? `<span class="match-warning">Review required: another card received this same suggestion.</span>` : ""}</div>
       <div class="candidate-picker"><img data-match-preview src="${selectedPath ? fileUrl(selectedPath) : "assets/favicon.svg"}" alt="" /><div><select data-match-select ${match.confirmed ? "disabled" : ""}><option value="">Leave unmatched</option>${match.candidates.map((candidate) => `<option value="${escapeHtml(candidate.image.path)}" ${selectedPath === candidate.image.path ? "selected" : ""}>${escapeHtml(candidate.image.relativePath)} — ${Math.max(0, Math.min(100, candidate.score))}% match</option>`).join("")}</select><div class="confidence-note">${top ? `Best clue: ${escapeHtml(top.reasons.join(", ") || "partial filename")}` : "No likely filename found"}</div></div></div>
       <div class="match-confirm">${match.confirmed ? `<span class="status available">Confirmed</span><button type="button" class="row-action" data-reopen-match="${match.card.id}">Reopen</button>` : `<button type="button" class="primary" data-confirm-match="${match.card.id}">${selectedPath ? "Confirm match" : "Confirm no image"}</button>`}</div>
     </article>`;
@@ -825,7 +877,7 @@ function renderMatchReview() {
   $("#deleteSelectedMatchesBtn").disabled = selectedMatchIds.size === 0;
   $("#selectAllMatches").checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
   $("#selectAllMatches").indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
-  $("#confirmPerfectMatchesBtn").disabled = !pendingMatches.review.some((match) => !match.confirmed && (match.candidates[0]?.score || 0) >= 100);
+  $("#confirmPerfectMatchesBtn").disabled = !pendingMatches.review.some((match) => !match.confirmed && !match.conflict && (match.candidates[0]?.score || 0) >= 100);
 }
 
 function confirmMatch(match, selectedPath = match.selected) {
@@ -857,7 +909,7 @@ function confirmSelectedMatches(ids = selectedMatchIds) {
 }
 
 function confirmPerfectMatches() {
-  const perfect = new Set(pendingMatches.review.filter((match) => !match.confirmed && (match.candidates[0]?.score || 0) >= 100).map((match) => match.card.id));
+  const perfect = new Set(pendingMatches.review.filter((match) => !match.confirmed && !match.conflict && (match.candidates[0]?.score || 0) >= 100).map((match) => match.card.id));
   perfect.forEach((id) => {
     const match = pendingMatches.review.find((item) => item.card.id === id);
     if (match) match.selected = match.candidates[0]?.image.path || "";
@@ -916,7 +968,7 @@ function deleteCard(cardId) {
   sale.cards = sale.cards.filter((item) => item.id !== cardId);
   if (card.imagePath && !sale.cards.some((item) => item.imagePath === card.imagePath)) sale.images = sale.images.filter((image) => image.path !== card.imagePath);
   recordAudit("delete", `Deleted ${card.ref} · ${card.name}`, { cardId: card.id });
-  saveSoon(); render(); toast("Card removed from the sale.");
+  saveSoon(); renderStats(); renderListings(); renderImages(); toast("Card removed from the sale.");
 }
 
 function deleteSelectedCards() {
@@ -929,7 +981,7 @@ function deleteSelectedCards() {
   removed.forEach((card) => { if (card.imagePath && !sale.cards.some((item) => item.imagePath === card.imagePath)) sale.images = sale.images.filter((image) => image.path !== card.imagePath); });
   selectedListingIds.clear();
   recordAudit("delete", `Deleted ${count} selected cards`);
-  saveSoon(); render(); toast(`${count} cards removed from the sale.`);
+  saveSoon(); renderStats(); renderListings(); renderImages(); toast(`${count} cards removed from the sale.`);
 }
 
 function deleteActiveSale() {
@@ -994,7 +1046,9 @@ function clearClaim(cardId) {
 async function copyAndHideCard(cardId) {
   const card = activeSale().cards.find((item) => item.id === cardId);
   if (!card || card.hiddenAfterCopy) return;
-  await navigator.clipboard.writeText(formatLine(card));
+  const line = formatLine(card);
+  const copied = await window.cardSale.copyText(line).catch(() => false);
+  if (!copied) return toast("The listing could not be copied. Please try again.");
   card.hiddenAfterCopy = true;
   card.completedBy = "copied";
   card.completedAt = new Date().toISOString();
@@ -1081,8 +1135,9 @@ function restoreVersion(versionId) {
   saveSoon(); render(); renderVersionList(); toast("Earlier sale version restored.");
 }
 
-function copyText(text, message = "Copied") {
-  navigator.clipboard.writeText(text).then(() => toast(message));
+async function copyText(text, message = "Copied") {
+  const copied = await window.cardSale.copyText(text).catch(() => false);
+  toast(copied ? message : "The text could not be copied. Please try again.");
 }
 
 function buyerSummary(buyer) {
@@ -1136,7 +1191,7 @@ async function checkForUpdates(manual = false) {
     $("#checkUpdateBtn").textContent = `Update ${result.version} available`;
     $("#checkUpdateBtn").classList.add("update-available");
     $("#updateTitle").textContent = `Version ${result.version} is available`;
-    $("#updateMessage").textContent = `You are using version ${result.currentVersion}. Download ${result.assetName} from the verified GitHub release.`;
+    $("#updateMessage").textContent = `You are using version ${result.currentVersion}. Confirm once and the app will download ${result.assetName}, install it, and restart with the update.`;
     $("#updateNotes").textContent = result.notes || "A newer Card Sale Manager release is available.";
     $("#updateNotes").classList.remove("hidden");
     $("#downloadUpdateBtn").classList.remove("hidden");
@@ -1148,7 +1203,7 @@ async function checkForUpdates(manual = false) {
   $("#updateTitle").textContent = result.status === "current" ? "You’re up to date" : "No update available";
   $("#updateMessage").textContent = result.status === "current"
     ? `Card Sale Manager ${result.currentVersion} is the latest release.`
-    : (result.status === "unavailable" ? "No public GitHub release is available yet." : (result.message || "The update check could not be completed."));
+    : (result.message || (result.status === "unavailable" ? "No installable GitHub update is available yet." : "The update check could not be completed."));
 }
 
 function openBulkEdit() {
@@ -1490,7 +1545,20 @@ function bindEvents() {
   $("#fontSmallerBtn").addEventListener("click", () => { state.preferences ||= {}; state.preferences.fontScale = Math.max(.85, Number(state.preferences.fontScale || 1) - .05); applyDisplayPreferences(); saveSoon(); });
   $("#fontLargerBtn").addEventListener("click", () => { state.preferences ||= {}; state.preferences.fontScale = Math.min(1.25, Number(state.preferences.fontScale || 1) + .05); applyDisplayPreferences(); saveSoon(); });
   $("#densityBtn").addEventListener("click", () => { state.preferences ||= {}; state.preferences.compact = !state.preferences.compact; applyDisplayPreferences(); saveSoon(); });
-  $("#downloadUpdateBtn").addEventListener("click", async () => { if (availableUpdate) await window.cardSale.openUpdate(availableUpdate.downloadUrl); });
+  $("#downloadUpdateBtn").addEventListener("click", async () => {
+    if (!availableUpdate || !window.confirm(`Install Card Sale Manager ${availableUpdate.version} now? The app will close automatically when the installer starts.`)) return;
+    const button = $("#downloadUpdateBtn");
+    button.disabled = true;
+    button.textContent = "Downloading…";
+    $("#updateProgress").classList.remove("hidden");
+    const result = await window.cardSale.downloadAndInstallUpdate(availableUpdate);
+    if (!result.ok) {
+      button.disabled = false;
+      button.textContent = "Download & install";
+      $("#updateTitle").textContent = "Update could not be installed";
+      $("#updateMessage").textContent = result.message || "Please try again.";
+    }
+  });
   document.addEventListener("keydown", (event) => {
     const editing = event.target.matches("input, textarea, select, [contenteditable='true']");
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !editing) { event.preventDefault(); undoLastCompletion(); }
@@ -1559,6 +1627,11 @@ async function init() {
     ]).sort((a, b) => a.at.localeCompare(b.at));
   }
   claimWords(); presets(); bindEvents(); resetListingView(); applyDisplayPreferences(); render();
+  window.cardSale.onUpdateProgress((details) => {
+    const percent = details.percent == null ? 10 : details.percent;
+    $("#updateProgressBar").style.width = `${percent}%`;
+    $("#updateProgressText").textContent = details.installing ? "Installing update…" : (details.percent == null ? "Downloading update…" : `Downloading update… ${details.percent}%`);
+  });
   $("#appVersion").textContent = `Version ${await window.cardSale.version()}`;
   checkForUpdates(false);
 }

@@ -32,9 +32,11 @@ CARD SALE MANAGER — GETTING STARTED
     individually or choose Check all cards, enter the tracking number, and copy
     the ready-to-send shipping message.
 13. Use row checkboxes for bulk deletion and image-review confirmation.
-    Duplicate cards are labeled (1 of x), and date-coded filenames break ties.
+    Duplicate cards are labeled (1 of x). Date-coded filenames (MDDYYYY or
+    MMDDYYYY) and a final sequence number such as 1 or 2 break ties.
 14. The app checks for GitHub releases when it opens. Use Check for updates in
-    the sidebar at any time.
+    the sidebar at any time. Confirm the update once and the app downloads and
+    installs the Windows setup file automatically.
 15. Use Live Sale Mode for a keyboard-first posting workflow. Press ? inside
     the app to see all available shortcuts.
 16. The Facebook claim parser recognizes configurable words such as claim,

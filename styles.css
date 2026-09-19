@@ -124,7 +124,10 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .hidden { display: none !important; }
 
 .claims-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; }
-.claim-table-wrap { min-height: 520px; }
+.claim-list-panel { position: sticky; top: 18px; max-height: calc(100vh - 74px); display: flex; flex-direction: column; overflow: hidden; }
+.claim-list-panel .toolbar { position: sticky; top: 0; z-index: 4; background: var(--panel); flex: 0 0 auto; }
+.claim-table-wrap { min-height: 0; height: 520px; flex: 1 1 auto; }
+.claim-table-wrap thead th { top: 0; z-index: 3; box-shadow: 0 1px 0 var(--border); }
 .buyer-assignment { width: 170px; }
 .claim-note-input { width: 170px; margin-top: 5px; font-size: 11px; }
 .offer-input { width: 105px; }
@@ -217,6 +220,8 @@ dialog:has(.large) { width: min(850px, calc(100% - 32px)); }
 .match-bulk { padding: 10px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .match-review-list { overflow-y: auto; display: grid; gap: 10px; padding-right: 4px; }
 .match-row { display: grid; grid-template-columns: 64px minmax(210px, 1fr) minmax(310px, 1.45fr) auto; gap: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; align-items: center; }
+.match-row.match-conflict { border-color: #d89552; background: #fffaf3; }
+.match-warning { color: #9a541c !important; font-weight: 800; }
 .match-select-box { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 5px; font-size: 11px; }
 .match-card-name strong { display: block; }
 .match-card-name span { display: block; color: var(--muted); margin-top: 4px; font-size: 12px; }
@@ -235,6 +240,11 @@ dialog:has(.large) { width: min(850px, calc(100% - 32px)); }
 .folder-item.excluded { background: #fff6f2; }
 .folder-empty { color: var(--muted); font-size: 13px; margin: 0; }
 .update-notes { white-space: pre-wrap; max-height: 260px; overflow: auto; border: 1px solid var(--border); background: #f7f9fb; padding: 12px; border-radius: 8px; font: 12px/1.45 "Segoe UI", sans-serif; }
+.task-progress { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
+.task-progress .progress-track { height: 8px; overflow: hidden; border-radius: 999px; background: #e1e7ec; }
+.task-progress .progress-bar { width: 0; height: 100%; border-radius: inherit; background: var(--navy); transition: width .18s ease; }
+.task-progress.indeterminate .progress-bar { width: 35% !important; animation: lookup-progress 1.1s ease-in-out infinite alternate; }
+@keyframes lookup-progress { from { transform: translateX(-80%); } to { transform: translateX(190%); } }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, .8fr); gap: 18px; }
 .aging-panel { grid-column: 1 / -1; }
 .dashboard-content { padding: 16px; max-height: 620px; overflow: auto; }

@@ -96,6 +96,7 @@
               <div id="imageQueue" class="image-queue"></div>
               <div class="queue-actions">
                 <button id="autoMatchBtn" class="primary full">Auto-match card images</button>
+                <div id="lookupProgress" class="task-progress hidden"><div class="progress-track"><div id="lookupProgressBar" class="progress-bar"></div></div><small id="lookupProgressText">Starting image lookup…</small></div>
                 <button id="imageFolderSettingsBtn" class="secondary full">Image lookup folders</button>
                 <button id="addFolderBtn" class="secondary full">Add image folder</button>
                 <p id="lookupFolderLabel" class="folder-label">No lookup folder selected</p>
@@ -247,7 +248,8 @@
         <div class="dialog-header"><div><p class="eyebrow">APP UPDATE</p><h2 id="updateTitle">Checking for updates…</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
         <p id="updateMessage" class="dialog-copy">Contacting GitHub.</p>
         <pre id="updateNotes" class="update-notes hidden"></pre>
-        <div class="dialog-actions"><button value="cancel" class="secondary">Not now</button><button type="button" id="downloadUpdateBtn" class="primary hidden">Download update</button></div>
+        <div id="updateProgress" class="task-progress hidden"><div class="progress-track"><div id="updateProgressBar" class="progress-bar"></div></div><small id="updateProgressText">Downloading update…</small></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Not now</button><button type="button" id="downloadUpdateBtn" class="primary hidden">Download &amp; install</button></div>
       </form>
     </dialog>
 
