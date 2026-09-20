@@ -19,6 +19,17 @@ const DEFAULT_PACKING_DESIGN = {
   showAddress: true, showOrderNumber: true, showPayment: true, showShipping: true, showPrices: true, showDetails: true, showThumbnails: false, includeLabel: false,
   sectionOrder: PACKING_SECTIONS.map(([id]) => id)
 };
+const DEFAULT_MESSAGE_TEMPLATES = {
+  orderSummary: "Hi {firstName} — here’s your total from the sale:\n\n{cardList}\n\nCards: {subtotal}\n{discountLine}Shipping ({shippingMethod}): {shipping}\nTotal: {total}\n\nPlease confirm your mailing address when you send payment. Thanks!",
+  paymentDue: "Hi {firstName} — your total is {total} including {shippingMethod} shipping. Please send payment and confirm your mailing address. Thanks!",
+  paymentReceived: "Hi {firstName} — payment received. Thank you! I’ll get your cards packed and will send tracking when available.",
+  shipped: "Hi {firstName} — your cards have shipped!\n\n{trackingLine}\n\nThanks again for your purchase!",
+  delayed: "Hi {firstName} — a quick update: your card shipment is delayed, but I’m still working on it and will send another update as soon as it ships. Thanks for your patience."
+};
+const MESSAGE_TEMPLATE_FIELDS = [
+  ["orderSummary", "Order confirmation"], ["paymentDue", "Payment due"], ["paymentReceived", "Payment received"],
+  ["shipped", "Shipping confirmation"], ["delayed", "Shipping delayed"]
+];
 
 const starterSale = {
   id: uid(),
@@ -89,6 +100,13 @@ function claimWords() {
   state.preferences ||= {};
   state.preferences.claimWords ||= [...DEFAULT_CLAIM_WORDS];
   return state.preferences.claimWords;
+}
+
+function ensureMessageTemplates() {
+  state.preferences ||= {};
+  state.preferences.messageTemplates ||= {};
+  Object.entries(DEFAULT_MESSAGE_TEMPLATES).forEach(([key, value]) => { state.preferences.messageTemplates[key] ??= value; });
+  return state.preferences.messageTemplates;
 }
 
 function trackingUrl(value) {
@@ -476,6 +494,7 @@ function renderOrderDetail() {
         </div>
         <button class="secondary full copy-summary" id="copySummaryBtn">Copy buyer summary</button>
         <div class="message-grid"><button class="secondary" data-copy-message="payment-due">Payment due</button><button class="secondary" data-copy-message="payment-received">Payment received</button><button class="secondary" data-copy-message="shipped">Shipped</button><button class="secondary" data-copy-message="delayed">Delayed</button></div>
+        <button class="row-action message-template-link" id="editMessageTemplatesBtn">Edit message templates</button>
       </aside>
     </div>`;
 }
@@ -523,8 +542,27 @@ function renderDashboard() {
   const profit = revenue - soldCost;
   const margin = revenue ? (profit / revenue) * 100 : 0;
   $("#profitStats").innerHTML = [["Revenue", money(revenue), `${sold.length} sold`], ["Sold-card cost", money(soldCost), `${money(inventoryCost)} total inventory cost`], ["Gross profit", money(profit), `${margin.toFixed(1)}% margin`], ["Average sale", money(sold.length ? revenue / sold.length : 0), `${sale.cards.length - sold.length} unsold`]].map(([label, value, sub]) => `<article class="stat"><span class="label">${label}</span><strong>${value}</strong><span class="sub">${sub}</span></article>`).join("");
-  const rows = sold.slice().sort((a, b) => Number(b.claimPrice ?? b.price) - Number(a.claimPrice ?? a.price));
-  $("#profitBreakdown").innerHTML = rows.length ? `<table><thead><tr><th>Card</th><th>Buyer</th><th>Revenue</th><th>Cost</th><th>Profit</th></tr></thead><tbody>${rows.map((card) => `<tr><td>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</td><td>${escapeHtml(card.buyer)}</td><td>${money(card.claimPrice ?? card.price)}</td><td>${money(card.purchasePrice)}</td><td class="${Number(card.claimPrice ?? card.price) < Number(card.purchasePrice) ? "cost-warning" : ""}">${money(Number(card.claimPrice ?? card.price) - Number(card.purchasePrice || 0))}</td></tr>`).join("")}</tbody></table>` : `<div class="empty-state"><h3>No completed claims yet</h3><p>Profit details will appear as cards are claimed.</p></div>`;
+  state.preferences ||= {};
+  state.preferences.profitSort ||= { key: "revenue", direction: "desc" };
+  const profitSort = state.preferences.profitSort;
+  const profitValue = (card, key) => {
+    if (key === "card") return `${card.year || ""} ${card.set || ""} ${card.name || ""}`.trim().toLowerCase();
+    if (key === "buyer") return String(card.buyer || "").toLowerCase();
+    if (key === "cost") return Number(card.purchasePrice || 0);
+    if (key === "profit") return Number(card.claimPrice ?? card.price ?? 0) - Number(card.purchasePrice || 0);
+    return Number(card.claimPrice ?? card.price ?? 0);
+  };
+  const rows = sold.slice().sort((a, b) => {
+    const left = profitValue(a, profitSort.key); const right = profitValue(b, profitSort.key);
+    const result = typeof left === "string" ? left.localeCompare(right, undefined, { numeric: true }) : left - right;
+    return (profitSort.direction === "asc" ? result : -result) || Number(a.sourceOrder ?? a.ref) - Number(b.sourceOrder ?? b.ref);
+  });
+  const profitHeading = (key, label) => {
+    const active = profitSort.key === key;
+    const arrow = active ? (profitSort.direction === "asc" ? "↑" : "↓") : "↕";
+    return `<th aria-sort="${active ? (profitSort.direction === "asc" ? "ascending" : "descending") : "none"}"><button class="table-sort" data-profit-sort="${key}">${label}<span>${arrow}</span></button></th>`;
+  };
+  $("#profitBreakdown").innerHTML = rows.length ? `<table><thead><tr>${profitHeading("card", "Card")}${profitHeading("buyer", "Buyer")}${profitHeading("revenue", "Revenue")}${profitHeading("cost", "Cost")}${profitHeading("profit", "Profit")}</tr></thead><tbody>${rows.map((card) => `<tr><td>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</td><td>${escapeHtml(card.buyer)}</td><td>${money(card.claimPrice ?? card.price)}</td><td>${money(card.purchasePrice)}</td><td class="${Number(card.claimPrice ?? card.price) < Number(card.purchasePrice) ? "cost-warning" : ""}">${money(Number(card.claimPrice ?? card.price) - Number(card.purchasePrice || 0))}</td></tr>`).join("")}</tbody></table>` : `<div class="empty-state"><h3>No completed claims yet</h3><p>Profit details will appear as cards are claimed.</p></div>`;
   const history = {};
   state.sales.forEach((pastSale) => pastSale.cards.filter((card) => card.buyer && card.status !== "available").forEach((card) => {
     const item = history[card.buyer] ||= { cards: 0, players: {}, brands: {}, years: {} };
@@ -1296,31 +1334,58 @@ async function copyText(text, message = "Copied") {
   toast(copied ? message : "The text could not be copied. Please try again.");
 }
 
-function buyerSummary(buyer) {
+function messageTemplateValues(buyer) {
   const cards = cardsForBuyer(buyer); const order = orderFor(buyer);
   const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price), 0);
   const shipping = shippingAmount(order);
   const total = subtotal + shipping - Number(order.discount || 0);
   const firstName = String(buyer || "").trim().split(/\s+/)[0] || buyer;
-  return [`Hi ${firstName} — here’s your total from the sale:`, "", ...cards.map((card) => `${card.year} ${card.set} #${card.number} ${card.name}${duplicateInfo(card).label ? ` ${duplicateInfo(card).label}` : ""} — ${money(card.claimPrice ?? card.price)} (${card.claimType === "offer" ? "accepted offer" : "claim"})`), "", `Cards: ${money(subtotal)}`, ...(order.discount ? [`Discount: -${money(order.discount)}`] : []), `Shipping (${order.shippingMethod}): ${money(shipping)}`, `Total: ${money(total)}`, "", "Please confirm your mailing address when you send payment. Thanks!"] .join("\n");
+  return {
+    buyer, firstName, saleName: activeSale().name, cardCount: String(cards.length),
+    cardList: cards.map((card) => `${card.year} ${card.set} ${numberLabel(card)} ${card.name}${duplicateInfo(card).label ? ` ${duplicateInfo(card).label}` : ""} — ${money(card.claimPrice ?? card.price)} (${card.claimType === "offer" ? "accepted offer" : "claim"})`.replace(/\s+/g, " ").trim()).join("\n"),
+    subtotal: money(subtotal), discount: money(order.discount || 0), discountLine: order.discount ? `Discount: -${money(order.discount)}\n` : "",
+    shippingMethod: order.shippingMethod, shipping: money(shipping), total: money(total),
+    trackingNumber: order.trackingNumber || "", trackingLine: order.trackingNumber ? `Tracking number: ${order.trackingNumber}` : ""
+  };
+}
+
+function renderBuyerMessageTemplate(key, buyer) {
+  const values = messageTemplateValues(buyer);
+  const template = ensureMessageTemplates()[key] || DEFAULT_MESSAGE_TEMPLATES[key] || "";
+  return template.replace(/\{(buyer|firstName|saleName|cardCount|cardList|subtotal|discount|discountLine|shippingMethod|shipping|total|trackingNumber|trackingLine)\}/g, (_match, name) => values[name] ?? "")
+    .replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function buyerSummary(buyer) {
+  return renderBuyerMessageTemplate("orderSummary", buyer);
 }
 
 function trackingMessage(buyer) {
-  const firstName = String(buyer || "").trim().split(/\s+/)[0] || buyer;
-  const order = orderFor(buyer);
-  return [`Hi ${firstName} — your cards have shipped!`, "", `Tracking number: ${order.trackingNumber}`, "", "Thanks again for your purchase!"] .join("\n");
+  return renderBuyerMessageTemplate("shipped", buyer);
 }
 
 function buyerMessage(type, buyer) {
-  const firstName = String(buyer || "").trim().split(/\s+/)[0] || buyer;
-  const order = orderFor(buyer);
-  const cards = cardsForBuyer(buyer);
-  const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price), 0);
-  const total = subtotal + shippingAmount(order) - Number(order.discount || 0);
-  if (type === "payment-due") return `Hi ${firstName} — your total is ${money(total)} including ${order.shippingMethod} shipping. Please send payment and confirm your mailing address. Thanks!`;
-  if (type === "payment-received") return `Hi ${firstName} — payment received. Thank you! I’ll get your cards packed and will send tracking when available.`;
-  if (type === "delayed") return `Hi ${firstName} — a quick update: your card shipment is delayed, but I’m still working on it and will send another update as soon as it ships. Thanks for your patience.`;
-  return order.trackingNumber ? trackingMessage(buyer) : `Hi ${firstName} — your cards have shipped! Thanks again for your purchase.`;
+  const key = { "payment-due": "paymentDue", "payment-received": "paymentReceived", shipped: "shipped", delayed: "delayed" }[type] || "shipped";
+  return renderBuyerMessageTemplate(key, buyer);
+}
+
+function openMessageTemplates() {
+  const templates = ensureMessageTemplates();
+  MESSAGE_TEMPLATE_FIELDS.forEach(([key]) => { const field = $(`#messageTemplate-${key}`); if (field) field.value = templates[key]; });
+  $("#messageTemplatesDialog").showModal();
+}
+
+function saveMessageTemplates() {
+  const templates = ensureMessageTemplates();
+  MESSAGE_TEMPLATE_FIELDS.forEach(([key]) => { templates[key] = $(`#messageTemplate-${key}`).value.trim() || DEFAULT_MESSAGE_TEMPLATES[key]; });
+  saveSoon();
+  $("#messageTemplatesDialog").close();
+  toast("Buyer message templates saved.");
+}
+
+function resetMessageTemplates() {
+  MESSAGE_TEMPLATE_FIELDS.forEach(([key]) => { $(`#messageTemplate-${key}`).value = DEFAULT_MESSAGE_TEMPLATES[key]; });
+  toast("Default messages restored. Save to keep them.");
 }
 
 const PACKING_PRINT_STYLES = `
@@ -1615,6 +1680,14 @@ function applyParsedClaims() {
 
 function bindEvents() {
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
+  $("#profitBreakdown").addEventListener("click", (event) => {
+    const key = event.target.closest("[data-profit-sort]")?.dataset.profitSort;
+    if (!key) return;
+    state.preferences ||= {};
+    const current = state.preferences.profitSort || { key: "revenue", direction: "desc" };
+    state.preferences.profitSort = { key, direction: current.key === key ? (current.direction === "asc" ? "desc" : "asc") : (["card", "buyer"].includes(key) ? "asc" : "desc") };
+    saveSoon(); renderDashboard();
+  });
   $("#importBtn").addEventListener("click", importSpreadsheet);
   $$('[data-action="import"]').forEach((button) => button.addEventListener("click", importSpreadsheet));
   $("#addSingleCardBtn").addEventListener("click", openAddCard);
@@ -1796,9 +1869,12 @@ function bindEvents() {
     if (status && state.selectedBuyer) { const order = orderFor(state.selectedBuyer); if (status === "paid" && !order.paymentMethod) return toast("Choose Cash, PayPal, Venmo or Other before marking paid."); snapshotSale(`Before marking ${state.selectedBuyer} ${status}`); order.status = status; if (status === "paid") order.paidAt = new Date().toISOString(); recordAudit("order", `${state.selectedBuyer} marked ${status}${order.paymentMethod ? ` via ${order.paymentMethod}` : ""}`, { buyer: state.selectedBuyer }); saveSoon(); render(); toast(`Order marked ${status}.`); }
     if (event.target.id === "copySummaryBtn") copyText(buyerSummary(state.selectedBuyer), "Buyer summary copied.");
     if (event.target.dataset.copyMessage) copyText(buyerMessage(event.target.dataset.copyMessage, state.selectedBuyer), "Buyer message copied.");
+    if (event.target.id === "editMessageTemplatesBtn") openMessageTemplates();
     if (event.target.dataset.openTracking) window.cardSale.openTracking(event.target.dataset.openTracking);
     if (event.target.dataset.openBuyerProfile) { state.profileBuyer = event.target.dataset.openBuyerProfile; showView("buyers"); renderBuyerProfiles(); }
   });
+  $("#saveMessageTemplatesBtn").addEventListener("click", saveMessageTemplates);
+  $("#resetMessageTemplatesBtn").addEventListener("click", resetMessageTemplates);
   $("#packingBuyer").addEventListener("change", renderPacking);
   $("#packingContent").addEventListener("input", (event) => {
     const buyer = $("#packingBuyer").value;
@@ -1993,7 +2069,7 @@ async function init() {
     ]).sort((a, b) => a.at.localeCompare(b.at));
   }
   if (![...$("#packingPageSize").options].some((option) => option.value === "two-up")) $("#packingPageSize").add(new Option("Two half-slips per letter page", "two-up"));
-  claimWords(); presets(); ensurePackingSettings(); bindEvents(); resetListingView(); applyDisplayPreferences(); render();
+  claimWords(); presets(); ensurePackingSettings(); ensureMessageTemplates(); bindEvents(); resetListingView(); applyDisplayPreferences(); render();
   window.cardSale.onPrepareClose(async () => {
     try { await saveNow(); await window.cardSale.backup("close"); } catch {}
     await window.cardSale.closeReady();

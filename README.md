@@ -15,11 +15,11 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Creates verified rolling recovery backups, saves again on close, and refuses to update until current sales are safely backed up.
 - Supports exact numeric card positioning in addition to custom drag-and-drop ordering.
 - Provides PWE and PMWT shipping options.
-- Generates buyer summaries and tracking messages.
+- Generates buyer summaries and tracking messages from editable saved templates.
 - Keeps sale data stored locally on the computer.
 - Includes Live Sale Mode, a Facebook claim-comment parser, and an unrecognized-comment review queue.
 - Provides sale closing, carryover, health-check, version restore, and undo workflows.
-- Tracks private profit and inventory aging information.
+- Tracks private profit and inventory aging information with sortable profit columns.
 - Stores buyer profiles, tags, notes, purchase patterns, and repeat-buyer alerts.
 - Includes a Packing Slip Studio with saved branded templates, logos, custom colors and messages, local QR codes, links, card thumbnails, configurable sections, live previews, and letter/half-sheet/4×6/compact layouts.
 - Prints filtered buyer slips in one job, exports combined PDFs, tracks successful prints and reprints, and can add a shipping-label page.

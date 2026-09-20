@@ -1,6 +1,6 @@
 {
   "name": "card-sale-manager",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Local-first card sale workflow manager",
   "main": "main.js",
   "type": "commonjs",
