@@ -123,6 +123,9 @@ tr:last-child td { border-bottom: 0; }
 .status { display: inline-flex; padding: 5px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .status.available { color: var(--green); background: var(--green-soft); }
 .status.claimed { color: var(--orange); background: var(--orange-soft); }
+.status.offered, .status.pending { color: var(--gold); background: color-mix(in srgb, var(--gold) 17%, var(--panel)); }
+.status.countered { color: var(--navy); background: var(--blue-soft); }
+.status.accepted { color: var(--green); background: var(--green-soft); }
 .status.paid { color: #245c91; background: var(--blue-soft); }
 .row-action { border: 0; background: transparent; color: var(--navy); font-weight: 700; padding: 4px 5px; white-space: nowrap; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 2px; }
@@ -181,6 +184,18 @@ input:focus, select:focus, textarea:focus { border-color: var(--navy); box-shado
 .timeline-link:hover { background: var(--blue-soft); }
 .focus-flash { animation: focusFlash 1.6s ease; }
 @keyframes focusFlash { 0%, 45% { background: #fff4cc; } 100% { background: transparent; } }
+
+.offers-panel { overflow: hidden; }
+.offers-table-wrap { min-height: 420px; }
+.offer-header-actions, .offer-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.offer-card-cell { display: grid; grid-template-columns: 48px minmax(170px, 1fr); gap: 10px; align-items: center; }
+.offer-card-cell img, .offer-card-placeholder { width: 48px; height: 48px; border-radius: 7px; background: var(--blue-soft); object-fit: cover; }
+.offer-card-placeholder { display: grid; place-items: center; color: var(--navy); font-weight: 800; }
+.offer-card-cell strong, .offer-card-cell small { display: block; }
+.offer-card-cell small, .accepted-note { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.counter-price-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.counter-price-summary span { padding: 12px; border-radius: 9px; background: var(--blue-soft); color: var(--muted); }
+.counter-price-summary strong { display: block; margin-top: 3px; color: var(--ink); font-size: 18px; }
 
 .orders-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 18px; }
 .buyer-list { padding: 8px; display: grid; gap: 4px; }

@@ -8,7 +8,9 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Formats each card into a copy-ready sale listing.
 - Matches local images using year folders, player names, card numbers, seven- or eight-digit purchase-date codes, and duplicate sequence numbers.
 - Supports manual image attachment and native drag-out to Facebook.
-- Tracks list price, private purchase price/date, claims, accepted offers, buyers, and shipping.
+- Adds a dedicated Offers desk after Claims Desk, with list price, private purchase price, offer status, and buyer details in one place.
+- Keeps offers out of buyer orders and sales totals until accepted; rejected offers return cards to the open pool.
+- Supports accepted, rejected, and countered offers with editable copy-ready counter messages.
 - Supports bulk card deletion, bulk image confirmation, and duplicate-card labels.
 - Keeps image lookup and exclusion folders shared across sales.
 - Checks GitHub releases when the app opens and, after confirmation, downloads and installs signed release installers automatically.

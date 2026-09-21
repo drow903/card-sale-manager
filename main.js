@@ -11,6 +11,7 @@ const UPDATE_REPOSITORY = "drow903/card-sale-manager";
 let mainWindow;
 let allowWindowClose = false;
 let closeFallbackTimer = null;
+let saveQueue = Promise.resolve();
 
 if (process.env.CARD_SALE_CAPTURE_PATH) app.disableHardwareAcceleration();
 
@@ -242,12 +243,16 @@ function createWindow() {
     mainWindow.webContents.once("did-finish-load", async () => {
       await new Promise((resolve) => setTimeout(resolve, 1200));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
-      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "buyers", "health", "parser", "quick-edit", "closing", "copied", "folders"].find((view) => captureName.includes(view)) || "");
+      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "parser", "quick-edit", "closing", "copied", "folders"].find((view) => captureName.includes(view)) || "");
       if (captureView === "match-review") {
         await mainWindow.webContents.executeJavaScript("autoMatchImages()");
         await new Promise((resolve) => setTimeout(resolve, 2500));
       } else if (captureView === "claims") {
         await mainWindow.webContents.executeJavaScript("showView('claims')");
+      } else if (captureView === "offers-accept") {
+        await mainWindow.webContents.executeJavaScript("const card = activeSale().cards.find((item) => item.offerStatus === 'pending'); acceptOffer(card?.id); if (!card || card.offerStatus !== 'accepted' || !cardsForBuyer(card.buyer).includes(card)) throw new Error('Offer acceptance QA failed'); showView('orders')");
+      } else if (captureView === "offers-counter") {
+        await mainWindow.webContents.executeJavaScript("showView('offers'); openCounterOffer(activeSale().cards.find((card) => card.offerStatus === 'pending')?.id)");
       } else if (captureView === "copied") {
         await mainWindow.webContents.executeJavaScript("activeSale().cards[0].hiddenAfterCopy = true; state.filter = 'copied'; document.querySelectorAll('[data-filter]').forEach((button) => button.classList.toggle('active', button.dataset.filter === 'copied')); renderListings()");
       } else if (captureView === "folders") {
@@ -266,7 +271,7 @@ function createWindow() {
         await new Promise((resolve) => setTimeout(resolve, 700));
       } else if (captureView === "packing-bulk") {
         await mainWindow.webContents.executeJavaScript("showView('packing'); packingBulkSelection = new Set(buyers()); renderPackingBulk(); document.querySelector('#packingBulkDialog').showModal()");
-      } else if (["dashboard", "orders", "packing", "live", "buyers", "health"].includes(captureView)) {
+      } else if (["dashboard", "orders", "packing", "live", "offers", "buyers", "health"].includes(captureView)) {
         await mainWindow.webContents.executeJavaScript(`showView(${JSON.stringify(captureView)})`);
       }
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -291,18 +296,23 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("data:save", async (_event, payload) => {
+  ipcMain.handle("data:save", (_event, payload) => {
     validateSavedData(payload);
-    const target = dataPath();
-    const temp = `${target}.tmp`;
-    const previous = `${target}.previous`;
-    await fs.promises.mkdir(path.dirname(target), { recursive: true });
-    await createDataBackup("pre-save", 15 * 60 * 1000);
-    await fs.promises.writeFile(temp, JSON.stringify(payload, null, 2), "utf8");
-    validateSavedData(JSON.parse(await fs.promises.readFile(temp, "utf8")));
-    try { await fs.promises.copyFile(target, previous); } catch (error) { if (error.code !== "ENOENT") throw error; }
-    await fs.promises.rename(temp, target);
-    return { ok: true, path: target };
+    const serialized = JSON.stringify(payload, null, 2);
+    const performSave = async () => {
+      const target = dataPath();
+      const temp = `${target}.tmp`;
+      const previous = `${target}.previous`;
+      await fs.promises.mkdir(path.dirname(target), { recursive: true });
+      await createDataBackup("pre-save", 15 * 60 * 1000);
+      await fs.promises.writeFile(temp, serialized, "utf8");
+      validateSavedData(JSON.parse(await fs.promises.readFile(temp, "utf8")));
+      try { await fs.promises.copyFile(target, previous); } catch (error) { if (error.code !== "ENOENT") throw error; }
+      await fs.promises.rename(temp, target);
+      return { ok: true, path: target };
+    };
+    saveQueue = saveQueue.then(performSave, performSave);
+    return saveQueue;
   });
 
   ipcMain.handle("data:backup", async (_event, reason) => ({ ok: Boolean(await createDataBackup(reason || "manual")) }));

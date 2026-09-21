@@ -24,11 +24,12 @@ const DEFAULT_MESSAGE_TEMPLATES = {
   paymentDue: "Hi {firstName} — your total is {total} including {shippingMethod} shipping. Please send payment and confirm your mailing address. Thanks!",
   paymentReceived: "Hi {firstName} — payment received. Thank you! I’ll get your cards packed and will send tracking when available.",
   shipped: "Hi {firstName} — your cards have shipped!\n\n{trackingLine}\n\nThanks again for your purchase!",
-  delayed: "Hi {firstName} — a quick update: your card shipment is delayed, but I’m still working on it and will send another update as soon as it ships. Thanks for your patience."
+  delayed: "Hi {firstName} — a quick update: your card shipment is delayed, but I’m still working on it and will send another update as soon as it ships. Thanks for your patience.",
+  counterOffer: "Hi {firstName} — the {card} was listed at {listPrice}. You offered {offerPrice}, and I’d like to counter at {counterPrice}. Let me know if that works for you."
 };
 const MESSAGE_TEMPLATE_FIELDS = [
   ["orderSummary", "Order confirmation"], ["paymentDue", "Payment due"], ["paymentReceived", "Payment received"],
-  ["shipped", "Shipping confirmation"], ["delayed", "Shipping delayed"]
+  ["shipped", "Shipping confirmation"], ["delayed", "Shipping delayed"], ["counterOffer", "Counter offer"]
 ];
 
 const starterSale = {
@@ -40,7 +41,7 @@ const starterSale = {
   cards: [
     { id: uid(), ref: "1", year: "1962", set: "Topps", number: "5", name: "Sandy Koufax", condition: "VG-EX", price: 42, purchasePrice: 30, purchaseDate: "", notes: "Clean back", status: "available", imagePath: "" },
     { id: uid(), ref: "2", year: "1962", set: "Topps", number: "18", name: "Managers' Dream", condition: "VG", price: 48, purchasePrice: 34, purchaseDate: "", notes: "Soft corners", status: "available", imagePath: "" },
-    { id: uid(), ref: "3", year: "1962", set: "Topps", number: "50", name: "Stan Musial", condition: "EX", price: 59, purchasePrice: 41, purchaseDate: "", notes: "Sharp color", status: "claimed", buyer: "Mike R", claimPrice: 55, offerPrice: 55, claimType: "offer", claimedAt: new Date().toISOString(), imagePath: "" }
+    { id: uid(), ref: "3", year: "1962", set: "Topps", number: "50", name: "Stan Musial", condition: "EX", price: 59, purchasePrice: 41, purchaseDate: "", notes: "Sharp color", status: "claimed", buyer: "Mike R", claimPrice: 55, offerPrice: 55, offerStatus: "accepted", claimType: "offer", claimedAt: new Date().toISOString(), imagePath: "" }
   ],
   images: [],
   orders: { "Mike R": { status: "awaiting", shippingMethod: "PMWT", discount: 0 } }
@@ -209,8 +210,12 @@ function orderFor(buyer) {
   return order;
 }
 
+function cardInOrder(card) {
+  return Boolean(card?.buyer) && card.status !== "available" && card.status !== "offered" && !(card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus));
+}
+
 function pweEligible(buyer) {
-  const cards = activeSale().cards.filter((card) => card.buyer === buyer && card.status !== "available");
+  const cards = activeSale().cards.filter((card) => card.buyer === buyer && cardInOrder(card));
   const value = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
   return cards.length <= 3 && value <= 50;
 }
@@ -220,11 +225,11 @@ function shippingAmount(order, sale = activeSale()) {
 }
 
 function cardsForBuyer(buyer) {
-  return activeSale().cards.filter((card) => card.buyer === buyer && card.status !== "available");
+  return activeSale().cards.filter((card) => card.buyer === buyer && cardInOrder(card));
 }
 
 function buyers() {
-  return [...new Set(activeSale().cards.filter((card) => card.buyer).map((card) => card.buyer))].sort((a, b) => a.localeCompare(b));
+  return [...new Set(activeSale().cards.filter(cardInOrder).map((card) => card.buyer))].sort((a, b) => a.localeCompare(b));
 }
 
 async function saveNow() {
@@ -286,6 +291,7 @@ function render() {
   renderListings();
   renderImages();
   renderClaims();
+  renderOffers();
   renderOrders();
   renderPacking();
   renderDashboard();
@@ -297,12 +303,12 @@ function render() {
 
 function renderStats() {
   const sale = activeSale();
-  const sold = sale.cards.filter((card) => card.status !== "available");
+  const sold = sale.cards.filter(cardInOrder);
   const paid = sold.filter((card) => orderFor(card.buyer).status === "paid" || orderFor(card.buyer).status === "packed" || orderFor(card.buyer).status === "shipped");
   const gross = sold.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
   const collected = paid.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
   const stats = [
-    ["Cards listed", sale.cards.length, `${sale.cards.filter((c) => c.status === "available").length} still available`],
+    ["Cards listed", sale.cards.length, `${sale.cards.filter((c) => c.status === "available").length} open · ${sale.cards.filter((c) => c.status === "offered").length} with offers`],
     ["Claimed", sold.length, sale.cards.length ? `${Math.round((sold.length / sale.cards.length) * 100)}% sell-through` : "No cards yet"],
     ["Gross sales", money(gross), `${money(collected)} collected`],
     ["Active buyers", buyers().length, `${buyers().filter((b) => orderFor(b).status === "paid").length} ready to pack`]
@@ -338,14 +344,14 @@ function renderListings() {
   const validIds = new Set(sale.cards.map((card) => card.id));
   selectedListingIds = new Set([...selectedListingIds].filter((id) => validIds.has(id)));
   $("#listingRows").innerHTML = cards.map((card) => {
-    const statusLabel = card.status === "available" ? "Available" : card.buyer || "Claimed";
+    const statusLabel = card.status === "available" ? "Available" : card.status === "offered" ? `Offer · ${card.buyer || "Pending"}` : card.buyer || "Claimed";
     return `<tr data-listing-row="${card.id}" draggable="${sale.sortMode === "custom"}">
       <td class="select-column"><input type="checkbox" data-select-listing="${card.id}" ${selectedListingIds.has(card.id) ? "checked" : ""} aria-label="Select ${escapeHtml(card.name)}" /></td>
       <td class="ref">${escapeHtml(card.ref)}</td>
       <td><div class="card-title">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</div><div class="card-line">${escapeHtml(formatLine(card))}</div></td>
       <td>${escapeHtml(card.condition || "—")}</td>
       <td><strong class="money">${money(card.price)}</strong><small class="cost-note">Cost ${card.purchasePrice !== "" && card.purchasePrice != null ? money(card.purchasePrice) : "—"}</small><small class="cost-note">Purchased ${displayPurchaseDate(card.purchaseDate)}</small></td>
-      <td><span class="status ${card.status === "available" ? "available" : "claimed"}">${escapeHtml(statusLabel)}</span></td>
+      <td><span class="status ${card.status === "available" ? "available" : card.status === "offered" ? "offered" : "claimed"}">${escapeHtml(statusLabel)}</span></td>
       <td><div class="row-actions">${card.hiddenAfterCopy ? `<button class="row-action" data-restore-card="${card.id}">Restore</button>` : `<button class="row-action" data-image-card="${card.id}">${card.imagePath ? "Change image" : "Add image"}</button><button class="row-action" data-copy-card="${card.id}">Copy</button>`}<button class="row-action" data-edit-card="${card.id}">Edit</button><button class="row-action" data-move-card="${card.id}">Move</button><button class="row-action danger-link" data-delete-card="${card.id}">Delete</button></div></td>
     </tr>`;
   }).join("");
@@ -417,6 +423,25 @@ function renderClaims() {
   $("#claimTimeline").innerHTML = claims.length ? claims.map((item) => `<button type="button" class="timeline-item timeline-link" ${item.cardId ? `data-timeline-card="${item.cardId}"` : ""}><strong>${escapeHtml(item.message)}</strong><p>${escapeHtml(item.buyer || item.type || "Activity")} · ${new Date(item.at).toLocaleString()}</p></button>`).join("") : `<div class="empty-state"><h3>No activity recorded</h3><p>Claims, offers and changes will appear here.</p></div>`;
 }
 
+function offerDecisionPrice(card) {
+  return Number(card.counterPrice != null ? card.counterPrice : card.offerPrice);
+}
+
+function renderOffers() {
+  const offers = activeSale().cards.filter((card) => card.claimType === "offer" && card.offerPrice != null && card.buyer);
+  const pending = offers.filter((card) => card.offerStatus !== "accepted");
+  $("#pendingOfferCount").textContent = `${pending.length} pending`;
+  $("#offersEmpty").classList.toggle("hidden", offers.length !== 0);
+  $("#offerRows").innerHTML = offers.map((card) => {
+    const status = card.offerStatus || (card.status === "claimed" ? "accepted" : "pending");
+    const accepted = status === "accepted";
+    const proposedPrice = offerDecisionPrice(card);
+    const belowCost = Number(card.purchasePrice) > 0 && proposedPrice < Number(card.purchasePrice);
+    const statusLabel = accepted ? `Accepted at ${money(card.claimPrice ?? proposedPrice)}` : status === "countered" ? `Countered at ${money(card.counterPrice)}` : "Awaiting decision";
+    return `<tr data-offer-row="${card.id}"><td><div class="offer-card-cell">${card.imagePath ? `<img src="${fileUrl(card.imagePath)}" alt="" />` : `<span class="offer-card-placeholder">${escapeHtml(card.ref)}</span>`}<div><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)}</strong><small>${escapeHtml(card.condition || "No grade")}${card.notes && !/^none$/i.test(card.notes) ? ` · ${escapeHtml(card.notes)}` : ""}</small></div></div></td><td><strong>${escapeHtml(card.buyer)}</strong></td><td class="money">${money(card.price)}</td><td><strong class="money">${money(card.offerPrice)}</strong>${card.counterPrice != null ? `<small class="offer-note">Your counter: ${money(card.counterPrice)}</small>` : ""}</td><td><strong class="money">${card.purchasePrice !== "" && card.purchasePrice != null ? money(card.purchasePrice) : "—"}</strong>${belowCost ? `<small class="cost-warning">Decision price is below cost</small>` : ""}</td><td><span class="status ${accepted ? "accepted" : status === "countered" ? "countered" : "pending"}">${escapeHtml(statusLabel)}</span></td><td>${accepted ? `<span class="accepted-note">Added to ${escapeHtml(card.buyer)}’s order</span>` : `<div class="offer-actions"><button class="primary" data-accept-offer="${card.id}">Accept ${money(proposedPrice)}</button><button class="secondary" data-counter-offer="${card.id}">${status === "countered" ? "Revise counter" : "Counter"}</button><button class="secondary danger-button" data-reject-offer="${card.id}">Reject</button></div>`}</td></tr>`;
+  }).join("");
+}
+
 function renderOrders() {
   const names = buyers();
   if (!names.includes(state.selectedBuyer)) state.selectedBuyer = names[0] || "";
@@ -444,7 +469,7 @@ function orderFlags(buyer) {
 }
 
 function buyerHistory(buyer) {
-  const cards = state.sales.flatMap((sale) => sale.cards).filter((card) => card.buyer === buyer && card.status !== "available");
+  const cards = state.sales.flatMap((sale) => sale.cards).filter((card) => card.buyer === buyer && cardInOrder(card));
   const countBy = (field) => cards.reduce((result, card) => { const value = String(card[field] || "").trim(); if (value) result[value] = (result[value] || 0) + 1; return result; }, {});
   const top = (record) => Object.entries(record).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
   return { cards, spent: cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0), player: top(countBy("name")), brand: top(countBy("set")), year: top(countBy("year")) };
@@ -472,7 +497,7 @@ function renderOrderDetail() {
   const repeatMatches = repeatBuyerMatches(buyer);
   $("#orderDetail").innerHTML = `<div class="panel-header"><div><h2>${escapeHtml(buyer)}</h2><p>${cards.length} claimed card${cards.length === 1 ? "" : "s"}</p></div><span class="status ${order.status === "paid" ? "paid" : "claimed"}">${escapeHtml(order.status)}</span></div>
     <div class="order-summary">
-      <div class="order-items">${cards.map((card) => `<article class="order-item">${card.imagePath ? `<div class="order-thumb"><img src="${fileUrl(card.imagePath)}" alt="" /><small title="${escapeHtml(card.imagePath)}">${escapeHtml(card.imagePath.split(/[\\/]/).pop())}</small></div>` : `<div class="thumb">${escapeHtml(card.ref)}</div>`}<div><strong>${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><div class="card-line">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)}</div><span class="type-badge ${card.claimType === "offer" ? "offer" : "claim"}">${card.claimType === "offer" ? "Offer" : "Claim"}</span>${card.claimType === "offer" ? `<small class="offer-note">Accepted offer · listed ${money(card.price)}${Number(card.purchasePrice) > 0 && Number(card.offerPrice) < Number(card.purchasePrice) ? ` · <span class="cost-warning">below ${money(card.purchasePrice)} cost</span>` : ""}</small>` : ""}</div><strong>${money(card.claimPrice ?? card.price)}</strong></article>`).join("")}</div>
+      <div class="order-items">${cards.map((card) => `<article class="order-item">${card.imagePath ? `<div class="order-thumb"><img src="${fileUrl(card.imagePath)}" alt="" /><small title="${escapeHtml(card.imagePath)}">${escapeHtml(card.imagePath.split(/[\\/]/).pop())}</small></div>` : `<div class="thumb">${escapeHtml(card.ref)}</div>`}<div><strong>${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><div class="card-line">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)}</div><span class="type-badge ${card.claimType === "offer" ? "offer" : "claim"}">${card.claimType === "offer" ? "Offer" : "Claim"}</span>${card.claimType === "offer" ? `<small class="offer-note">Accepted offer · listed ${money(card.price)}${Number(card.purchasePrice) > 0 && Number(card.claimPrice) < Number(card.purchasePrice) ? ` · <span class="cost-warning">below ${money(card.purchasePrice)} cost</span>` : ""}</small>` : ""}</div><strong>${money(card.claimPrice ?? card.price)}</strong></article>`).join("")}</div>
       <aside class="order-sidebar">
         <div class="totals">
           <div class="total-line"><span>Cards</span><strong>${money(subtotal)}</strong></div>
@@ -535,7 +560,7 @@ function renderPacking() {
 
 function renderDashboard() {
   const sale = activeSale();
-  const sold = sale.cards.filter((card) => card.status !== "available");
+  const sold = sale.cards.filter(cardInOrder);
   const revenue = sold.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
   const soldCost = sold.reduce((sum, card) => sum + Number(card.purchasePrice || 0), 0);
   const inventoryCost = sale.cards.reduce((sum, card) => sum + Number(card.purchasePrice || 0), 0);
@@ -564,7 +589,7 @@ function renderDashboard() {
   };
   $("#profitBreakdown").innerHTML = rows.length ? `<table><thead><tr>${profitHeading("card", "Card")}${profitHeading("buyer", "Buyer")}${profitHeading("revenue", "Revenue")}${profitHeading("cost", "Cost")}${profitHeading("profit", "Profit")}</tr></thead><tbody>${rows.map((card) => `<tr><td>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</td><td>${escapeHtml(card.buyer)}</td><td>${money(card.claimPrice ?? card.price)}</td><td>${money(card.purchasePrice)}</td><td class="${Number(card.claimPrice ?? card.price) < Number(card.purchasePrice) ? "cost-warning" : ""}">${money(Number(card.claimPrice ?? card.price) - Number(card.purchasePrice || 0))}</td></tr>`).join("")}</tbody></table>` : `<div class="empty-state"><h3>No completed claims yet</h3><p>Profit details will appear as cards are claimed.</p></div>`;
   const history = {};
-  state.sales.forEach((pastSale) => pastSale.cards.filter((card) => card.buyer && card.status !== "available").forEach((card) => {
+  state.sales.forEach((pastSale) => pastSale.cards.filter(cardInOrder).forEach((card) => {
     const item = history[card.buyer] ||= { cards: 0, players: {}, brands: {}, years: {} };
     item.cards += 1;
     item.players[card.name] = (item.players[card.name] || 0) + 1;
@@ -598,7 +623,8 @@ function healthIssues() {
     if (!Number.isFinite(Number(card.price)) || Number(card.price) <= 0) issues.push({ level: "error", area: "Pricing", message: `${label} has no valid claim price.`, cardId: card.id });
     if (!card.imagePath) issues.push({ level: "warning", area: "Images", message: `${label} has no matched image.`, cardId: card.id });
     if (card.status !== "available" && !card.buyer) issues.push({ level: "error", area: "Claims", message: `${label} is claimed without a buyer.`, cardId: card.id });
-    if (card.buyer && Number(card.claimPrice ?? card.price) < Number(card.purchasePrice || 0)) issues.push({ level: "warning", area: "Profit", message: `${label} is selling below purchase price.`, cardId: card.id });
+    const decisionPrice = card.claimType === "offer" && card.offerPrice != null ? offerDecisionPrice(card) : Number(card.claimPrice ?? card.price);
+    if (card.buyer && decisionPrice < Number(card.purchasePrice || 0)) issues.push({ level: "warning", area: "Profit", message: `${label} is selling below purchase price.`, cardId: card.id });
   });
   const paths = new Set(); sale.cards.filter((card) => card.imagePath).forEach((card) => { const key = card.imagePath.toLowerCase(); if (paths.has(key)) issues.push({ level: "error", area: "Images", message: `An image is linked to more than one card: ${card.imagePath.split(/[\\/]/).pop()}.`, cardId: card.id }); paths.add(key); });
   buyers().forEach((buyer) => orderFlags(buyer).forEach((flag) => issues.push({ level: "warning", area: "Order", message: `${buyer}: ${flag}.`, buyer })));
@@ -627,11 +653,11 @@ function renderLiveSale() {
 }
 
 function showView(view) {
-  const refresh = { sale: () => { renderListings(); renderImages(); }, claims: renderClaims, orders: renderOrders, packing: renderPacking, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck };
+  const refresh = { sale: () => { renderListings(); renderImages(); }, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck };
   refresh[view]?.();
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `${view}View`));
-  const labels = { sale: "SALE WORKSPACE", claims: "CLAIMS DESK", orders: "BUYER ORDERS", packing: "PACKING", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK" };
+  const labels = { sale: "SALE WORKSPACE", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK" };
   $("#viewEyebrow").textContent = labels[view];
 }
 
@@ -1200,24 +1226,117 @@ function assignBuyer(cardId, buyerName, offeredPrice, claimType = "claim", claim
   const buyer = String(buyerName || "").trim();
   if (!card || !buyer) return toast("Enter a buyer name first.");
   const hasOffer = claimType === "offer";
+  const wasAcceptedOffer = hasOffer && card.offerStatus === "accepted";
   const acceptedPrice = hasOffer ? Number(offeredPrice) : Number(card.price);
   if (hasOffer && String(offeredPrice ?? "").trim() === "") return toast("Enter the accepted offer price.");
   if (!Number.isFinite(acceptedPrice) || acceptedPrice < 0) return toast("Enter a valid price.");
   snapshotSale(`Before assigning ${card.ref} to ${buyer}`);
   const previousBuyer = card.buyer;
-  card.status = "claimed";
   card.buyer = buyer;
-  card.claimPrice = acceptedPrice;
   card.claimType = hasOffer ? "offer" : "claim";
-  if (hasOffer) card.offerPrice = acceptedPrice;
-  else delete card.offerPrice;
   card.claimedAt ||= new Date().toISOString();
   card.claimUpdatedAt = new Date().toISOString();
   card.claimNote = String(claimNote || "").trim();
-  orderFor(buyer);
-  state.selectedBuyer = buyer;
+  if (wasAcceptedOffer) {
+    card.status = "claimed";
+    card.offerPrice = acceptedPrice;
+    card.claimPrice = Number(card.counterPrice ?? acceptedPrice);
+    orderFor(buyer);
+    state.selectedBuyer = buyer;
+  } else if (hasOffer) {
+    card.status = "offered";
+    card.offerPrice = acceptedPrice;
+    card.offerStatus = "pending";
+    card.offerReceivedAt = new Date().toISOString();
+    delete card.claimPrice;
+    delete card.counterPrice;
+    delete card.counteredAt;
+    delete card.offerAcceptedAt;
+  } else {
+    card.status = "claimed";
+    card.claimPrice = acceptedPrice;
+    delete card.offerPrice;
+    delete card.offerStatus;
+    delete card.counterPrice;
+    delete card.offerReceivedAt;
+    delete card.offerAcceptedAt;
+    orderFor(buyer);
+    state.selectedBuyer = buyer;
+  }
   recordAudit(claimType, previousBuyer && previousBuyer !== buyer ? `Moved ${card.ref} · ${card.name} from ${previousBuyer} to ${buyer}` : `${claimType === "offer" ? "Offer" : "Claim"} recorded for ${card.ref} · ${card.name}`, { cardId: card.id, buyer });
-  saveSoon(); render(); toast(`${card.ref} assigned to ${buyer}.`);
+  saveSoon(); render(); toast(hasOffer && !wasAcceptedOffer ? `${card.ref} offer sent to the Offers tab.` : `${card.ref} assigned to ${buyer}.`);
+}
+
+function acceptOffer(cardId) {
+  const card = activeSale().cards.find((item) => item.id === cardId);
+  if (!card || card.claimType !== "offer" || !card.buyer || card.offerStatus === "accepted") return;
+  const acceptedPrice = offerDecisionPrice(card);
+  if (!Number.isFinite(acceptedPrice) || acceptedPrice < 0) return toast("This offer does not have a valid price.");
+  snapshotSale(`Before accepting offer on ${card.ref}`);
+  card.status = "claimed";
+  card.offerStatus = "accepted";
+  card.claimPrice = acceptedPrice;
+  card.offerAcceptedAt = new Date().toISOString();
+  card.claimUpdatedAt = card.offerAcceptedAt;
+  orderFor(card.buyer);
+  state.selectedBuyer = card.buyer;
+  recordAudit("offer-accepted", `Accepted ${money(acceptedPrice)} offer for ${card.ref} · ${card.name}`, { cardId: card.id, buyer: card.buyer });
+  saveSoon(); render(); toast(`${card.ref} added to ${card.buyer}’s order at ${money(acceptedPrice)}.`);
+}
+
+function rejectOffer(cardId) {
+  const card = activeSale().cards.find((item) => item.id === cardId);
+  if (!card || card.claimType !== "offer" || card.offerStatus === "accepted") return;
+  const buyer = card.buyer;
+  if (!window.confirm(`Reject ${buyer || "this buyer"}’s ${money(card.offerPrice)} offer and return the card to the open pool?`)) return;
+  snapshotSale(`Before rejecting offer on ${card.ref}`);
+  card.status = "available";
+  ["buyer", "claimPrice", "offerPrice", "offerStatus", "counterPrice", "counteredAt", "offerReceivedAt", "offerAcceptedAt", "claimedAt", "claimUpdatedAt", "claimType", "claimNote", "packed"].forEach((key) => delete card[key]);
+  recordAudit("offer-rejected", `Rejected ${buyer || "buyer"} offer for ${card.ref} · ${card.name}`, { cardId: card.id, buyer });
+  saveSoon(); render(); toast(`${card.ref} returned to the open pool.`);
+}
+
+function counterOfferMessage(card, counterPrice) {
+  const buyer = String(card.buyer || "").trim();
+  const values = {
+    firstName: buyer.split(/\s+/)[0] || buyer,
+    buyer,
+    card: `${card.year || ""} ${card.set || ""} ${numberLabel(card)} ${card.name || ""}`.replace(/\s+/g, " ").trim(),
+    listPrice: money(card.price),
+    offerPrice: money(card.offerPrice),
+    counterPrice: money(counterPrice)
+  };
+  return (ensureMessageTemplates().counterOffer || DEFAULT_MESSAGE_TEMPLATES.counterOffer).replace(/\{(firstName|buyer|card|listPrice|offerPrice|counterPrice)\}/g, (_match, key) => values[key] ?? "").trim();
+}
+
+function openCounterOffer(cardId) {
+  const card = activeSale().cards.find((item) => item.id === cardId);
+  if (!card || card.claimType !== "offer" || card.offerStatus === "accepted") return;
+  const initial = Number(card.counterPrice ?? card.price);
+  $("#counterOfferCardId").value = card.id;
+  $("#counterOfferTitle").textContent = `${card.ref} · ${card.name}`;
+  $("#counterListPrice").textContent = money(card.price);
+  $("#counterOriginalPrice").textContent = money(card.offerPrice);
+  $("#counterOfferPrice").value = Number.isFinite(initial) ? initial.toFixed(2) : "";
+  $("#counterOfferMessage").value = counterOfferMessage(card, initial);
+  $("#counterOfferDialog").showModal();
+}
+
+async function copyCounterOffer() {
+  const card = activeSale().cards.find((item) => item.id === $("#counterOfferCardId").value);
+  const counterPrice = Number($("#counterOfferPrice").value);
+  if (!card || !Number.isFinite(counterPrice) || counterPrice < 0) return toast("Enter a valid counter price.");
+  const message = $("#counterOfferMessage").value.trim();
+  if (!message) return toast("Enter a counter message.");
+  const copied = await window.cardSale.copyText(message).catch(() => false);
+  if (!copied) return toast("The counter message could not be copied.");
+  snapshotSale(`Before countering offer on ${card.ref}`);
+  card.counterPrice = counterPrice;
+  card.offerStatus = "countered";
+  card.counteredAt = new Date().toISOString();
+  recordAudit("offer-countered", `Countered ${card.buyer} at ${money(counterPrice)} for ${card.ref} · ${card.name}`, { cardId: card.id, buyer: card.buyer });
+  $("#counterOfferDialog").close();
+  saveSoon(); render(); toast("Counter message copied and offer updated.");
 }
 
 function clearClaim(cardId) {
@@ -1229,7 +1348,13 @@ function clearClaim(cardId) {
   delete card.buyer;
   delete card.claimPrice;
   delete card.offerPrice;
+  delete card.offerStatus;
+  delete card.counterPrice;
+  delete card.counteredAt;
+  delete card.offerReceivedAt;
+  delete card.offerAcceptedAt;
   delete card.claimedAt;
+  delete card.claimUpdatedAt;
   delete card.claimType;
   delete card.packed;
   delete card.claimNote;
@@ -1669,17 +1794,34 @@ function applyParsedClaims() {
   snapshotSale(`Before applying ${valid.length} parsed claims`);
   valid.forEach((match) => {
     const card = match.card;
-    card.status = "claimed"; card.buyer = match.buyer; card.claimType = match.type; card.claimPrice = match.type === "offer" ? match.price : Number(card.price); card.claimedAt ||= new Date().toISOString(); card.claimUpdatedAt = new Date().toISOString();
-    if (match.type === "offer") card.offerPrice = match.price; else delete card.offerPrice;
-    orderFor(match.buyer);
+    card.status = match.type === "offer" ? "offered" : "claimed"; card.buyer = match.buyer; card.claimType = match.type; card.claimedAt ||= new Date().toISOString(); card.claimUpdatedAt = new Date().toISOString();
+    if (match.type === "offer") {
+      card.offerPrice = match.price; card.offerStatus = "pending"; card.offerReceivedAt = new Date().toISOString(); delete card.claimPrice; delete card.counterPrice; delete card.counteredAt;
+    } else {
+      card.claimPrice = Number(card.price); delete card.offerPrice; delete card.offerStatus; delete card.counterPrice; orderFor(match.buyer);
+    }
     recordAudit(match.type, `${match.type === "offer" ? "Offer" : "Claim"} parsed for ${card.ref} · ${card.name}`, { cardId: card.id, buyer: match.buyer });
   });
   const applied = new Set(valid.map((match) => match.line)); activeSale().unrecognizedComments = (activeSale().unrecognizedComments || []).filter((line) => !applied.has(line));
-  $("#claimParserDialog").close(); saveSoon(); render(); toast(`${valid.length} parsed claims applied.`);
+  $("#claimParserDialog").close(); saveSoon(); render(); toast(`${valid.length} parsed claims applied. Offers are waiting in the Offers tab.`);
 }
 
 function bindEvents() {
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
+  $("#offerRows").addEventListener("click", (event) => {
+    const acceptId = event.target.dataset.acceptOffer;
+    const rejectId = event.target.dataset.rejectOffer;
+    const counterId = event.target.dataset.counterOffer;
+    if (acceptId) acceptOffer(acceptId);
+    if (rejectId) rejectOffer(rejectId);
+    if (counterId) openCounterOffer(counterId);
+  });
+  $("#editCounterTemplateBtn").addEventListener("click", openMessageTemplates);
+  $("#counterOfferPrice").addEventListener("input", (event) => {
+    const card = activeSale().cards.find((item) => item.id === $("#counterOfferCardId").value);
+    if (card) $("#counterOfferMessage").value = counterOfferMessage(card, Number(event.target.value));
+  });
+  $("#copyCounterOfferBtn").addEventListener("click", copyCounterOffer);
   $("#profitBreakdown").addEventListener("click", (event) => {
     const key = event.target.closest("[data-profit-sort]")?.dataset.profitSort;
     if (!key) return;
@@ -2055,6 +2197,16 @@ async function init() {
         card.customOrder ??= card.sourceOrder;
         card.purchaseDate = normalizePurchaseDate(card.purchaseDate);
         if (card.status !== "available") card.claimType ||= card.offerPrice != null ? "offer" : "claim";
+        if (card.claimType === "offer" && card.offerPrice != null) {
+          card.offerStatus ||= card.status === "offered" ? "pending" : "accepted";
+          if (["pending", "countered"].includes(card.offerStatus)) {
+            card.status = "offered";
+            delete card.claimPrice;
+          } else {
+            card.status = "claimed";
+            card.claimPrice ??= Number(card.offerPrice);
+          }
+        }
         if (card.claimedAt && !sale.audit.some((item) => item.cardId === card.id && ["claim", "offer"].includes(item.type))) sale.audit.push({ id: uid(), at: card.claimedAt, type: card.claimType || "claim", message: `${card.claimType === "offer" ? "Offer" : "Claim"} recorded for ${card.ref} · ${card.name}`, cardId: card.id, buyer: card.buyer });
         const imageKey = String(card.imagePath || "").toLowerCase();
         if (imageKey && usedImages.has(imageKey)) card.imagePath = "";

@@ -18,12 +18,13 @@
         <nav aria-label="Main navigation">
           <button class="nav-item active" data-view="sale"><span>01</span> Sale workspace</button>
           <button class="nav-item" data-view="claims"><span>02</span> Claims desk</button>
-          <button class="nav-item" data-view="orders"><span>03</span> Buyer orders</button>
-          <button class="nav-item" data-view="packing"><span>04</span> Packing</button>
-          <button class="nav-item" data-view="dashboard"><span>05</span> Profit dashboard</button>
-          <button class="nav-item" data-view="live"><span>06</span> Live Sale Mode</button>
-          <button class="nav-item" data-view="buyers"><span>07</span> Buyer profiles</button>
-          <button class="nav-item" data-view="health"><span>08</span> Health check</button>
+          <button class="nav-item" data-view="offers"><span>03</span> Offers</button>
+          <button class="nav-item" data-view="orders"><span>04</span> Buyer orders</button>
+          <button class="nav-item" data-view="packing"><span>05</span> Packing</button>
+          <button class="nav-item" data-view="dashboard"><span>06</span> Profit dashboard</button>
+          <button class="nav-item" data-view="live"><span>07</span> Live Sale Mode</button>
+          <button class="nav-item" data-view="buyers"><span>08</span> Buyer profiles</button>
+          <button class="nav-item" data-view="health"><span>09</span> Health check</button>
         </nav>
         <div class="sale-switcher">
           <label for="saleSelect">Active sale</label>
@@ -119,6 +120,13 @@
               <div id="claimTimeline" class="timeline"></div>
             </section>
           </div>
+        </section>
+
+        <section id="offersView" class="view">
+          <section class="panel offers-panel">
+            <div class="panel-header"><div><h2>Offer desk</h2><p>Review pending offers before they become buyer orders.</p></div><div class="offer-header-actions"><span id="pendingOfferCount" class="count-pill">0 pending</span><button id="editCounterTemplateBtn" class="secondary">Edit counter template</button></div></div>
+            <div class="table-wrap offers-table-wrap"><table><thead><tr><th>Card</th><th>Buyer</th><th>Listed</th><th>Offer</th><th>Purchase price</th><th>Status</th><th></th></tr></thead><tbody id="offerRows"></tbody></table><div id="offersEmpty" class="empty-state hidden"><div class="empty-icon">$</div><h3>No offers yet</h3><p>Offers recorded in Claims Desk will appear here for review.</p></div></div>
+          </section>
         </section>
 
         <section id="ordersView" class="view">
@@ -228,7 +236,9 @@
 
     <dialog id="packingHistoryDialog"><form method="dialog" class="dialog-card large"><div class="dialog-header"><div><p class="eyebrow">PRINT HISTORY</p><h2>Packing-slip activity</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><div id="packingPrintHistory" class="print-history"></div><div class="dialog-actions"><button value="cancel" class="primary">Done</button></div></form></dialog>
 
-    <dialog id="messageTemplatesDialog"><form method="dialog" class="dialog-card large"><div class="dialog-header"><div><p class="eyebrow">BUYER MESSAGES</p><h2>Edit message templates</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><p class="dialog-copy">These templates are used by the copy buttons in Buyer Orders and Packing. Available fields: <code>{firstName}</code>, <code>{buyer}</code>, <code>{saleName}</code>, <code>{cardCount}</code>, <code>{cardList}</code>, <code>{subtotal}</code>, <code>{discountLine}</code>, <code>{shippingMethod}</code>, <code>{shipping}</code>, <code>{total}</code>, <code>{trackingNumber}</code>, and <code>{trackingLine}</code>.</p><div class="message-template-grid"><label>Order confirmation<textarea id="messageTemplate-orderSummary" rows="10"></textarea></label><label>Payment due<textarea id="messageTemplate-paymentDue" rows="5"></textarea></label><label>Payment received<textarea id="messageTemplate-paymentReceived" rows="5"></textarea></label><label>Shipping confirmation<textarea id="messageTemplate-shipped" rows="7"></textarea></label><label>Shipping delayed<textarea id="messageTemplate-delayed" rows="5"></textarea></label></div><div class="dialog-actions spread"><button id="resetMessageTemplatesBtn" type="button" class="secondary">Restore defaults</button><div><button value="cancel" class="secondary">Cancel</button><button id="saveMessageTemplatesBtn" type="button" class="primary">Save templates</button></div></div></form></dialog>
+    <dialog id="messageTemplatesDialog"><form method="dialog" class="dialog-card large"><div class="dialog-header"><div><p class="eyebrow">BUYER MESSAGES</p><h2>Edit message templates</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><p class="dialog-copy">These templates are used by the copy buttons in Offers, Buyer Orders, and Packing. Order fields: <code>{firstName}</code>, <code>{buyer}</code>, <code>{saleName}</code>, <code>{cardCount}</code>, <code>{cardList}</code>, <code>{subtotal}</code>, <code>{discountLine}</code>, <code>{shippingMethod}</code>, <code>{shipping}</code>, <code>{total}</code>, <code>{trackingNumber}</code>, and <code>{trackingLine}</code>. Counter-offer fields also include <code>{card}</code>, <code>{listPrice}</code>, <code>{offerPrice}</code>, and <code>{counterPrice}</code>.</p><div class="message-template-grid"><label>Order confirmation<textarea id="messageTemplate-orderSummary" rows="10"></textarea></label><label>Payment due<textarea id="messageTemplate-paymentDue" rows="5"></textarea></label><label>Payment received<textarea id="messageTemplate-paymentReceived" rows="5"></textarea></label><label>Shipping confirmation<textarea id="messageTemplate-shipped" rows="7"></textarea></label><label>Shipping delayed<textarea id="messageTemplate-delayed" rows="5"></textarea></label><label>Counter offer<textarea id="messageTemplate-counterOffer" rows="6"></textarea></label></div><div class="dialog-actions spread"><button id="resetMessageTemplatesBtn" type="button" class="secondary">Restore defaults</button><div><button value="cancel" class="secondary">Cancel</button><button id="saveMessageTemplatesBtn" type="button" class="primary">Save templates</button></div></div></form></dialog>
+
+    <dialog id="counterOfferDialog"><form method="dialog" class="dialog-card"><div class="dialog-header"><div><p class="eyebrow">COUNTER OFFER</p><h2 id="counterOfferTitle">Reply to buyer</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><input id="counterOfferCardId" type="hidden" /><div class="counter-price-summary"><span>Listed <strong id="counterListPrice">$0.00</strong></span><span>Buyer offered <strong id="counterOriginalPrice">$0.00</strong></span></div><label>Your counter price<input id="counterOfferPrice" type="number" min="0" step="0.01" /></label><label>Message<textarea id="counterOfferMessage" rows="7"></textarea><small>Edit this message before copying if needed.</small></label><div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="copyCounterOfferBtn" type="button" class="primary">Copy counter message</button></div></form></dialog>
 
     <dialog id="shortcutsDialog"><form method="dialog" class="dialog-card"><div class="dialog-header"><div><p class="eyebrow">KEYBOARD-FIRST CONTROLS</p><h2>Shortcuts</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><div class="shortcut-list"><div><kbd>Ctrl</kbd> + <kbd>K</kbd><span>Search current sale</span></div><div><kbd>Ctrl</kbd> + <kbd>I</kbd><span>Import spreadsheet</span></div><div><kbd>Ctrl</kbd> + <kbd>L</kbd><span>Open Live Sale Mode</span></div><div><kbd>Ctrl</kbd> + <kbd>Enter</kbd><span>Copy current live listing</span></div><div><kbd>←</kbd> / <kbd>→</kbd><span>Previous or next live card</span></div><div><kbd>E</kbd><span>Quick-edit selected or current live card</span></div><div><kbd>Ctrl</kbd> + <kbd>Z</kbd><span>Undo last supported action</span></div><div><kbd>?</kbd><span>Show this guide</span></div></div><div class="dialog-actions"><button value="cancel" class="primary">Done</button></div></form></dialog>
 
