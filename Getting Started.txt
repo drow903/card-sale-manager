@@ -1,4 +1,18 @@
 CARD SALE MANAGER — GETTING STARTED
+POST. SELL. TRACK.
+From first claim to final shipment.
+
+FIRST RUN
+
+The setup wizard chooses your shipping defaults, primary image folder, and
+optional seller name. Keep the fictional sample sale to follow the built-in
+guided walkthrough without using real customer information. You can reopen
+Setup and the walkthrough from Help & Guide at any time.
+
+The Command Center is the default starting page. Green actions move work
+forward. Amber or red items need review. Its checklist links directly to
+pending offers, unpaid orders, address problems, missing images, and work that
+is ready to pack or ship.
 
 1. Double-click Card Sale Manager.exe.
 2. Choose New sale and give the sale a name.
@@ -59,7 +73,10 @@ CARD SALE MANAGER — GETTING STARTED
     prior print status. Select any buyers, then print them in one job or save a
     combined PDF. Successful output is recorded in Print history, and reprints
     are clearly labeled. Available formats include letter, half-sheet, two-up,
-    4 x 6 label, and compact inserts.
+    4 x 6 label, and compact inserts. The built-in Card Sale Manager logo and
+    green accent are the default; a custom seller logo and colors can still
+    replace them. PWE labels have a separate editable 4 x 6 thermal-label
+    designer.
 22. The Theme button cycles between System, Light, Dark, and High Contrast. The Motion button
     reduces animation. These preferences are remembered, but printed packing
     slips always use a clean white background.

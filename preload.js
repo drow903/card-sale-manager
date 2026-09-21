@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("cardSale", {
   load: () => ipcRenderer.invoke("data:load"),
   save: (payload) => ipcRenderer.invoke("data:save", payload),
   backup: (reason) => ipcRenderer.invoke("data:backup", reason),
+  saveDiagnosticReport: (report) => ipcRenderer.invoke("diagnostic:save", report),
   chooseSpreadsheet: () => ipcRenderer.invoke("dialog:spreadsheet"),
   parseSpreadsheet: (filePath) => {
     const workbook = XLSX.readFile(filePath, { cellDates: false });
@@ -28,6 +29,7 @@ contextBridge.exposeInMainWorld("cardSale", {
   openTracking: (url) => ipcRenderer.invoke("tracking:open", url),
   fetchFacebookPost: (url) => ipcRenderer.invoke("facebook:fetch-public", url),
   printPackingSlip: (payload) => ipcRenderer.invoke("print:packing-slip", payload),
+  previewPackingSlip: (payload) => ipcRenderer.invoke("packing:preview-pdf", payload),
   exportPackingPdf: (payload) => ipcRenderer.invoke("packing:export-pdf", payload),
   choosePackingLogo: () => ipcRenderer.invoke("packing:choose-logo"),
   packingFileDataUrl: (filePath) => ipcRenderer.invoke("packing:file-data-url", filePath),

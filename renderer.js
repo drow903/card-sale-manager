@@ -7,20 +7,23 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => 
 const fileUrl = (value) => value ? encodeURI(`file:///${value.replace(/\\/g, "/")}`) : "";
 const DEFAULT_TEMPLATE = "{year} {brand} {player} #{number} {grade} ({flaws}) - ${claimPrice}";
 const DEFAULT_CLAIM_WORDS = ["claim", "claimed", "take", "taken", "mine", "sold"];
+const DEFAULT_SALE_INTRO = "Welcome to {saleName}!\n\nI’ll be posting {cardCount} cards spanning {yearRange}. To claim a card, comment {claimWords} on the individual listing.\n\nShipping:\n• PWE: {pwePrice}\n• PMWT: {pmwtPrice}\n\nPlease keep claims in the order posted. Offers will be reviewed separately. Thanks, and have fun!";
+const DEFAULT_PWE_LABEL = { heading: "PLEASE DELIVER TO", returnName: "", returnAddress: "", footer: "Thank you! Please do not bend.", accent: "#071A2B", size: "standard", showOrder: true };
+const BUILT_IN_BRAND_LOGO = `data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 140"><rect x="18" y="34" width="62" height="74" rx="7" fill="white" stroke="#2F6BFF" stroke-width="8" transform="rotate(-13 49 71)"/><rect x="32" y="24" width="62" height="78" rx="7" fill="white" stroke="#071A2B" stroke-width="8" transform="rotate(-4 63 63)"/><path d="M62 29h37c6 0 11 5 11 11v38l-29 33-29-29V40c0-6 4-11 10-11Z" fill="#19B56B" stroke="#071A2B" stroke-width="7"/><circle cx="92" cy="47" r="6" fill="#071A2B"/><path d="m66 73 11 11 21-24" fill="none" stroke="white" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><text x="132" y="66" fill="#071A2B" font-family="Segoe UI,Arial" font-size="42" font-weight="800">CARD SALE</text><text x="134" y="96" fill="#334155" font-family="Segoe UI,Arial" font-size="24" font-weight="700" letter-spacing="8">MANAGER</text><text x="188" y="121" fill="#119754" font-family="Segoe UI,Arial" font-size="18" font-weight="700">Post. Sell. Track.</text></svg>')}`;
 const PACKING_SECTIONS = [
   ["header", "Brand header"], ["buyer", "Buyer and order"], ["message", "Thank-you message"],
   ["items", "Card list"], ["totals", "Totals"], ["policy", "Return policy"],
   ["qr", "QR code and links"], ["footer", "Footer"]
 ];
 const DEFAULT_PACKING_DESIGN = {
-  name: "Standard branded slip", pageSize: "letter", accent: "#d9693d", brandName: "Card Sale Manager", contact: "", logoPath: "",
+  name: "Standard branded slip", pageSize: "letter", accent: "#19b56b", brandName: "Card Sale Manager", contact: "Post. Sell. Track.", logoPath: "",
   socialLink: "", paymentLink: "", feedbackLink: "", upcomingLink: "", qrType: "social", qrUrl: "",
   header: "Thanks for joining the sale!", thanks: "Thank you for your purchase. I appreciate your business!", returnPolicy: "Please contact me if anything in your order needs attention.", footer: "Packed with care.",
   showAddress: true, showOrderNumber: true, showPayment: true, showShipping: true, showPrices: true, showDetails: true, showThumbnails: false, includeLabel: false,
   sectionOrder: PACKING_SECTIONS.map(([id]) => id)
 };
 const DEFAULT_MESSAGE_TEMPLATES = {
-  orderSummary: "Hi {firstName} — here’s your total from the sale:\n\n{cardList}\n\nCards: {subtotal}\n{discountLine}Shipping ({shippingMethod}): {shipping}\nTotal: {total}\n\nPlease confirm your mailing address when you send payment. Thanks!",
+  orderSummary: "Hi {firstName} — here’s your total from the sale:\n\n{cardList}\n\nCards ({cardCount}): {subtotal}\nShipping ({shippingMethod}): {shipping}\n{discountLine}Total: {total}\n\nPlease confirm your mailing address when you send payment. Thanks!",
   paymentDue: "Hi {firstName} — your total is {total} including {shippingMethod} shipping. Please send payment and confirm your mailing address. Thanks!",
   paymentReceived: "Hi {firstName} — payment received. Thank you! I’ll get your cards packed and will send tracking when available.",
   shipped: "Hi {firstName} — your cards have shipped!\n\n{trackingLine}\n\nThanks again for your purchase!",
@@ -39,12 +42,12 @@ const starterSale = {
   pmwtShipping: 5,
   template: DEFAULT_TEMPLATE,
   cards: [
-    { id: uid(), ref: "1", year: "1962", set: "Topps", number: "5", name: "Sandy Koufax", condition: "VG-EX", price: 42, purchasePrice: 30, purchaseDate: "", notes: "Clean back", status: "available", imagePath: "" },
-    { id: uid(), ref: "2", year: "1962", set: "Topps", number: "18", name: "Managers' Dream", condition: "VG", price: 48, purchasePrice: 34, purchaseDate: "", notes: "Soft corners", status: "available", imagePath: "" },
-    { id: uid(), ref: "3", year: "1962", set: "Topps", number: "50", name: "Stan Musial", condition: "EX", price: 59, purchasePrice: 41, purchaseDate: "", notes: "Sharp color", status: "claimed", buyer: "Mike R", claimPrice: 55, offerPrice: 55, offerStatus: "accepted", claimType: "offer", claimedAt: new Date().toISOString(), imagePath: "" }
+    { id: uid(), ref: "1", year: "1961", set: "Heritage Stars", number: "12", name: "Jack Mercer", condition: "VG-EX", price: 12, purchasePrice: 6, purchaseDate: "", notes: "Light corner wear", status: "available", imagePath: "" },
+    { id: uid(), ref: "2", year: "1974", set: "Court Kings", number: "8", name: "Eli Turner", condition: "EX", price: 18, purchasePrice: 9, purchaseDate: "", notes: "None", status: "offered", buyer: "Jamie Example", offerPrice: 15, offerStatus: "pending", claimType: "offer", claimedAt: new Date().toISOString(), imagePath: "" },
+    { id: uid(), ref: "3", year: "1968", set: "Ice Legends", number: "30", name: "Noah Reed", condition: "VG", price: 15, purchasePrice: 7, purchaseDate: "", notes: "Soft lower-left corner", status: "claimed", buyer: "Alex Sample", claimPrice: 14, claimType: "claim", claimedAt: new Date().toISOString(), imagePath: "" }
   ],
   images: [],
-  orders: { "Mike R": { status: "awaiting", shippingMethod: "PMWT", discount: 0 } }
+  orders: { "Alex Sample": { status: "awaiting", shippingMethod: "PWE", discount: 0 } }
 };
 
 let state = { sales: [starterSale], activeSaleId: starterSale.id, selectedBuyer: "Mike R", filter: "all", query: "", claimQuery: "", lookupSettings: { primaryFolder: "", additionalFolders: [], excludedFolders: [] } };
@@ -60,8 +63,17 @@ let liveIndex = 0;
 let profileQuery = "";
 let packingDesignerDraft = null;
 let packingBulkSelection = new Set();
+let setupStep = 0;
+let walkthroughStep = 0;
+let installedVersion = "";
+const runtimeErrors = [];
+const scrubDiagnosticText = (value) => String(value ?? "").replace(/file:\/{2,3}[^\s)]+/gi, "[local path]").replace(/[A-Za-z]:[\\/][^\n\r]*/g, "[local path]").slice(0, 2000);
+window.addEventListener("error", (event) => { runtimeErrors.push({ at: new Date().toISOString(), type: "error", message: scrubDiagnosticText(event.message || "Unknown renderer error").slice(0, 500) }); if (runtimeErrors.length > 25) runtimeErrors.shift(); });
+window.addEventListener("unhandledrejection", (event) => { runtimeErrors.push({ at: new Date().toISOString(), type: "promise", message: scrubDiagnosticText(event.reason?.message || event.reason || "Unhandled promise rejection").slice(0, 500) }); if (runtimeErrors.length > 25) runtimeErrors.shift(); });
 const packingPreviewSheet = typeof CSSStyleSheet !== "undefined" ? new CSSStyleSheet() : null;
 if (packingPreviewSheet && typeof document !== "undefined" && document.adoptedStyleSheets) document.adoptedStyleSheets = [...document.adoptedStyleSheets, packingPreviewSheet];
+const pwePreviewSheet = typeof CSSStyleSheet !== "undefined" ? new CSSStyleSheet() : null;
+if (pwePreviewSheet && typeof document !== "undefined" && document.adoptedStyleSheets) document.adoptedStyleSheets = [...document.adoptedStyleSheets, pwePreviewSheet];
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -87,14 +99,38 @@ function recordAudit(type, message, details = {}, sale = activeSale()) {
 }
 
 function allBuyerNames() {
-  return [...new Set(state.sales.flatMap((sale) => sale.cards.map((card) => card.buyer).filter(Boolean)))].sort((a, b) => a.localeCompare(b));
+  return [...new Set([...Object.keys(state.buyerProfiles || {}), ...state.sales.flatMap((sale) => sale.cards.map((card) => card.buyer).filter(Boolean))])].sort((a, b) => a.localeCompare(b));
 }
 
 function buyerProfile(name) {
   state.buyerProfiles ||= {};
-  state.buyerProfiles[name] ||= { notes: "", address: "", tags: [] };
+  state.buyerProfiles[name] ||= { notes: "", address: "", tags: [], aliases: [], previousAddresses: [] };
   state.buyerProfiles[name].tags ||= [];
+  state.buyerProfiles[name].aliases ||= [];
+  state.buyerProfiles[name].previousAddresses ||= [];
   return state.buyerProfiles[name];
+}
+
+function canonicalBuyerName(name) {
+  const entered = String(name || "").trim();
+  if (!entered) return "";
+  const lower = entered.toLowerCase();
+  return Object.keys(state.buyerProfiles || {}).find((buyer) => buyer.toLowerCase() === lower || buyerProfile(buyer).aliases.some((alias) => alias.toLowerCase() === lower)) || entered;
+}
+
+function normalizedAddress(value) { return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+
+function addressWarnings(buyer, address = buyerProfile(buyer).address) {
+  const value = String(address || "").trim();
+  const warnings = [];
+  if (!value) return ["Mailing address is missing"];
+  if (!/\b\d{5}(?:-\d{4})?\b/.test(value)) warnings.push("ZIP code is missing or incomplete");
+  if (!/\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/i.test(value)) warnings.push("State abbreviation may be missing");
+  if (/\b(?:apt|apartment|unit|suite|ste)\b\s*$/i.test(value)) warnings.push("Apartment or unit number is incomplete");
+  const key = normalizedAddress(value);
+  const duplicate = key && Object.keys(state.buyerProfiles || {}).find((name) => name !== buyer && normalizedAddress(buyerProfile(name).address) === key);
+  if (duplicate) warnings.push(`Same address is also saved for ${duplicate}`);
+  return warnings;
 }
 
 function claimWords() {
@@ -106,8 +142,39 @@ function claimWords() {
 function ensureMessageTemplates() {
   state.preferences ||= {};
   state.preferences.messageTemplates ||= {};
+  const legacySummary = "Hi {firstName} — here’s your total from the sale:\n\n{cardList}\n\nCards: {subtotal}\n{discountLine}Shipping ({shippingMethod}): {shipping}\nTotal: {total}\n\nPlease confirm your mailing address when you send payment. Thanks!";
+  if (state.preferences.messageTemplates.orderSummary === legacySummary) state.preferences.messageTemplates.orderSummary = DEFAULT_MESSAGE_TEMPLATES.orderSummary;
   Object.entries(DEFAULT_MESSAGE_TEMPLATES).forEach(([key, value]) => { state.preferences.messageTemplates[key] ??= value; });
   return state.preferences.messageTemplates;
+}
+
+function ensureSaleIntroTemplate() {
+  state.preferences ||= {};
+  state.preferences.saleIntroTemplate ||= DEFAULT_SALE_INTRO;
+  return state.preferences.saleIntroTemplate;
+}
+
+function ensurePweLabelSettings() {
+  state.preferences ||= {};
+  state.preferences.pweLabel ||= clone(DEFAULT_PWE_LABEL);
+  return state.preferences.pweLabel;
+}
+
+function importPresets() {
+  state.importPresets ||= [];
+  return state.importPresets;
+}
+
+function offerDeskSettings() {
+  state.preferences ||= {};
+  state.preferences.offerDesk ||= { query: "", status: "all", buyer: "all", margin: "all", sortKey: "card", sortDirection: "asc" };
+  return state.preferences.offerDesk;
+}
+
+function orderDeskSettings() {
+  state.preferences ||= {};
+  state.preferences.orderDesk ||= { query: "", status: "all" };
+  return state.preferences.orderDesk;
 }
 
 function trackingUrl(value) {
@@ -150,6 +217,10 @@ function ensurePackingSettings() {
   state.preferences ||= {};
   state.preferences.packingDesign ||= clone(DEFAULT_PACKING_DESIGN);
   const design = state.preferences.packingDesign;
+  if (design.brandName === "Card Sale Manager") {
+    if (String(design.accent).toLowerCase() === "#d9693d") design.accent = "#19b56b";
+    if (!design.contact && !design.logoPath) design.contact = "Post. Sell. Track.";
+  }
   Object.entries(DEFAULT_PACKING_DESIGN).forEach(([key, value]) => { if (design[key] == null) design[key] = clone(value); });
   design.sectionOrder = [...new Set([...(design.sectionOrder || []), ...PACKING_SECTIONS.map(([id]) => id)])].filter((id) => PACKING_SECTIONS.some(([section]) => section === id));
   state.packingPrintHistory ||= [];
@@ -203,10 +274,10 @@ function orderFor(buyer) {
   sale.pweShipping ??= 1;
   sale.pmwtShipping ??= sale.shipping ?? 5;
   sale.orders ||= {};
-  sale.orders[buyer] ||= { status: "shopping", shippingMethod: "PMWT", discount: 0 };
+  sale.orders[buyer] ||= { status: "shopping", shippingMethod: pweEligible(buyer) ? "" : "PMWT", discount: 0 };
   const order = sale.orders[buyer];
-  order.shippingMethod ||= Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT";
-  if (order.shippingMethod === "PWE" && !pweEligible(buyer)) order.shippingMethod = "PMWT";
+  if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : (pweEligible(buyer) ? "" : "PMWT");
+  if (!order.shippingMethod && !pweEligible(buyer)) order.shippingMethod = "PMWT";
   return order;
 }
 
@@ -221,6 +292,7 @@ function pweEligible(buyer) {
 }
 
 function shippingAmount(order, sale = activeSale()) {
+  if (!order.shippingMethod) return 0;
   return Number(order.shippingMethod === "PWE" ? sale.pweShipping : sale.pmwtShipping) || 0;
 }
 
@@ -238,8 +310,8 @@ async function saveNow() {
   state.activeSaleId = activeSale().id;
   await window.cardSale.save(state);
   const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  $("#saveText").textContent = `All changes saved · ${time}`;
-  $("#saveDot").style.background = "#54c78c";
+  $("#saveText").textContent = `Changes saved locally · ${time}`;
+  $("#saveDot").style.background = "#19b56b";
 }
 
 function saveSoon() {
@@ -287,6 +359,7 @@ function render() {
   const sale = activeSale();
   $("#viewTitle").textContent = sale.name;
   $("#saleSelect").innerHTML = state.sales.map((item) => `<option value="${item.id}" ${item.id === sale.id ? "selected" : ""}>${escapeHtml(item.name)} (${item.cards.length} cards)</option>`).join("");
+  renderCommandCenter();
   renderStats();
   renderListings();
   renderImages();
@@ -299,6 +372,35 @@ function render() {
   renderBuyerProfiles();
   renderHealthCheck();
   applyDisplayPreferences();
+}
+
+function renderCommandCenter() {
+  const sale = activeSale();
+  const pendingOffers = sale.cards.filter((card) => card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus || "pending"));
+  const buyerNames = buyers();
+  const unpaid = buyerNames.filter((buyer) => !["paid", "packed", "shipped"].includes(orderFor(buyer).status));
+  const addressIssues = buyerNames.filter((buyer) => addressWarnings(buyer).length);
+  const shippingNeeded = buyerNames.filter((buyer) => !orderFor(buyer).shippingMethod);
+  const readyToPack = buyerNames.filter((buyer) => orderFor(buyer).status === "paid" && cardsForBuyer(buyer).some((card) => !card.packed));
+  const readyToShip = buyerNames.filter((buyer) => cardsForBuyer(buyer).length && cardsForBuyer(buyer).every((card) => card.packed) && orderFor(buyer).status !== "shipped");
+  const missingImages = sale.cards.filter((card) => card.status === "available" && !card.imagePath);
+  $("#commandStats").innerHTML = [["Available", sale.cards.filter((card) => card.status === "available").length, "cards still open"], ["Pending offers", pendingOffers.length, "need a decision"], ["Unpaid orders", unpaid.length, "awaiting payment"], ["Ready to ship", readyToShip.length, "fully packed"]].map(([label, value, sub]) => `<article class="stat"><span class="label">${label}</span><strong>${value}</strong><span class="sub">${sub}</span></article>`).join("");
+  const attention = [
+    [pendingOffers.length, "Offers awaiting a decision", "Review offers", "offers"],
+    [shippingNeeded.length, "Orders without shipping selected", "Choose shipping", "orders"],
+    [addressIssues.length, "Buyer addresses need review", "Validate addresses", "buyers"],
+    [unpaid.length, "Orders not marked paid", "Review payments", "orders"],
+    [missingImages.length, "Available cards missing images", "Match images", "sale"]
+  ].filter(([count]) => count);
+  $("#commandAttention").innerHTML = attention.length ? attention.map(([count, title, action, view]) => `<button class="command-item warning" data-command-view="${view}"><span>${count}</span><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(action)}</small></div><b>›</b></button>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>Nothing urgent</h3><p>This sale has no outstanding warnings.</p></div>`;
+  const ready = [
+    [readyToPack.length, "Paid orders ready to pack", "packing"],
+    [readyToShip.length, "Packed orders ready to ship", "packing"],
+    [sale.cards.filter((card) => card.status === "available" && card.imagePath && !card.hiddenAfterCopy).length, "Listings ready to copy", "live"]
+  ].filter(([count]) => count);
+  $("#commandReady").innerHTML = ready.length ? ready.map(([count, title, view]) => `<button class="command-item ready" data-command-view="${view}"><span>${count}</span><div><strong>${escapeHtml(title)}</strong><small>Open workflow</small></div><b>›</b></button>`).join("") : `<div class="empty-state"><p>No items are ready for the next step yet.</p></div>`;
+  const activity = (sale.audit || []).slice(0, 8);
+  $("#commandActivity").innerHTML = activity.length ? activity.map((item) => `<div class="timeline-item"><strong>${escapeHtml(item.message)}</strong><p>${new Date(item.at).toLocaleString()}</p></div>`).join("") : `<div class="empty-state"><p>Sale activity will appear here.</p></div>`;
 }
 
 function renderStats() {
@@ -411,7 +513,7 @@ function renderClaims() {
   const sale = activeSale();
   const legacyClaims = sale.cards.filter((card) => card.claimedAt).map((card) => ({ id: `legacy-${card.id}`, at: card.claimedAt, type: card.claimType || "claim", message: `${card.claimType === "offer" ? "Offer" : "Claim"} recorded for ${card.ref} · ${card.name}`, cardId: card.id, buyer: card.buyer }));
   const claims = (sale.audit?.length ? sale.audit : legacyClaims).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
-  $("#buyerNames").innerHTML = allBuyerNames().map((buyer) => `<option value="${escapeHtml(buyer)}"></option>`).join("");
+  $("#buyerNames").innerHTML = allBuyerNames().flatMap((buyer) => [buyer, ...buyerProfile(buyer).aliases]).map((buyer) => `<option value="${escapeHtml(buyer)}"></option>`).join("");
   const query = String(state.claimQuery || "").toLowerCase();
   const cards = sale.cards.filter((card) => Object.values(card).join(" ").toLowerCase().includes(query));
   $("#claimRows").innerHTML = cards.map((card) => {
@@ -428,9 +530,47 @@ function offerDecisionPrice(card) {
 }
 
 function renderOffers() {
-  const offers = activeSale().cards.filter((card) => card.claimType === "offer" && card.offerPrice != null && card.buyer);
-  const pending = offers.filter((card) => card.offerStatus !== "accepted");
+  const allOffers = activeSale().cards.filter((card) => card.claimType === "offer" && card.offerPrice != null && card.buyer);
+  const settings = offerDeskSettings();
+  const buyerNames = [...new Set(allOffers.map((card) => card.buyer))].sort((a, b) => a.localeCompare(b));
+  if (settings.buyer !== "all" && !buyerNames.includes(settings.buyer)) settings.buyer = "all";
+  const buyerFilter = $("#offerBuyerFilter");
+  buyerFilter.innerHTML = `<option value="all">All buyers</option>${buyerNames.map((buyer) => `<option value="${escapeHtml(buyer)}" ${settings.buyer === buyer ? "selected" : ""}>${escapeHtml(buyer)}</option>`).join("")}`;
+  $("#offerSearch").value = settings.query;
+  $("#offerStatusFilter").value = settings.status;
+  $("#offerMarginFilter").value = settings.margin;
+  const query = settings.query.trim().toLowerCase();
+  const statusFor = (card) => card.offerStatus || (card.status === "claimed" ? "accepted" : "pending");
+  const offers = allOffers.filter((card) => {
+    const status = statusFor(card);
+    const price = offerDecisionPrice(card);
+    const cost = Number(card.purchasePrice);
+    const searchText = [card.ref, card.year, card.set, card.number, card.name, card.buyer].join(" ").toLowerCase();
+    if (query && !searchText.includes(query)) return false;
+    if (settings.status !== "all" && status !== settings.status) return false;
+    if (settings.buyer !== "all" && card.buyer !== settings.buyer) return false;
+    if (settings.margin === "below-cost" && !(cost > 0 && price < cost)) return false;
+    if (settings.margin === "above-cost" && !(cost > 0 && price >= cost)) return false;
+    if (settings.margin === "no-cost" && cost > 0) return false;
+    return true;
+  }).sort((a, b) => {
+    const values = {
+      card: (card) => `${card.year} ${card.set} ${card.name} ${card.number}`,
+      buyer: (card) => card.buyer,
+      listed: (card) => Number(card.price || 0),
+      offer: (card) => offerDecisionPrice(card),
+      cost: (card) => Number(card.purchasePrice || 0),
+      status: (card) => ({ pending: 0, countered: 1, accepted: 2 })[statusFor(card)] ?? 9
+    };
+    const getter = values[settings.sortKey] || values.card;
+    const left = getter(a); const right = getter(b);
+    const result = typeof left === "number" ? left - right : String(left).localeCompare(String(right), undefined, { numeric: true });
+    return (settings.sortDirection === "desc" ? -result : result) || Number(a.sourceOrder || 0) - Number(b.sourceOrder || 0);
+  });
+  const pending = allOffers.filter((card) => statusFor(card) !== "accepted");
   $("#pendingOfferCount").textContent = `${pending.length} pending`;
+  $("#offerShownCount").textContent = `${offers.length} of ${allOffers.length} shown`;
+  $$('[data-offer-sort]').forEach((button) => { button.querySelector("span").textContent = settings.sortKey === button.dataset.offerSort ? (settings.sortDirection === "asc" ? "▲" : "▼") : ""; });
   $("#offersEmpty").classList.toggle("hidden", offers.length !== 0);
   $("#offerRows").innerHTML = offers.map((card) => {
     const status = card.offerStatus || (card.status === "claimed" ? "accepted" : "pending");
@@ -443,16 +583,30 @@ function renderOffers() {
 }
 
 function renderOrders() {
-  const names = buyers();
-  if (!names.includes(state.selectedBuyer)) state.selectedBuyer = names[0] || "";
-  $("#buyerCount").textContent = `${names.length} active order${names.length === 1 ? "" : "s"}`;
+  const allNames = buyers();
+  const settings = orderDeskSettings();
+  $("#orderSearch").value = settings.query;
+  $("#orderStatusFilter").value = settings.status;
+  const query = settings.query.trim().toLowerCase();
+  const names = allNames.filter((buyer) => {
+    const order = orderFor(buyer); const flags = orderFlags(buyer);
+    if (query && !buyer.toLowerCase().includes(query)) return false;
+    if (settings.status === "attention" && !flags.length) return false;
+    if (settings.status === "unpaid" && ["paid", "packed", "shipped"].includes(order.status)) return false;
+    if (["paid", "packed", "shipped"].includes(settings.status) && order.status !== settings.status) return false;
+    if (settings.status === "missing-address" && buyerProfile(buyer).address?.trim()) return false;
+    return true;
+  });
+  if (!allNames.includes(state.selectedBuyer)) state.selectedBuyer = allNames[0] || "";
+  $("#buyerCount").textContent = names.length === allNames.length ? `${allNames.length} active order${allNames.length === 1 ? "" : "s"}` : `${names.length} of ${allNames.length} orders shown`;
   $("#buyerList").innerHTML = names.length ? names.map((buyer) => {
     const cards = cardsForBuyer(buyer);
     const total = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price), 0);
     const order = orderFor(buyer);
     const flags = orderFlags(buyer);
-    return `<button class="buyer-button ${buyer === state.selectedBuyer ? "active" : ""}" data-buyer="${escapeHtml(buyer)}"><strong>${escapeHtml(buyer)}</strong><span class="buyer-total">${money(total + shippingAmount(order) - Number(order.discount))}</span><small>${cards.length} cards · ${escapeHtml(order.shippingMethod)} · ${escapeHtml(order.status)}${flags.length ? ` · ⚑ ${flags.length}` : ""}</small></button>`;
-  }).join("") : `<div class="empty-state"><p>Orders appear as soon as you record a claim.</p></div>`;
+    const visualStatus = ["paid", "packed", "shipped"].includes(order.status) ? order.status : "unpaid";
+    return `<button class="buyer-button order-${visualStatus} ${flags.length ? "has-warning" : ""} ${buyer === state.selectedBuyer ? "active" : ""}" data-buyer="${escapeHtml(buyer)}"><strong>${escapeHtml(buyer)}</strong><span class="buyer-total">${money(total + shippingAmount(order) - Number(order.discount))}</span><small>${cards.length} cards · ${escapeHtml(order.shippingMethod || "Shipping needed")} · ${escapeHtml(order.status)}${flags.length ? ` · ⚑ ${flags.length}` : ""}</small><span class="order-state-badge">${escapeHtml(flags.length ? "Needs attention" : visualStatus)}</span></button>`;
+  }).join("") : `<div class="empty-state"><p>${allNames.length ? "No orders match these filters." : "Orders appear as soon as you record a claim."}</p></div>`;
   renderOrderDetail();
 }
 
@@ -461,7 +615,8 @@ function orderFlags(buyer) {
   const order = orderFor(buyer);
   const profile = buyerProfile(buyer);
   const flags = [];
-  if (!profile.address?.trim()) flags.push("Missing address");
+  addressWarnings(buyer, profile.address).forEach((warning) => flags.push(warning));
+  if (!order.shippingMethod) flags.push("Shipping not selected");
   if (!["paid", "packed", "shipped"].includes(order.status)) flags.push("Unpaid balance");
   if (["paid", "packed", "shipped"].includes(order.status) && cards.some((card) => !card.packed)) flags.push("Packing incomplete");
   if (!pweEligible(buyer) && order.shippingMethod === "PWE") flags.push("PWE limit exceeded");
@@ -500,8 +655,9 @@ function renderOrderDetail() {
       <div class="order-items">${cards.map((card) => `<article class="order-item">${card.imagePath ? `<div class="order-thumb"><img src="${fileUrl(card.imagePath)}" alt="" /><small title="${escapeHtml(card.imagePath)}">${escapeHtml(card.imagePath.split(/[\\/]/).pop())}</small></div>` : `<div class="thumb">${escapeHtml(card.ref)}</div>`}<div><strong>${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><div class="card-line">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)}</div><span class="type-badge ${card.claimType === "offer" ? "offer" : "claim"}">${card.claimType === "offer" ? "Offer" : "Claim"}</span>${card.claimType === "offer" ? `<small class="offer-note">Accepted offer · listed ${money(card.price)}${Number(card.purchasePrice) > 0 && Number(card.claimPrice) < Number(card.purchasePrice) ? ` · <span class="cost-warning">below ${money(card.purchasePrice)} cost</span>` : ""}</small>` : ""}</div><strong>${money(card.claimPrice ?? card.price)}</strong></article>`).join("")}</div>
       <aside class="order-sidebar">
         <div class="totals">
-          <div class="total-line"><span>Cards</span><strong>${money(subtotal)}</strong></div>
-          <label>Shipping<select id="orderShippingMethod"><option value="PWE" ${order.shippingMethod === "PWE" ? "selected" : ""} ${pweEligible(buyer) ? "" : "disabled"}>PWE — ${money(activeSale().pweShipping)} (max 3 cards / $50)</option><option value="PMWT" ${order.shippingMethod === "PMWT" ? "selected" : ""}>PMWT — ${money(activeSale().pmwtShipping)}</option></select></label>
+          <div class="total-line"><span>Cards (${cards.length})</span><strong>${money(subtotal)}</strong></div>
+          <label>Shipping option<select id="orderShippingMethod"><option value="" ${order.shippingMethod ? "" : "selected"} disabled>Select PWE or PMWT…</option><option value="PMWT" ${order.shippingMethod === "PMWT" ? "selected" : ""}>PMWT — ${money(activeSale().pmwtShipping)}${pweEligible(buyer) ? "" : " (auto-selected by rule)"}</option><option value="PWE" ${order.shippingMethod === "PWE" ? "selected" : ""}>PWE — ${money(activeSale().pweShipping)}${pweEligible(buyer) ? "" : " (manual override)"}</option></select></label>
+          <div class="total-line shipping-total"><span>${escapeHtml(order.shippingMethod || "Shipping not selected")}</span><strong>${order.shippingMethod ? money(shipping) : "—"}</strong></div>
           <label>Discount<input id="orderDiscount" type="number" min="0" step="0.01" value="${Number(order.discount || 0)}" /></label>
           <div class="total-line grand"><span>Total</span><span>${money(total)}</span></div>
         </div>
@@ -509,7 +665,7 @@ function renderOrderDetail() {
         <div class="slip-status"><strong>Packing slip</strong><span>${order.packingSlipPrintCount ? `Printed ${order.packingSlipPrintCount}× · ${new Date(order.packingSlipPrintedAt).toLocaleString()}` : "Not printed"}</span></div>
         ${repeatMatches.length ? `<div class="repeat-alert"><strong>Repeat-buyer alert</strong><span>${repeatMatches.length} available card${repeatMatches.length === 1 ? "" : "s"} match this buyer’s history.</span><button class="row-action" data-open-buyer-profile="${escapeHtml(buyer)}">View profile</button></div>` : ""}
         <label>Payment method<select id="orderPaymentMethod"><option value="">Not recorded</option>${["Cash", "PayPal", "Venmo", "Other"].map((method) => `<option ${order.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
-        <label>Mailing address<textarea id="buyerAddress" rows="3">${escapeHtml(profile.address || "")}</textarea></label>
+        <label>Mailing address<textarea id="buyerAddress" data-original-address="${escapeHtml(profile.address || "")}" rows="3">${escapeHtml(profile.address || "")}</textarea></label>
         <label>Buyer notes<textarea id="buyerNotes" rows="3">${escapeHtml(profile.notes || "")}</textarea></label>
         ${order.trackingNumber ? `<button class="secondary full" data-open-tracking="${escapeHtml(trackingUrl(order.trackingNumber))}">Track package ↗</button>` : ""}
         <div class="status-actions">
@@ -528,7 +684,7 @@ function renderPacking() {
   const names = buyers();
   const select = $("#packingBuyer");
   const current = select.value || names[0] || "";
-  select.innerHTML = names.map((buyer) => `<option value="${escapeHtml(buyer)}" ${buyer === current ? "selected" : ""}>${escapeHtml(buyer)}</option>`).join("");
+  select.innerHTML = names.map((buyer) => `<option value="${escapeHtml(buyer)}" ${buyer === current ? "selected" : ""}>${escapeHtml(buyer)}${orderFor(buyer).status === "packed" ? " (Packed)" : ""}</option>`).join("");
   const buyer = select.value || names[0];
   if (!buyer) {
     $("#packingWarnings").innerHTML = "";
@@ -542,11 +698,11 @@ function renderPacking() {
   const profile = buyerProfile(buyer);
   const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
   const total = subtotal + shippingAmount(order) - Number(order.discount || 0);
-  const warnings = [!profile.address && "Missing address", !["paid", "packed", "shipped"].includes(order.status) && "Unpaid balance", ["paid", "packed", "shipped"].includes(order.status) && !order.paymentMethod && "Payment method missing", cards.some((card) => !card.packed) && "Packing incomplete"].filter(Boolean);
+  const warnings = [!profile.address && "Missing address", !order.shippingMethod && "Shipping not selected", !["paid", "packed", "shipped"].includes(order.status) && "Unpaid balance", ["paid", "packed", "shipped"].includes(order.status) && !order.paymentMethod && "Payment method missing", cards.some((card) => !card.packed) && "Packing incomplete"].filter(Boolean);
   $("#packingWarnings").innerHTML = warnings.length ? warnings.map((warning) => `<span>${escapeHtml(warning)}</span>`).join("") : `<span class="valid-text">Order ready</span>`;
   const firstImage = cards.find((card) => card.imagePath)?.imagePath;
   const printed = Number(order.packingSlipPrintCount || 0);
-  $("#packingContent").innerHTML = `<section class="packing-card"><div class="packing-progress"><div><h2>${escapeHtml(buyer)}</h2><p>${packed} of ${cards.length} cards verified · ${escapeHtml(order.shippingMethod)}${profile.address ? "" : " · Missing address"}${printed ? ` · Slip printed ${printed}×` : ""}</p><div class="progress-track"><div class="progress-bar" style="width:${percent}%"></div></div></div><div class="packing-actions"><button class="secondary" id="printPackingSlipBtn">${printed ? "Reprint" : "Print"} packing slip</button><button class="secondary" id="checkAllCardsBtn">${packed === cards.length ? "Uncheck all" : "Check all cards"}</button><button class="primary" id="completePackingBtn" ${packed !== cards.length ? "disabled" : ""}>Complete package</button></div></div><div class="packing-order-summary">${firstImage ? `<img src="${fileUrl(firstImage)}" alt="First card in order" />` : `<div class="placeholder-thumb">No image</div>`}<div><strong>${escapeHtml(activeSale().name)}</strong><p>${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p><div class="packing-order-stats"><span><strong>${cards.length}</strong><br>cards</span><span><strong>${money(total)}</strong><br>order total</span><span><strong>${escapeHtml(order.status || "awaiting")}</strong><br>status</span></div></div></div><div class="pack-list">${cards.map((card) => `<label class="pack-item ${card.packed ? "checked" : ""}" data-pack-row="${card.id}"><input type="checkbox" data-pack-card="${card.id}" ${card.packed ? "checked" : ""} /><span><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><small>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)} · ${card.claimType === "offer" ? "Offer" : "Claim"}</small></span><strong>${money(card.claimPrice ?? card.price)}</strong></label>`).join("")}</div><div class="packing-notes"><label>Internal packing notes<textarea id="packingInternalNotes" placeholder="Private notes — never printed">${escapeHtml(order.packingNotes || "")}</textarea></label><label>Buyer-facing slip note<textarea id="packingBuyerNote" placeholder="Optional note printed on this buyer’s slip">${escapeHtml(order.packingSlipNote || "")}</textarea></label></div><div class="tracking-panel"><label>Tracking number<input id="trackingNumber" value="${escapeHtml(order.trackingNumber || "")}" placeholder="Enter USPS or carrier tracking number" /></label><div class="tracking-actions"><button class="secondary" id="copyTrackingMessageBtn" ${order.trackingNumber ? "" : "disabled"}>Copy shipping message</button><button class="secondary" id="openTrackingBtn" data-open-tracking="${escapeHtml(trackingUrl(order.trackingNumber))}" ${order.trackingNumber ? "" : "disabled"}>Track package ↗</button></div></div></section>`;
+  $("#packingContent").innerHTML = `<section class="packing-card"><div class="packing-progress"><div><h2>${escapeHtml(buyer)}</h2><p>${packed} of ${cards.length} cards verified · ${escapeHtml(order.shippingMethod)}${profile.address ? "" : " · Missing address"}${printed ? ` · Slip printed ${printed}×` : ""}</p><div class="progress-track"><div class="progress-bar" style="width:${percent}%"></div></div></div><div class="packing-actions"><button class="secondary" id="previewPackingSlipBtn">Preview PDF</button><button class="secondary" id="printPackingSlipBtn">${printed ? "Reprint" : "Print"} packing slip</button><button class="secondary" id="checkAllCardsBtn">${packed === cards.length ? "Uncheck all" : "Check all cards"}</button><button class="primary" id="completePackingBtn" ${packed !== cards.length ? "disabled" : ""}>Complete package</button></div></div><div class="packing-order-summary">${firstImage ? `<img src="${fileUrl(firstImage)}" alt="First card in order" />` : `<div class="placeholder-thumb">No image</div>`}<div><strong>${escapeHtml(activeSale().name)}</strong><p>${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p><div class="packing-order-stats"><span><strong>${cards.length}</strong><br>cards</span><span><strong>${money(total)}</strong><br>order total</span><span><strong>${escapeHtml(order.status || "awaiting")}</strong><br>status</span></div></div></div><div class="pack-list">${cards.map((card) => `<label class="pack-item ${card.packed ? "checked" : ""}" data-pack-row="${card.id}"><input type="checkbox" data-pack-card="${card.id}" ${card.packed ? "checked" : ""} /><span><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><small>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)} · ${card.claimType === "offer" ? "Offer" : "Claim"}</small></span><strong>${money(card.claimPrice ?? card.price)}</strong></label>`).join("")}</div><div class="packing-notes"><label>Internal packing notes<textarea id="packingInternalNotes" placeholder="Private notes — never printed">${escapeHtml(order.packingNotes || "")}</textarea></label><label>Buyer-facing slip note<textarea id="packingBuyerNote" placeholder="Optional note printed on this buyer’s slip">${escapeHtml(order.packingSlipNote || "")}</textarea></label></div><div class="tracking-panel"><label>Tracking number<input id="trackingNumber" value="${escapeHtml(order.trackingNumber || "")}" placeholder="Enter USPS or carrier tracking number" /></label><div class="tracking-actions"><button class="secondary" id="copyTrackingMessageBtn" ${order.trackingNumber ? "" : "disabled"}>Copy shipping message</button><button class="secondary" id="openTrackingBtn" data-open-tracking="${escapeHtml(trackingUrl(order.trackingNumber))}" ${order.trackingNumber ? "" : "disabled"}>Track package ↗</button></div></div></section>`;
   const legacyProgress = $(".packing-card .progress-track");
   if (legacyProgress) {
     const meter = document.createElement("progress");
@@ -606,13 +762,13 @@ function renderDashboard() {
 
 function renderBuyerProfiles() {
   const names = allBuyerNames();
-  const filtered = names.filter((name) => `${name} ${buyerProfile(name).tags.join(" ")}`.toLowerCase().includes(profileQuery.toLowerCase()));
+  const filtered = names.filter((name) => `${name} ${buyerProfile(name).aliases.join(" ")} ${buyerProfile(name).tags.join(" ")}`.toLowerCase().includes(profileQuery.toLowerCase()));
   if (!filtered.includes(state.profileBuyer)) state.profileBuyer = filtered[0] || names[0] || "";
-  $("#buyerProfileList").innerHTML = filtered.length ? filtered.map((name) => { const history = buyerHistory(name); const profile = buyerProfile(name); return `<button class="buyer-button ${name === state.profileBuyer ? "active" : ""}" data-profile-buyer="${escapeHtml(name)}"><strong>${escapeHtml(name)}</strong><span class="buyer-total">${money(history.spent)}</span><small>${history.cards.length} purchases${profile.tags.length ? ` · ${escapeHtml(profile.tags.join(", "))}` : ""}</small></button>`; }).join("") : `<div class="empty-state"><p>No matching buyers.</p></div>`;
+  $("#buyerProfileList").innerHTML = filtered.length ? filtered.map((name) => { const history = buyerHistory(name); const profile = buyerProfile(name); const warnings = addressWarnings(name); return `<button class="buyer-button ${warnings.length ? "has-warning" : ""} ${name === state.profileBuyer ? "active" : ""}" data-profile-buyer="${escapeHtml(name)}"><strong>${escapeHtml(name)}</strong><span class="buyer-total">${money(history.spent)}</span><small>${history.cards.length} purchases${profile.tags.length ? ` · ${escapeHtml(profile.tags.join(", "))}` : ""}</small>${warnings.length ? `<span class="order-state-badge">Address review</span>` : ""}</button>`; }).join("") : `<div class="empty-state"><p>No matching buyers.</p></div>`;
   const buyer = state.profileBuyer;
   if (!buyer) { $("#buyerProfileDetail").innerHTML = `<div class="empty-state"><h3>No buyer history yet</h3><p>Profiles are created when a card is assigned.</p></div>`; return; }
-  const history = buyerHistory(buyer); const profile = buyerProfile(buyer); const matches = repeatBuyerMatches(buyer);
-  $("#buyerProfileDetail").innerHTML = `<div class="panel-header"><div><h2>${escapeHtml(buyer)}</h2><p>${history.cards.length} lifetime cards · ${money(history.spent)} spent</p></div></div><div class="profile-content"><div class="profile-stats"><article><span>Favorite player</span><strong>${escapeHtml(history.player || "—")}</strong></article><article><span>Favorite brand</span><strong>${escapeHtml(history.brand || "—")}</strong></article><article><span>Favorite year</span><strong>${escapeHtml(history.year || "—")}</strong></article></div><label>Buyer tags<input id="profileTags" value="${escapeHtml(profile.tags.join(", "))}" placeholder="Vintage, Yankees, set builder" /></label><label>Mailing address<textarea id="profileAddress" rows="3">${escapeHtml(profile.address || "")}</textarea></label><label>Notes<textarea id="profileNotes" rows="4">${escapeHtml(profile.notes || "")}</textarea></label><button id="saveBuyerProfileBtn" class="primary">Save profile</button>${matches.length ? `<section class="profile-alert"><h3>Available cards this buyer may like</h3>${matches.map((card) => `<button data-profile-card="${card.id}"><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</strong><span>${money(card.price)}</span></button>`).join("")}</section>` : ""}<section><h3>Purchase history</h3><div class="profile-history">${history.cards.slice().reverse().map((card) => `<article><span>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</span><strong>${money(card.claimPrice ?? card.price)}</strong></article>`).join("") || "No purchases recorded."}</div></section></div>`;
+  const history = buyerHistory(buyer); const profile = buyerProfile(buyer); const matches = repeatBuyerMatches(buyer); const warnings = addressWarnings(buyer);
+  $("#buyerProfileDetail").innerHTML = `<div class="panel-header"><div><h2>${escapeHtml(buyer)}</h2><p>${history.cards.length} lifetime cards · ${money(history.spent)} spent</p></div><span class="status ${warnings.length ? "offered" : "available"}">${warnings.length ? `${warnings.length} address warning${warnings.length === 1 ? "" : "s"}` : "Address ready"}</span></div><div class="profile-content"><div class="profile-stats"><article><span>Favorite player</span><strong>${escapeHtml(history.player || "—")}</strong></article><article><span>Favorite brand</span><strong>${escapeHtml(history.brand || "—")}</strong></article><article><span>Favorite year</span><strong>${escapeHtml(history.year || "—")}</strong></article></div>${warnings.length ? `<div class="address-warnings">${warnings.map((warning) => `<span>⚑ ${escapeHtml(warning)}</span>`).join("")}</div>` : ""}<label>Facebook names / aliases<input id="profileAliases" value="${escapeHtml(profile.aliases.join(", "))}" placeholder="Alex Smith, Alex S." /><small>Claims under these names will be assigned to this buyer.</small></label><label>Buyer tags<input id="profileTags" value="${escapeHtml(profile.tags.join(", "))}" placeholder="Vintage, Yankees, set builder" /></label><label>Mailing address<textarea id="profileAddress" rows="4">${escapeHtml(profile.address || "")}</textarea></label><label>Notes<textarea id="profileNotes" rows="4">${escapeHtml(profile.notes || "")}</textarea></label><button id="saveBuyerProfileBtn" class="primary">Save and validate profile</button>${profile.previousAddresses.length ? `<details class="address-history"><summary>Previous addresses (${profile.previousAddresses.length})</summary>${profile.previousAddresses.slice().reverse().map((item) => `<div><span>${escapeHtml(item.address).replace(/\n/g, "<br>")}</span><small>${new Date(item.changedAt).toLocaleDateString()}</small></div>`).join("")}</details>` : ""}${matches.length ? `<section class="profile-alert"><h3>Available cards this buyer may like</h3>${matches.map((card) => `<button data-profile-card="${card.id}"><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</strong><span>${money(card.price)}</span></button>`).join("")}</section>` : ""}<section><h3>Purchase history</h3><div class="profile-history">${history.cards.slice().reverse().map((card) => `<article><span>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</span><strong>${money(card.claimPrice ?? card.price)}</strong></article>`).join("") || "No purchases recorded."}</div></section></div>`;
 }
 
 function healthIssues() {
@@ -653,11 +809,11 @@ function renderLiveSale() {
 }
 
 function showView(view) {
-  const refresh = { sale: () => { renderListings(); renderImages(); }, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck };
+  const refresh = { command: renderCommandCenter, sale: () => { renderListings(); renderImages(); }, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck, help: () => {} };
   refresh[view]?.();
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `${view}View`));
-  const labels = { sale: "SALE WORKSPACE", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK" };
+  const labels = { command: "COMMAND CENTER", sale: "SALE WORKSPACE", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK", help: "HELP & GUIDE" };
   $("#viewEyebrow").textContent = labels[view];
 }
 
@@ -787,6 +943,7 @@ async function importSpreadsheet() {
   pendingSheet = { ...parsed, path, headers, mapping: autoMap(headers) };
   const fields = [["year", "Year"], ["set", "Brand"], ["name", "Player"], ["number", "Number"], ["notes", "Flaw(s)"], ["condition", "Grade"], ["price", "Claim Price"], ["purchasePrice", "Purchase Price"], ["purchaseDate", "Purchase Date"]];
   $("#mappingGrid").innerHTML = fields.map(([field, label]) => `<label>${label}<select data-map="${field}"><option value="">Not included</option>${headers.map((header) => `<option value="${escapeHtml(header)}" ${pendingSheet.mapping[field] === header ? "selected" : ""}>${escapeHtml(header)}</option>`).join("")}</select></label>`).join("");
+  renderImportPresetOptions();
   $("#listingTemplate").value = activeSale().template;
   updateImportPreview();
   $("#importDialog").showModal();
@@ -1223,7 +1380,7 @@ function deleteActiveSale() {
 
 function assignBuyer(cardId, buyerName, offeredPrice, claimType = "claim", claimNote = "") {
   const card = activeSale().cards.find((item) => item.id === cardId);
-  const buyer = String(buyerName || "").trim();
+  const buyer = canonicalBuyerName(buyerName);
   if (!card || !buyer) return toast("Enter a buyer name first.");
   const hasOffer = claimType === "offer";
   const wasAcceptedOffer = hasOffer && card.offerStatus === "accepted";
@@ -1469,7 +1626,7 @@ function messageTemplateValues(buyer) {
     buyer, firstName, saleName: activeSale().name, cardCount: String(cards.length),
     cardList: cards.map((card) => `${card.year} ${card.set} ${numberLabel(card)} ${card.name}${duplicateInfo(card).label ? ` ${duplicateInfo(card).label}` : ""} — ${money(card.claimPrice ?? card.price)} (${card.claimType === "offer" ? "accepted offer" : "claim"})`.replace(/\s+/g, " ").trim()).join("\n"),
     subtotal: money(subtotal), discount: money(order.discount || 0), discountLine: order.discount ? `Discount: -${money(order.discount)}\n` : "",
-    shippingMethod: order.shippingMethod, shipping: money(shipping), total: money(total),
+    shippingMethod: order.shippingMethod || "Not selected", shipping: order.shippingMethod ? money(shipping) : "—", total: money(total),
     trackingNumber: order.trackingNumber || "", trackingLine: order.trackingNumber ? `Tracking number: ${order.trackingNumber}` : ""
   };
 }
@@ -1515,8 +1672,9 @@ function resetMessageTemplates() {
 
 const PACKING_PRINT_STYLES = `
   body{font:14px "Segoe UI",Arial,sans-serif;color:#172333;background:#fff}
-  .slip-page{min-height:100vh;padding:.42in;page-break-after:always;display:flex;flex-direction:column;background:#fff}
-  .slip-page:last-child{page-break-after:auto}.slip-brand{display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid var(--accent);padding-bottom:14px}.slip-brand-main{display:flex;align-items:center;gap:14px}.slip-logo{max-width:92px;max-height:70px;object-fit:contain}.slip-brand h1{font:700 27px Georgia,serif;margin:0}.slip-brand p,.slip-muted{margin:4px 0 0;color:#607080}.slip-header{font-size:18px;font-weight:800;color:var(--accent);margin:20px 0 8px}.slip-order{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0;padding:14px;background:#f3f6f8;border-radius:10px}.slip-order h2{margin:0 0 5px;font:700 21px Georgia,serif}.slip-order p{margin:3px 0}.slip-message{padding:12px 14px;border-left:4px solid var(--accent);background:#fff7f1;margin:4px 0 16px}.slip-table{width:100%;border-collapse:collapse}.slip-table th{text-align:left;text-transform:uppercase;font-size:10px;letter-spacing:.06em;color:#607080;border-bottom:2px solid #d9e0e6;padding:8px 6px}.slip-table td{padding:9px 6px;border-bottom:1px solid #e2e7eb;vertical-align:middle}.slip-table .price{text-align:right;font-weight:800}.slip-thumb{width:42px;height:42px;object-fit:cover;border-radius:5px}.slip-card-detail{font-size:11px;color:#607080;margin-top:2px}.slip-totals{margin:15px 0 10px auto;width:min(290px,100%)}.slip-total-line{display:flex;justify-content:space-between;padding:4px 0}.slip-total-line.grand{font-size:19px;font-weight:900;border-top:2px solid var(--accent);padding-top:9px;margin-top:5px}.slip-policy{font-size:11px;color:#607080;border-top:1px solid #d9e0e6;padding-top:10px;margin-top:12px}.slip-links{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center;margin-top:15px;padding:12px;border-radius:10px;background:#f3f6f8}.slip-links img{width:92px;height:92px}.slip-footer{margin-top:auto;text-align:center;color:#607080;font-size:11px;padding-top:16px}.shipping-label-page{justify-content:center;align-items:center}.shipping-label{width:100%;border:2px solid #172333;border-radius:12px;padding:.35in}.shipping-label h1{font-size:17px;text-transform:uppercase}.shipping-label address{font-size:22px;line-height:1.45;font-style:normal;margin-top:25px}.slip-note{font-style:italic;margin-top:10px;color:#465767}
+  .slip-page{min-height:100vh;padding:.42in;page-break-after:always;display:flex;flex-direction:column;background:#fff;break-inside:avoid}
+  .slip-page:last-child{page-break-after:auto}.slip-brand{display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid var(--accent);padding-bottom:14px}.slip-brand-main{display:flex;align-items:center;gap:14px}.slip-logo{max-width:92px;max-height:70px;object-fit:contain}.slip-logo.app-brand-logo{width:210px;max-width:210px;max-height:62px}.slip-brand h1{font:700 27px "Segoe UI",Arial,sans-serif;margin:0}.slip-brand p,.slip-muted{margin:4px 0 0;color:#607080}.slip-header{font-size:18px;font-weight:800;color:var(--accent);margin:20px 0 8px}.slip-order{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0;padding:14px;background:#f3f6f8;border-radius:10px}.slip-order h2{margin:0 0 5px;font:700 21px "Segoe UI",Arial,sans-serif}.slip-order p{margin:3px 0}.slip-message{padding:12px 14px;border-left:4px solid var(--accent);background:#e9fff3;margin:4px 0 16px}.slip-table{width:100%;border-collapse:collapse}.slip-table th{text-align:left;text-transform:uppercase;font-size:10px;letter-spacing:.06em;color:#607080;border-bottom:2px solid #d9e0e6;padding:8px 6px}.slip-table td{padding:9px 6px;border-bottom:1px solid #e2e7eb;vertical-align:middle}.slip-table .price{text-align:right;font-weight:800}.slip-thumb{width:42px;height:42px;object-fit:cover;border-radius:5px}.slip-card-detail{font-size:11px;color:#607080;margin-top:2px}.slip-totals{margin:15px 0 10px auto;width:min(290px,100%)}.slip-total-line{display:flex;justify-content:space-between;padding:4px 0}.slip-total-line.grand{font-size:19px;font-weight:900;border-top:2px solid var(--accent);padding-top:9px;margin-top:5px}.slip-policy{font-size:11px;color:#607080;border-top:1px solid #d9e0e6;padding-top:10px;margin-top:12px}.slip-links{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center;margin-top:15px;padding:12px;border-radius:10px;background:#f3f6f8}.slip-links img{width:92px;height:92px}.slip-footer{margin-top:auto;text-align:center;color:#607080;font-size:11px;padding-top:16px}.shipping-label-page{justify-content:center;align-items:center}.shipping-label{width:100%;border:2px solid #172333;border-radius:12px;padding:.35in}.shipping-label h1{font-size:17px;text-transform:uppercase}.shipping-label address{font-size:22px;line-height:1.45;font-style:normal;margin-top:25px}.slip-note{font-style:italic;margin-top:10px;color:#465767}
+  .slip-dense{font-size:12px;padding:.3in}.slip-dense .slip-brand h1{font-size:22px}.slip-dense .slip-header{margin:11px 0 5px}.slip-dense .slip-order{margin:8px 0;padding:9px}.slip-dense .slip-message{padding:8px 10px;margin:3px 0 8px}.slip-dense .slip-table td{padding:5px}.slip-dense .slip-thumb{width:34px;height:34px}.slip-dense .slip-totals{margin:8px 0 5px auto}.slip-dense .slip-links{margin-top:7px;padding:7px}.slip-dense .slip-links img{width:68px;height:68px}.slip-ultra-dense{font-size:10px;padding:.22in}.slip-ultra-dense .slip-brand h1{font-size:18px}.slip-ultra-dense .slip-brand{padding-bottom:7px}.slip-ultra-dense .slip-header{font-size:14px;margin:7px 0 3px}.slip-ultra-dense .slip-order{margin:5px 0;padding:6px}.slip-ultra-dense .slip-order h2{font-size:16px}.slip-ultra-dense .slip-message{padding:5px 8px;margin:2px 0 5px}.slip-ultra-dense .slip-table td{padding:3px}.slip-ultra-dense .slip-thumb{width:28px;height:28px}.slip-ultra-dense .slip-totals{margin:5px 0 3px auto}.slip-ultra-dense .slip-links{margin-top:4px;padding:5px}.slip-ultra-dense .slip-links img{width:52px;height:52px}.slip-ultra-dense .slip-policy,.slip-ultra-dense .slip-footer{padding-top:5px;margin-top:5px}
   @media print{.slip-page{break-after:page}.slip-page:last-child{break-after:auto}}
 `;
 
@@ -1535,11 +1693,12 @@ async function buildPackingSlip(buyer, design = ensurePackingSettings()) {
   const shipping = shippingAmount(order);
   const discount = Number(order.discount || 0);
   const total = subtotal + shipping - discount;
-  const logoData = design.logoPath ? await window.cardSale.packingFileDataUrl(design.logoPath) : "";
+  const logoData = design.logoPath ? await window.cardSale.packingFileDataUrl(design.logoPath) : design.brandName === "Card Sale Manager" ? BUILT_IN_BRAND_LOGO : "";
   const qrValue = packingQrValue(design);
   const qrData = qrValue ? await window.cardSale.packingQrDataUrl(qrValue, design.accent) : "";
   const thumbData = design.showThumbnails ? await Promise.all(cards.map((card) => card.imagePath ? window.cardSale.packingFileDataUrl(card.imagePath) : Promise.resolve(""))) : [];
-  const brand = `<section class="slip-brand"><div class="slip-brand-main">${logoData ? `<img class="slip-logo" src="${logoData}" alt="" />` : ""}<div><h1>${escapeHtml(design.brandName || sale.name)}</h1><p>${escapeHtml(design.contact || "")}</p></div></div><div class="slip-muted">${escapeHtml(sale.name)}</div></section>${design.header ? `<div class="slip-header">${escapeHtml(design.header)}</div>` : ""}`;
+  const appBrand = !design.logoPath && design.brandName === "Card Sale Manager";
+  const brand = `<section class="slip-brand"><div class="slip-brand-main">${logoData ? `<img class="slip-logo${appBrand ? " app-brand-logo" : ""}" src="${logoData}" alt="" />` : ""}${appBrand ? "" : `<div><h1>${escapeHtml(design.brandName || sale.name)}</h1><p>${escapeHtml(design.contact || "")}</p></div>`}</div><div class="slip-muted">${escapeHtml(sale.name)}</div></section>${design.header ? `<div class="slip-header">${escapeHtml(design.header)}</div>` : ""}`;
   const buyerBlock = `<section class="slip-order"><div><h2>${escapeHtml(buyer)}</h2>${design.showAddress ? `<p>${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p>` : ""}</div><div>${design.showOrderNumber ? `<p><strong>Order:</strong> ${escapeHtml(order.orderNumber)}</p>` : ""}${design.showPayment ? `<p><strong>Payment:</strong> ${escapeHtml(order.paymentMethod || "Not recorded")}</p>` : ""}${design.showShipping ? `<p><strong>Shipping:</strong> ${escapeHtml(order.shippingMethod || "")}</p>` : ""}<p><strong>Cards:</strong> ${cards.length}</p></div></section>`;
   const message = design.thanks || order.packingSlipNote ? `<section class="slip-message">${escapeHtml(design.thanks || "")}${order.packingSlipNote ? `<div class="slip-note">${escapeHtml(order.packingSlipNote)}</div>` : ""}</section>` : "";
   const items = `<table class="slip-table"><thead><tr>${design.showThumbnails ? "<th></th>" : ""}<th>Ref</th><th>Card</th>${design.showPrices ? "<th class=\"price\">Price</th>" : ""}</tr></thead><tbody>${cards.map((card, index) => `<tr>${design.showThumbnails ? `<td>${thumbData[index] ? `<img class="slip-thumb" src="${thumbData[index]}" alt="" />` : ""}</td>` : ""}<td><strong>${escapeHtml(card.ref)}</strong></td><td><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong>${design.showDetails ? `<div class="slip-card-detail">${[card.condition, card.notes && String(card.notes).toLowerCase() !== "none" ? card.notes : ""].filter(Boolean).map(escapeHtml).join(" · ")}</div>` : ""}</td>${design.showPrices ? `<td class="price">${money(card.claimPrice ?? card.price)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
@@ -1548,7 +1707,8 @@ async function buildPackingSlip(buyer, design = ensurePackingSettings()) {
   const qr = qrData || design.socialLink ? `<section class="slip-links"><div><strong>Stay connected</strong>${design.socialLink ? `<p>${escapeHtml(design.socialLink)}</p>` : ""}${qrValue ? `<p class="slip-muted">Scan to open ${escapeHtml(design.qrType === "social" ? "our page" : design.qrType)}.</p>` : ""}</div>${qrData ? `<img src="${qrData}" alt="QR code" />` : ""}</section>` : "";
   const footer = design.footer ? `<footer class="slip-footer">${escapeHtml(design.footer)}</footer>` : "";
   const sectionHtml = { header: brand, buyer: buyerBlock, message, items, totals, policy, qr, footer };
-  let html = `<article class="slip-page">${design.sectionOrder.map((id) => sectionHtml[id] || "").join("")}</article>`;
+  const densityClass = cards.length > 16 ? " slip-ultra-dense" : cards.length > 8 ? " slip-dense" : "";
+  let html = `<article class="slip-page${densityClass}">${design.sectionOrder.map((id) => sectionHtml[id] || "").join("")}</article>`;
   if (design.includeLabel && profile.address) html += `<article class="slip-page shipping-label-page"><section class="shipping-label"><h1>Ship to</h1><address><strong>${escapeHtml(buyer)}</strong><br>${escapeHtml(profile.address).replace(/\n/g, "<br>")}</address><p>${escapeHtml(order.shippingMethod || "")} · ${cards.length} card${cards.length === 1 ? "" : "s"} · ${escapeHtml(order.orderNumber)}</p></section></article>`;
   return { html, total, cards: cards.length, orderNumber: order.orderNumber };
 }
@@ -1566,14 +1726,14 @@ function recordPackingPrint(buyer, action, details = {}) {
 async function outputPackingSlips(names, action = "print", design = ensurePackingSettings(), testOnly = false) {
   if (!names.length) return toast("Choose at least one buyer.");
   const slips = await Promise.all(names.map((buyer) => buildPackingSlip(buyer, design)));
-  const accent = /^#[0-9a-f]{6}$/i.test(design.accent) ? design.accent : "#d9693d";
+  const accent = /^#[0-9a-f]{6}$/i.test(design.accent) ? design.accent : "#19b56b";
   const twoUpStyles = design.pageSize === "two-up" ? `.slip-page{min-height:5.5in;height:5.5in;padding:.24in;page-break-after:auto;overflow:hidden}.slip-page:nth-child(2n){page-break-after:always}.slip-brand h1{font-size:21px}.slip-order{margin:9px 0;padding:9px}.slip-table td{padding:5px}.slip-links{margin-top:7px;padding:7px}.slip-links img{width:68px;height:68px}` : "";
   const payload = { title: names.length === 1 ? `${names[0]} packing slip` : `${activeSale().name} packing slips`, html: slips.map((slip) => slip.html).join(""), styles: `${PACKING_PRINT_STYLES.replaceAll("var(--accent)", accent)}${twoUpStyles}`, pageSize: design.pageSize };
-  const result = action === "pdf" ? await window.cardSale.exportPackingPdf(payload) : await window.cardSale.printPackingSlip(payload);
-  if (!result?.success) return result?.canceled ? null : toast("The packing slips were not printed.");
-  if (!testOnly) names.forEach((buyer) => recordPackingPrint(buyer, action, { pageSize: design.pageSize }));
+  const result = action === "preview" ? await window.cardSale.previewPackingSlip(payload) : action === "pdf" ? await window.cardSale.exportPackingPdf(payload) : await window.cardSale.printPackingSlip(payload);
+  if (!result?.success) return result?.canceled ? null : toast(action === "preview" ? "The PDF preview could not be opened." : "The packing slips were not printed.");
+  if (!testOnly && action !== "preview") names.forEach((buyer) => recordPackingPrint(buyer, action, { pageSize: design.pageSize }));
   saveSoon(); renderPacking();
-  toast(action === "pdf" ? "Combined packing-slip PDF saved." : `${names.length} packing slip${names.length === 1 ? "" : "s"} sent to the printer.`);
+  toast(action === "preview" ? "Packing-slip preview opened in your PDF viewer." : action === "pdf" ? "Combined packing-slip PDF saved." : `${names.length} packing slip${names.length === 1 ? "" : "s"} sent to the printer.`);
   return result;
 }
 
@@ -1600,10 +1760,10 @@ function populatePackingDesigner(design = ensurePackingSettings(), selectedId = 
   Object.entries(values).forEach(([id, value]) => { $(`#${id}`).value = value || ""; });
   const checks = { packingShowAddress: design.showAddress, packingShowOrderNumber: design.showOrderNumber, packingShowPayment: design.showPayment, packingShowShipping: design.showShipping, packingShowPrices: design.showPrices, packingShowDetails: design.showDetails, packingShowThumbnails: design.showThumbnails, packingIncludeLabel: design.includeLabel };
   Object.entries(checks).forEach(([id, value]) => { $(`#${id}`).checked = Boolean(value); });
-  $("#packingLogoStatus").textContent = design.logoPath || "No logo selected";
+  $("#packingLogoStatus").textContent = design.logoPath || (design.brandName === "Card Sale Manager" ? "Built-in Card Sale Manager logo" : "No logo selected");
   $("#deletePackingTemplateBtn").disabled = !selectedId;
   renderPackingSectionOrder();
-  updatePackingPreview();
+  return updatePackingPreview();
 }
 
 function renderPackingSectionOrder() {
@@ -1615,16 +1775,16 @@ async function updatePackingPreview() {
   const buyer = $("#packingBuyer").value || buyers()[0];
   if (!buyer || !$("#packingSlipPreview")) return;
   const design = readPackingDesignerForm();
-  const previewAccent = /^#[0-9a-f]{6}$/i.test(design.accent) ? design.accent : "#d9693d";
+  const previewAccent = /^#[0-9a-f]{6}$/i.test(design.accent) ? design.accent : "#19b56b";
   packingPreviewSheet?.replaceSync(`#packingSlipPreview{--accent:${previewAccent}}`);
   $("#packingPreviewBuyer").textContent = buyer;
   const slip = await buildPackingSlip(buyer, design);
   $("#packingSlipPreview").innerHTML = slip.html;
 }
 
-function openPackingDesigner() {
+async function openPackingDesigner() {
   ensurePackingSettings();
-  populatePackingDesigner(ensurePackingSettings());
+  await populatePackingDesigner(ensurePackingSettings());
   $("#packingDesignerDialog").showModal();
 }
 
@@ -1665,6 +1825,108 @@ function renderPackingHistory() {
   const saleId = activeSale().id;
   const history = (state.packingPrintHistory || []).filter((item) => item.saleId === saleId);
   $("#packingPrintHistory").innerHTML = history.length ? history.map((item) => `<article><strong>${escapeHtml(item.buyer)}</strong><span>${item.action === "pdf" ? "PDF" : item.count > 1 ? "Reprint" : "Printed"}</span><small>${new Date(item.at).toLocaleString()} · ${escapeHtml(item.pageSize || "letter")}</small><small>Print #${item.count}</small></article>`).join("") : `<div class="empty-state"><h3>No slips printed yet</h3><p>Successful prints and PDF exports will be recorded here.</p></div>`;
+}
+
+function saleIntroduction(template = ensureSaleIntroTemplate()) {
+  const sale = activeSale();
+  const years = sale.cards.map((card) => Number(card.year)).filter(Number.isFinite).sort((a, b) => a - b);
+  const yearRange = !years.length ? "a variety of years" : years[0] === years.at(-1) ? String(years[0]) : `${years[0]}–${years.at(-1)}`;
+  const values = { saleName: sale.name, cardCount: String(sale.cards.length), yearRange, pwePrice: money(sale.pweShipping), pmwtPrice: money(sale.pmwtShipping), claimWords: claimWords().slice(0, 4).join(", ") };
+  return String(template || DEFAULT_SALE_INTRO).replace(/\{(saleName|cardCount|yearRange|pwePrice|pmwtPrice|claimWords)\}/g, (_match, key) => values[key] ?? "").trim();
+}
+
+function openSaleIntroduction() {
+  $("#saleIntroTemplate").value = ensureSaleIntroTemplate();
+  $("#saleIntroPreview").value = saleIntroduction();
+  $("#saleIntroDialog").showModal();
+}
+
+function currentImportMapping() { return Object.fromEntries($$("[data-map]").map((select) => [select.dataset.map, select.value])); }
+
+function renderImportPresetOptions(selectedId = "") {
+  $("#importPresetSelect").innerHTML = `<option value="">Automatic mapping</option>${importPresets().map((preset) => `<option value="${preset.id}" ${preset.id === selectedId ? "selected" : ""}>${escapeHtml(preset.name)}</option>`).join("")}`;
+  $("#deleteImportPresetBtn").disabled = !selectedId;
+}
+
+function applyImportPreset(id) {
+  const preset = importPresets().find((item) => item.id === id);
+  if (!preset || !pendingSheet) return;
+  $$('[data-map]').forEach((select) => { select.value = pendingSheet.headers.includes(preset.mapping[select.dataset.map]) ? preset.mapping[select.dataset.map] : ""; });
+  if (preset.template) $("#listingTemplate").value = preset.template;
+  updateImportPreview();
+}
+
+const PWE_LABEL_STYLES = `body{margin:0;background:#fff;color:#172333;font-family:"Segoe UI",Arial,sans-serif}.pwe-print-label{width:4in;height:6in;padding:.23in;display:flex;flex-direction:column;border:0;page-break-after:always;overflow:hidden}.pwe-print-label:last-child{page-break-after:auto}.pwe-return{font-size:11px;line-height:1.35;border-bottom:2px solid var(--label-accent);padding-bottom:10px}.pwe-heading{text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:900;color:var(--label-accent);margin:28px 0 10px}.pwe-recipient{font-size:22px;line-height:1.42;font-style:normal;font-weight:600;white-space:pre-line}.pwe-order{margin-top:18px;padding:9px;border:1px solid #ccd4dc;border-radius:7px;font-size:11px}.pwe-footer{margin-top:auto;border-top:3px solid var(--label-accent);padding-top:10px;text-align:center;font-weight:800;font-size:12px}.pwe-print-label.compact .pwe-recipient{font-size:18px}.pwe-print-label.large .pwe-recipient{font-size:26px}`;
+
+function readPweLabelForm() {
+  return { heading: $("#pweLabelHeading").value.trim(), returnName: $("#pweReturnName").value.trim(), returnAddress: $("#pweReturnAddress").value.trim(), footer: $("#pweLabelFooter").value.trim(), accent: $("#pweLabelAccent").value, size: $("#pweLabelSize").value, showOrder: $("#pweShowOrder").checked };
+}
+
+function pweLabelHtml(buyer, settings = ensurePweLabelSettings()) {
+  const profile = buyerProfile(buyer); const order = orderFor(buyer); const cards = cardsForBuyer(buyer);
+  order.orderNumber ||= `${String(activeSale().name || "SALE").replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase()}-${String(buyers().indexOf(buyer) + 1).padStart(3, "0")}`;
+  return `<article class="pwe-print-label ${escapeHtml(settings.size || "standard")}"><div class="pwe-return"><strong>${escapeHtml(settings.returnName || "Return address")}</strong><br>${escapeHtml(settings.returnAddress || "Add a return address in the label editor").replace(/\n/g, "<br>")}</div><div class="pwe-heading">${escapeHtml(settings.heading || "Please deliver to")}</div><address class="pwe-recipient"><strong>${escapeHtml(buyer)}</strong>\n${escapeHtml(profile.address || "Address not entered")}</address>${settings.showOrder ? `<div class="pwe-order">Order ${escapeHtml(order.orderNumber)} · ${cards.length} card${cards.length === 1 ? "" : "s"} · PWE</div>` : ""}<footer class="pwe-footer">${escapeHtml(settings.footer || "")}</footer></article>`;
+}
+
+function updatePweLabelPreview() {
+  const buyer = $("#packingBuyer").value || buyers()[0] || "Sample Buyer";
+  const accent = /^#[0-9a-f]{6}$/i.test($("#pweLabelAccent").value) ? $("#pweLabelAccent").value : "#172333";
+  pwePreviewSheet?.replaceSync(`#pweLabelPreview{--label-accent:${accent}}`);
+  $("#pwePreviewBuyer").textContent = buyer;
+  $("#pweLabelPreview").innerHTML = pweLabelHtml(buyer, readPweLabelForm());
+}
+
+function openPweLabelDesigner() {
+  const settings = ensurePweLabelSettings();
+  $("#pweLabelHeading").value = settings.heading || ""; $("#pweReturnName").value = settings.returnName || ""; $("#pweReturnAddress").value = settings.returnAddress || ""; $("#pweLabelFooter").value = settings.footer || ""; $("#pweLabelAccent").value = settings.accent || "#172333"; $("#pweLabelSize").value = settings.size || "standard"; $("#pweShowOrder").checked = settings.showOrder !== false;
+  updatePweLabelPreview(); $("#pweLabelDialog").showModal();
+}
+
+async function outputPweLabels(names, action = "print") {
+  const valid = names.filter((buyer) => buyerProfile(buyer).address?.trim());
+  if (!valid.length) return toast("Add a mailing address before printing a PWE label.");
+  const settings = ensurePweLabelSettings();
+  const accent = /^#[0-9a-f]{6}$/i.test(settings.accent) ? settings.accent : "#172333";
+  const payload = { title: valid.length === 1 ? `${valid[0]} PWE label` : `${activeSale().name} PWE labels`, html: valid.map((buyer) => pweLabelHtml(buyer, settings)).join(""), styles: PWE_LABEL_STYLES.replaceAll("var(--label-accent)", accent), pageSize: "label" };
+  const result = action === "preview" ? await window.cardSale.previewPackingSlip(payload) : await window.cardSale.printPackingSlip(payload);
+  if (!result?.success) return toast(action === "preview" ? "The PWE label preview could not be opened." : "The PWE labels were not printed.");
+  toast(action === "preview" ? "PWE label preview opened." : `${valid.length} PWE label${valid.length === 1 ? "" : "s"} sent to the printer.`);
+}
+
+const WALKTHROUGH_STEPS = [
+  { title: "Welcome to Card Sale Manager", body: "Post. Sell. Track. The Command Center is your daily checklist from first claim to final shipment.", tips: ["Green actions move work forward", "Amber and red are reserved for items needing attention"], image: "assets/brand-logo-dark.svg", view: "command" },
+  { title: "Import and prepare listings", body: "Import your spreadsheet, choose a saved column preset, review warnings, and match each card to its image.", tips: ["Purchase data stays private", "Copying text and dragging an image are separate actions"], image: "assets/help/workspace.png", view: "sale" },
+  { title: "Record claims and offers", body: "Claims Desk contains every sale card. Assign a buyer, record an offer, or paste comments into the parser.", tips: ["Accepted offers become orders", "Audit timestamps preserve what happened"], image: "assets/help/offers.png", view: "claims" },
+  { title: "Confirm buyer orders", body: "Choose shipping, validate the mailing address, record payment, and copy the buyer summary.", tips: ["PWE or PMWT can be overridden", "Costs never appear in customer messages"], image: "assets/help/orders.png", view: "orders" },
+  { title: "Pack and print", body: "Check cards as they are packed, preview packing slips, print PWE thermal labels, and add tracking.", tips: ["Packed buyers are marked in the menu", "Print previews use the final PDF layout"], image: "assets/help/packing.png", view: "packing" },
+  { title: "Your work is protected", body: "The green indicator confirms a local save. Daily rotating backups and pre-update backups protect your sales.", tips: ["Open the data folder from the sidebar", "Anonymous diagnostics contain no buyer or card details"], image: "assets/brand-logo-dark.svg", view: "help" }
+];
+
+function renderWalkthrough() {
+  const step = WALKTHROUGH_STEPS[walkthroughStep];
+  $("#walkthroughTitle").textContent = step.title; $("#walkthroughBody").textContent = step.body; $("#walkthroughCounter").textContent = `${walkthroughStep + 1} of ${WALKTHROUGH_STEPS.length}`; $("#walkthroughImage").src = step.image; $("#walkthroughTips").innerHTML = step.tips.map((tip) => `<li>${escapeHtml(tip)}</li>`).join(""); $("#walkthroughBackBtn").disabled = walkthroughStep === 0; $("#walkthroughNextBtn").textContent = walkthroughStep === WALKTHROUGH_STEPS.length - 1 ? "Finish" : "Next";
+}
+
+function openWalkthrough() { walkthroughStep = 0; renderWalkthrough(); $("#walkthroughDialog").showModal(); }
+
+function renderSetupStep() {
+  $$('[data-setup-step]').forEach((section, index) => section.classList.toggle("hidden", index !== setupStep));
+  $("#setupStepLabel").textContent = `Step ${setupStep + 1} of 3`; $("#setupProgress").value = setupStep + 1; $("#setupBackBtn").disabled = setupStep === 0; $("#setupNextBtn").textContent = setupStep === 2 ? "Finish setup" : "Next";
+}
+
+function openSetupWizard() {
+  setupStep = 0; const sale = activeSale(); $("#setupSellerName").value = state.preferences?.sellerName || ""; $("#setupPwePrice").value = sale.pweShipping ?? 1; $("#setupPmwtPrice").value = sale.pmwtShipping ?? 5; $("#setupImageFolder").value = lookupSettings().primaryFolder || ""; renderSetupStep(); $("#setupWizardDialog").showModal();
+}
+
+function diagnosticReport() {
+  const description = scrubDiagnosticText($("#diagnosticDescription")?.value.trim() || "");
+  return { reportVersion: 1, appVersion: installedVersion, description, preferences: { theme: state.preferences?.theme, compact: Boolean(state.preferences?.compact), reducedMotion: Boolean(state.preferences?.reducedMotion) }, totals: { sales: state.sales.length, cards: state.sales.reduce((sum, sale) => sum + sale.cards.length, 0), buyerProfiles: Object.keys(state.buyerProfiles || {}).length, importPresets: importPresets().length }, activeSale: { cards: activeSale().cards.length, images: activeSale().images.length, orders: Object.keys(activeSale().orders || {}).length, pendingOffers: activeSale().cards.filter((card) => card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus || "pending")).length, healthIssues: healthIssues().length }, recentErrors: runtimeErrors.slice(-10) };
+}
+
+function openDiagnosticDialog() {
+  $("#diagnosticDescription").value = "";
+  $("#diagnosticSummary").innerHTML = `<strong>Privacy check</strong><span>Buyer names: excluded</span><span>Addresses: excluded</span><span>Card details and prices: excluded</span><span>Image and folder paths: excluded</span>`;
+  $("#diagnosticDialog").showModal();
 }
 
 async function checkForUpdates(manual = false) {
@@ -1808,6 +2070,26 @@ function applyParsedClaims() {
 
 function bindEvents() {
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
+  $("#commandView").addEventListener("click", (event) => { const view = event.target.closest("[data-command-view]")?.dataset.commandView; if (view) showView(view); });
+  $("#refreshCommandBtn").addEventListener("click", renderCommandCenter);
+  $("#helpView").addEventListener("click", (event) => { const view = event.target.closest("[data-help-view]")?.dataset.helpView; if (view) showView(view); });
+  $("#startWalkthroughBtn").addEventListener("click", openWalkthrough);
+  $("#openSetupWizardBtn").addEventListener("click", openSetupWizard);
+  $("#saveDiagnosticBtn").addEventListener("click", openDiagnosticDialog);
+  $("#saleIntroBtn").addEventListener("click", openSaleIntroduction);
+  $("#saleIntroTemplate").addEventListener("input", (event) => { $("#saleIntroPreview").value = saleIntroduction(event.target.value); });
+  $("#resetSaleIntroBtn").addEventListener("click", () => { $("#saleIntroTemplate").value = DEFAULT_SALE_INTRO; $("#saleIntroPreview").value = saleIntroduction(DEFAULT_SALE_INTRO); });
+  $("#saveSaleIntroBtn").addEventListener("click", () => { state.preferences.saleIntroTemplate = $("#saleIntroTemplate").value.trim() || DEFAULT_SALE_INTRO; saveSoon(); toast("Sale introduction template saved."); });
+  $("#copySaleIntroBtn").addEventListener("click", () => { state.preferences.saleIntroTemplate = $("#saleIntroTemplate").value.trim() || DEFAULT_SALE_INTRO; saveSoon(); copyText($("#saleIntroPreview").value, "Sale introduction copied."); });
+  $("#offerSearch").addEventListener("input", (event) => { offerDeskSettings().query = event.target.value; saveSoon(); renderOffers(); });
+  [["#offerStatusFilter", "status"], ["#offerBuyerFilter", "buyer"], ["#offerMarginFilter", "margin"]].forEach(([selector, key]) => $(selector).addEventListener("change", (event) => { offerDeskSettings()[key] = event.target.value; saveSoon(); renderOffers(); }));
+  $("#offersView").addEventListener("click", (event) => {
+    const key = event.target.closest("[data-offer-sort]")?.dataset.offerSort;
+    if (!key) return;
+    const settings = offerDeskSettings();
+    settings.sortDirection = settings.sortKey === key ? (settings.sortDirection === "asc" ? "desc" : "asc") : (["card", "buyer", "status"].includes(key) ? "asc" : "desc");
+    settings.sortKey = key; saveSoon(); renderOffers();
+  });
   $("#offerRows").addEventListener("click", (event) => {
     const acceptId = event.target.dataset.acceptOffer;
     const rejectId = event.target.dataset.rejectOffer;
@@ -1835,6 +2117,9 @@ function bindEvents() {
   $("#addSingleCardBtn").addEventListener("click", openAddCard);
   $$('[data-action="add-card"]').forEach((button) => button.addEventListener("click", openAddCard));
   $("#confirmAddCardBtn").addEventListener("click", addSingleCard);
+  $("#importPresetSelect").addEventListener("change", (event) => { $("#deleteImportPresetBtn").disabled = !event.target.value; if (event.target.value) applyImportPreset(event.target.value); });
+  $("#saveImportPresetBtn").addEventListener("click", () => { if (!pendingSheet) return; const name = window.prompt("Name this column preset:", pendingSheet.name || "My spreadsheet"); if (!name?.trim()) return; const preset = { id: uid(), name: name.trim(), mapping: currentImportMapping(), template: $("#listingTemplate").value }; state.importPresets.push(preset); renderImportPresetOptions(preset.id); saveSoon(); toast("Import-column preset saved."); });
+  $("#deleteImportPresetBtn").addEventListener("click", () => { const id = $("#importPresetSelect").value; if (!id || !window.confirm("Delete this import-column preset?")) return; state.importPresets = importPresets().filter((preset) => preset.id !== id); renderImportPresetOptions(); saveSoon(); toast("Import preset deleted."); });
   $("#addCardDialog").addEventListener("input", (event) => { if (event.target.matches("input")) updateAddCardPreview(); });
   $("#addImagesBtn").addEventListener("click", () => addImages("files"));
   $("#addFolderBtn").addEventListener("click", () => addImages("folder"));
@@ -1996,6 +2281,8 @@ function bindEvents() {
   $("#confirmPerfectMatchesBtn").addEventListener("click", confirmPerfectMatches);
   $("#deleteSelectedMatchesBtn").addEventListener("click", deleteSelectedMatches);
   $("#buyerList").addEventListener("click", (event) => { const button = event.target.closest("[data-buyer]"); if (button) { state.selectedBuyer = button.dataset.buyer; renderOrders(); } });
+  $("#orderSearch").addEventListener("input", (event) => { orderDeskSettings().query = event.target.value; saveSoon(); renderOrders(); });
+  $("#orderStatusFilter").addEventListener("change", (event) => { orderDeskSettings().status = event.target.value; saveSoon(); renderOrders(); });
   $("#orderDetail").addEventListener("input", (event) => {
     if (!state.selectedBuyer) return; const order = orderFor(state.selectedBuyer);
     const rerender = ["orderShippingMethod", "orderDiscount", "orderPaymentMethod"].includes(event.target.id);
@@ -2006,11 +2293,12 @@ function bindEvents() {
     if (event.target.id === "buyerNotes") buyerProfile(state.selectedBuyer).notes = event.target.value;
     saveSoon(); if (rerender) renderOrderDetail();
   });
+  $("#orderDetail").addEventListener("change", (event) => { if (event.target.id !== "buyerAddress" || !state.selectedBuyer) return; const previous = event.target.dataset.originalAddress || ""; const current = event.target.value.trim(); const profile = buyerProfile(state.selectedBuyer); if (previous && normalizedAddress(previous) !== normalizedAddress(current)) profile.previousAddresses.push({ address: previous, changedAt: new Date().toISOString() }); profile.address = current; saveSoon(); renderOrders(); toast(addressWarnings(state.selectedBuyer).length ? "Address saved with warnings." : "Address saved and checked."); });
   $("#orderDetail").addEventListener("click", (event) => {
     const status = event.target.dataset.orderStatus;
-    if (status && state.selectedBuyer) { const order = orderFor(state.selectedBuyer); if (status === "paid" && !order.paymentMethod) return toast("Choose Cash, PayPal, Venmo or Other before marking paid."); snapshotSale(`Before marking ${state.selectedBuyer} ${status}`); order.status = status; if (status === "paid") order.paidAt = new Date().toISOString(); recordAudit("order", `${state.selectedBuyer} marked ${status}${order.paymentMethod ? ` via ${order.paymentMethod}` : ""}`, { buyer: state.selectedBuyer }); saveSoon(); render(); toast(`Order marked ${status}.`); }
-    if (event.target.id === "copySummaryBtn") copyText(buyerSummary(state.selectedBuyer), "Buyer summary copied.");
-    if (event.target.dataset.copyMessage) copyText(buyerMessage(event.target.dataset.copyMessage, state.selectedBuyer), "Buyer message copied.");
+    if (status && state.selectedBuyer) { const order = orderFor(state.selectedBuyer); if (status === "paid" && !order.shippingMethod) return toast("Select PWE or PMWT before marking the order paid."); if (status === "paid" && !order.paymentMethod) return toast("Choose Cash, PayPal, Venmo or Other before marking paid."); snapshotSale(`Before marking ${state.selectedBuyer} ${status}`); order.status = status; if (status === "paid") order.paidAt = new Date().toISOString(); recordAudit("order", `${state.selectedBuyer} marked ${status}${order.paymentMethod ? ` via ${order.paymentMethod}` : ""}`, { buyer: state.selectedBuyer }); saveSoon(); render(); toast(`Order marked ${status}.`); }
+    if (event.target.id === "copySummaryBtn") { if (!orderFor(state.selectedBuyer).shippingMethod) return toast("Select PWE or PMWT before copying the summary."); copyText(buyerSummary(state.selectedBuyer), "Buyer summary copied."); }
+    if (event.target.dataset.copyMessage) { if (!orderFor(state.selectedBuyer).shippingMethod && ["payment-due", "payment-received"].includes(event.target.dataset.copyMessage)) return toast("Select PWE or PMWT before copying this message."); copyText(buyerMessage(event.target.dataset.copyMessage, state.selectedBuyer), "Buyer message copied."); }
     if (event.target.id === "editMessageTemplatesBtn") openMessageTemplates();
     if (event.target.dataset.openTracking) window.cardSale.openTracking(event.target.dataset.openTracking);
     if (event.target.dataset.openBuyerProfile) { state.profileBuyer = event.target.dataset.openBuyerProfile; showView("buyers"); renderBuyerProfiles(); }
@@ -2028,12 +2316,19 @@ function bindEvents() {
   $("#packingContent").addEventListener("click", (event) => {
     const buyer = $("#packingBuyer").value;
     if (event.target.id === "checkAllCardsBtn") { const cards = cardsForBuyer(buyer); const shouldPack = cards.some((card) => !card.packed); cards.forEach((card) => card.packed = shouldPack); saveSoon(); renderPacking(); toast(shouldPack ? "All cards checked." : "All cards unchecked."); }
-    if (event.target.id === "completePackingBtn" && !event.target.disabled) { orderFor(buyer).status = "packed"; saveSoon(); render(); toast(`${buyer}'s package is complete.`); }
+    if (event.target.id === "completePackingBtn" && !event.target.disabled) { if (!orderFor(buyer).shippingMethod) return toast("Select PWE or PMWT in Buyer Orders first."); orderFor(buyer).status = "packed"; saveSoon(); render(); toast(`${buyer}'s package is complete.`); }
     if (event.target.id === "copyTrackingMessageBtn") { const order = orderFor(buyer); order.trackingNumber = $("#trackingNumber").value.trim(); if (!order.trackingNumber) return toast("Enter a tracking number first."); copyText(trackingMessage(buyer), "Shipping message copied."); }
+    if (event.target.id === "previewPackingSlipBtn") outputPackingSlips([buyer], "preview");
     if (event.target.id === "printPackingSlipBtn") printPackingSlip(buyer);
     if (event.target.dataset.openTracking) window.cardSale.openTracking(event.target.dataset.openTracking);
   });
   $("#packingCustomizeBtn").addEventListener("click", openPackingDesigner);
+  $("#pweLabelBtn").addEventListener("click", openPweLabelDesigner);
+  $("#pweLabelDialog").addEventListener("input", (event) => { if (event.target.matches("input, textarea, select")) updatePweLabelPreview(); });
+  $("#savePweLabelBtn").addEventListener("click", () => { state.preferences.pweLabel = readPweLabelForm(); saveSoon(); toast("PWE label design saved."); });
+  $("#previewPweLabelBtn").addEventListener("click", () => { state.preferences.pweLabel = readPweLabelForm(); const buyer = $("#packingBuyer").value || buyers()[0]; if (buyer) outputPweLabels([buyer], "preview"); });
+  $("#printPweLabelBtn").addEventListener("click", () => { state.preferences.pweLabel = readPweLabelForm(); const buyer = $("#packingBuyer").value || buyers()[0]; if (buyer) outputPweLabels([buyer]); });
+  $("#printAllPweLabelsBtn").addEventListener("click", () => { state.preferences.pweLabel = readPweLabelForm(); outputPweLabels(buyers().filter((buyer) => orderFor(buyer).shippingMethod === "PWE")); });
   $("#packingBulkBtn").addEventListener("click", () => { packingBulkSelection = new Set(buyers()); renderPackingBulk(); $("#packingBulkDialog").showModal(); });
   $("#packingPrintHistoryBtn").addEventListener("click", () => { renderPackingHistory(); $("#packingHistoryDialog").showModal(); });
   $("#packingJumpSearch").addEventListener("keydown", (event) => {
@@ -2048,7 +2343,7 @@ function bindEvents() {
   $("#packingDesignerDialog").addEventListener("input", (event) => { if (event.target.matches("input, textarea, select")) updatePackingPreview(); });
   $("#packingTemplateSelect").addEventListener("change", (event) => { const template = state.packingTemplates.find((item) => item.id === event.target.value); populatePackingDesigner(template || ensurePackingSettings(), event.target.value); });
   $("#choosePackingLogoBtn").addEventListener("click", async () => { const logoPath = await window.cardSale.choosePackingLogo(); if (!logoPath) return; packingDesignerDraft.logoPath = logoPath; $("#packingLogoStatus").textContent = logoPath; updatePackingPreview(); });
-  $("#clearPackingLogoBtn").addEventListener("click", () => { packingDesignerDraft.logoPath = ""; $("#packingLogoStatus").textContent = "No logo selected"; updatePackingPreview(); });
+  $("#clearPackingLogoBtn").addEventListener("click", () => { packingDesignerDraft.logoPath = ""; $("#packingLogoStatus").textContent = packingDesignerDraft.brandName === "Card Sale Manager" ? "Built-in Card Sale Manager logo" : "No logo selected"; updatePackingPreview(); });
   $("#packingSectionOrder").addEventListener("dragstart", (event) => { const item = event.target.closest("[data-packing-section]"); if (!item) return; item.classList.add("dragging"); event.dataTransfer.setData("text/plain", item.dataset.packingSection); });
   $("#packingSectionOrder").addEventListener("dragend", (event) => event.target.closest("[data-packing-section]")?.classList.remove("dragging"));
   $("#packingSectionOrder").addEventListener("dragover", (event) => event.preventDefault());
@@ -2062,6 +2357,7 @@ function bindEvents() {
   $("#packingBulkSelectAll").addEventListener("change", (event) => { packingFilteredBuyers().forEach((buyer) => event.target.checked ? packingBulkSelection.add(buyer) : packingBulkSelection.delete(buyer)); renderPackingBulk(); });
   $("#packingBulkBuyers").addEventListener("change", (event) => { const buyer = event.target.dataset.packingBuyer; if (!buyer) return; event.target.checked ? packingBulkSelection.add(buyer) : packingBulkSelection.delete(buyer); renderPackingBulk(); });
   $("#printPackingBulkBtn").addEventListener("click", async () => { const names = packingFilteredBuyers().filter((buyer) => packingBulkSelection.has(buyer)); if (await outputPackingSlips(names)) $("#packingBulkDialog").close(); });
+  $("#previewPackingBulkBtn").addEventListener("click", async () => { const names = packingFilteredBuyers().filter((buyer) => packingBulkSelection.has(buyer)); await outputPackingSlips(names, "preview"); });
   $("#exportPackingPdfBtn").addEventListener("click", async () => { const names = packingFilteredBuyers().filter((buyer) => packingBulkSelection.has(buyer)); if (await outputPackingSlips(names, "pdf")) $("#packingBulkDialog").close(); });
   $("#liveSaleContent").addEventListener("click", (event) => {
     if (event.target.dataset.liveCopy) copyAndHideCard(event.target.dataset.liveCopy).then(() => { liveIndex = Math.min(liveIndex, Math.max(0, liveCards().length - 1)); renderLiveSale(); });
@@ -2104,7 +2400,16 @@ function bindEvents() {
   $("#quickEditDrawer").addEventListener("input", (event) => { if (event.target.matches("input, textarea")) updateQuickEditPreview(); });
   $("#buyerProfileSearch").addEventListener("input", (event) => { profileQuery = event.target.value; renderBuyerProfiles(); });
   $("#buyerProfileList").addEventListener("click", (event) => { const button = event.target.closest("[data-profile-buyer]"); if (button) { state.profileBuyer = button.dataset.profileBuyer; renderBuyerProfiles(); } });
-  $("#buyerProfileDetail").addEventListener("click", (event) => { if (event.target.id === "saveBuyerProfileBtn") { const profile = buyerProfile(state.profileBuyer); profile.tags = $("#profileTags").value.split(",").map((tag) => tag.trim()).filter(Boolean); profile.address = $("#profileAddress").value.trim(); profile.notes = $("#profileNotes").value.trim(); saveSoon(); renderBuyerProfiles(); toast("Buyer profile saved."); } if (event.target.dataset.profileCard) { showView("sale"); resetListingView(); state.query = activeSale().cards.find((card) => card.id === event.target.dataset.profileCard)?.name || ""; $("#cardSearch").value = state.query; renderListings(); } });
+  $("#buyerProfileDetail").addEventListener("click", (event) => { if (event.target.id === "saveBuyerProfileBtn") { const profile = buyerProfile(state.profileBuyer); const nextAddress = $("#profileAddress").value.trim(); if (profile.address && normalizedAddress(profile.address) !== normalizedAddress(nextAddress)) profile.previousAddresses.push({ address: profile.address, changedAt: new Date().toISOString() }); profile.aliases = $("#profileAliases").value.split(",").map((alias) => alias.trim()).filter(Boolean); profile.tags = $("#profileTags").value.split(",").map((tag) => tag.trim()).filter(Boolean); profile.address = nextAddress; profile.notes = $("#profileNotes").value.trim(); saveSoon(); renderBuyerProfiles(); renderOrders(); toast(addressWarnings(state.profileBuyer).length ? "Profile saved with address warnings." : "Buyer profile saved and address checked."); } if (event.target.dataset.profileCard) { showView("sale"); resetListingView(); state.query = activeSale().cards.find((card) => card.id === event.target.dataset.profileCard)?.name || ""; $("#cardSearch").value = state.query; renderListings(); } });
+  $("#setupChooseFolderBtn").addEventListener("click", async () => { const folder = await window.cardSale.chooseLookupFolder(); if (folder) $("#setupImageFolder").value = folder; });
+  $("#setupBackBtn").addEventListener("click", () => { setupStep = Math.max(0, setupStep - 1); renderSetupStep(); });
+  $("#setupSkipBtn").addEventListener("click", () => { state.preferences.setupCompleted = true; saveSoon(); $("#setupWizardDialog").close(); });
+  $("#setupNextBtn").addEventListener("click", () => { if (setupStep < 2) { setupStep += 1; return renderSetupStep(); } const firstSetup = !state.preferences.setupCompleted; state.preferences.sellerName = $("#setupSellerName").value.trim(); activeSale().pweShipping = Number($("#setupPwePrice").value || 0); activeSale().pmwtShipping = Number($("#setupPmwtPrice").value || 0); const folder = $("#setupImageFolder").value.trim(); if (folder) lookupSettings().primaryFolder = folder; if (state.preferences.sellerName) { ensurePackingSettings().brandName = state.preferences.sellerName; ensurePweLabelSettings().returnName ||= state.preferences.sellerName; } if (firstSetup && !$("#setupUseSample").checked) { activeSale().name = "My first sale"; activeSale().cards = []; activeSale().orders = {}; activeSale().images = []; } state.preferences.setupCompleted = true; saveSoon(); $("#setupWizardDialog").close(); render(); showView("command"); toast("Setup complete. Your defaults are saved locally."); if ($("#setupStartGuide").checked) setTimeout(openWalkthrough, 250); });
+  $("#walkthroughBackBtn").addEventListener("click", () => { walkthroughStep = Math.max(0, walkthroughStep - 1); renderWalkthrough(); });
+  $("#walkthroughNextBtn").addEventListener("click", () => { if (walkthroughStep >= WALKTHROUGH_STEPS.length - 1) return $("#walkthroughDialog").close(); walkthroughStep += 1; renderWalkthrough(); });
+  $("#walkthroughOpenBtn").addEventListener("click", () => { const view = WALKTHROUGH_STEPS[walkthroughStep].view; $("#walkthroughDialog").close(); showView(view); });
+  $("#copyDiagnosticBtn").addEventListener("click", () => copyText(JSON.stringify(diagnosticReport(), null, 2), "Anonymous diagnostic report copied."));
+  $("#downloadDiagnosticBtn").addEventListener("click", async () => { const result = await window.cardSale.saveDiagnosticReport(diagnosticReport()); if (result?.success) { $("#diagnosticDialog").close(); toast("Anonymous diagnostic report saved."); } });
   $("#refreshHealthBtn").addEventListener("click", () => { renderHealthCheck(); toast("Health check refreshed."); });
   $("#healthIssues").addEventListener("click", (event) => { const item = event.target.closest("[data-health-card], [data-health-buyer]"); if (!item) return; if (item.dataset.healthCard) { showView("sale"); openQuickEdit(item.dataset.healthCard); } if (item.dataset.healthBuyer) { state.selectedBuyer = item.dataset.healthBuyer; showView("orders"); renderOrders(); } });
   $("#fontSmallerBtn").addEventListener("click", () => { state.preferences ||= {}; state.preferences.fontScale = Math.max(.85, Number(state.preferences.fontScale || 1) - .05); applyDisplayPreferences(); saveSoon(); });
@@ -2153,6 +2458,7 @@ function bindEvents() {
 
 async function init() {
   const saved = await window.cardSale.load();
+  const firstLaunch = !saved?.sales?.length;
   let recoveryNotice = "";
   if (saved?.sales?.length) {
     if (saved.__recovery?.source) recoveryNotice = "The main save could not be read, so Card Sale Manager restored the newest recovery backup.";
@@ -2179,6 +2485,8 @@ async function init() {
     state.preferences.reducedMotion ??= false;
     state.preferences.claimWords ||= [...DEFAULT_CLAIM_WORDS];
     state.salePresets ||= [];
+    state.importPresets ||= [];
+    state.preferences.setupCompleted ??= true;
     state.sales.forEach((sale) => {
       if (!sale.template || legacyTemplates.has(sale.template)) sale.template = DEFAULT_TEMPLATE;
       sale.pweShipping ??= 1;
@@ -2212,16 +2520,19 @@ async function init() {
         if (imageKey && usedImages.has(imageKey)) card.imagePath = "";
         else if (imageKey) usedImages.add(imageKey);
       });
-      Object.values(sale.orders).forEach((order) => { order.shippingMethod ||= Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT"; order.packingNotes ||= ""; order.packingSlipNote ||= ""; order.packingSlipPrintCount ||= 0; });
+      Object.values(sale.orders).forEach((order) => { if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : ""; order.packingNotes ||= ""; order.packingSlipNote ||= ""; order.packingSlipPrintCount ||= 0; });
     });
-    Object.values(state.buyerProfiles).forEach((profile) => profile.tags ||= []);
+    Object.values(state.buyerProfiles).forEach((profile) => { profile.tags ||= []; profile.aliases ||= []; profile.previousAddresses ||= []; });
     undoStack = state.sales.flatMap((sale) => [
       ...sale.cards.filter((card) => card.hiddenAfterCopy).map((card) => ({ saleId: sale.id, cardId: card.id, at: card.completedAt || "" })),
       ...sale.images.filter((image) => image.hiddenAfterDrag).map((image) => ({ saleId: sale.id, imageId: image.id, at: image.hiddenAt || "" }))
     ]).sort((a, b) => a.at.localeCompare(b.at));
   }
+  state.preferences ||= { fontScale: 1, compact: false, theme: "system", reducedMotion: false };
+  if (firstLaunch) state.preferences.setupCompleted ??= false;
+  state.importPresets ||= [];
   if (![...$("#packingPageSize").options].some((option) => option.value === "two-up")) $("#packingPageSize").add(new Option("Two half-slips per letter page", "two-up"));
-  claimWords(); presets(); ensurePackingSettings(); ensureMessageTemplates(); bindEvents(); resetListingView(); applyDisplayPreferences(); render();
+  claimWords(); presets(); importPresets(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); bindEvents(); resetListingView(); applyDisplayPreferences(); render();
   window.cardSale.onPrepareClose(async () => {
     try { await saveNow(); await window.cardSale.backup("close"); } catch {}
     await window.cardSale.closeReady();
@@ -2231,8 +2542,10 @@ async function init() {
     $("#updateProgressBar").style.width = `${percent}%`;
     $("#updateProgressText").textContent = details.installing ? "Installing update…" : (details.percent == null ? "Downloading update…" : `Downloading update… ${details.percent}%`);
   });
-  $("#appVersion").textContent = `Version ${await window.cardSale.version()}`;
+  installedVersion = await window.cardSale.version();
+  $("#appVersion").textContent = `Version ${installedVersion}`;
   if (recoveryNotice) toast(recoveryNotice);
+  if (!state.preferences.setupCompleted) setTimeout(openSetupWizard, 300);
   checkForUpdates(false);
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "card-sale-manager",
-  "version": "0.8.0",
+  "version": "1.0.0",
   "description": "Local-first card sale workflow manager",
   "main": "main.js",
   "type": "commonjs",
@@ -37,6 +37,7 @@
       "package.json"
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         "nsis",
         "portable"
@@ -45,6 +46,9 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
       "artifactName": "Card-Sale-Manager-${version}-Setup.${ext}"
     },
     "portable": {

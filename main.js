@@ -66,6 +66,25 @@ async function createDataBackup(reason = "automatic", minimumAgeMs = 0) {
   }
 }
 
+async function createDailyBackup() {
+  const source = dataPath();
+  try {
+    await fs.promises.access(source);
+    const folder = path.join(backupFolderPath(), "daily");
+    await fs.promises.mkdir(folder, { recursive: true });
+    const day = new Date().toISOString().slice(0, 10);
+    const destination = path.join(folder, `${day}.json`);
+    await fs.promises.copyFile(source, destination);
+    validateSavedData(JSON.parse(await fs.promises.readFile(destination, "utf8")));
+    const backups = (await fs.promises.readdir(folder)).filter((name) => /^\d{4}-\d{2}-\d{2}\.json$/.test(name)).sort().reverse();
+    await Promise.all(backups.slice(30).map((name) => fs.promises.unlink(path.join(folder, name)).catch(() => {})));
+    return destination;
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function loadRecoveryData() {
   const candidates = [`${dataPath()}.previous`];
   try {
@@ -221,6 +240,7 @@ function createWindow() {
     minHeight: 700,
     backgroundColor: "#f5f7fa",
     title: "Card Sale Manager",
+    icon: path.join(__dirname, "assets", "icon.ico"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -243,7 +263,7 @@ function createWindow() {
     mainWindow.webContents.once("did-finish-load", async () => {
       await new Promise((resolve) => setTimeout(resolve, 1200));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
-      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "parser", "quick-edit", "closing", "copied", "folders"].find((view) => captureName.includes(view)) || "");
+      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "parser", "quick-edit", "closing", "copied", "folders"].find((view) => captureName.includes(view)) || "");
       if (captureView === "match-review") {
         await mainWindow.webContents.executeJavaScript("autoMatchImages()");
         await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -271,7 +291,17 @@ function createWindow() {
         await new Promise((resolve) => setTimeout(resolve, 700));
       } else if (captureView === "packing-bulk") {
         await mainWindow.webContents.executeJavaScript("showView('packing'); packingBulkSelection = new Set(buyers()); renderPackingBulk(); document.querySelector('#packingBulkDialog').showModal()");
-      } else if (["dashboard", "orders", "packing", "live", "offers", "buyers", "health"].includes(captureView)) {
+      } else if (captureView === "setup") {
+        await mainWindow.webContents.executeJavaScript("if (!document.querySelector('#setupWizardDialog').open) openSetupWizard()");
+      } else if (captureView === "walkthrough") {
+        await mainWindow.webContents.executeJavaScript("openWalkthrough()");
+      } else if (captureView === "command-light") {
+        await mainWindow.webContents.executeJavaScript("state.preferences.theme='light'; applyDisplayPreferences(); showView('command')");
+      } else if (captureView === "help-light") {
+        await mainWindow.webContents.executeJavaScript("state.preferences.theme='light'; applyDisplayPreferences(); showView('help')");
+      } else if (captureView === "pwe-label") {
+        await mainWindow.webContents.executeJavaScript("showView('packing'); openPweLabelDesigner()");
+      } else if (["command", "sale", "dashboard", "orders", "packing", "live", "offers", "buyers", "health", "help"].includes(captureView)) {
         await mainWindow.webContents.executeJavaScript(`showView(${JSON.stringify(captureView)})`);
       }
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -287,6 +317,7 @@ app.whenReady().then(() => {
     try {
       const saved = validateSavedData(JSON.parse(await fs.promises.readFile(dataPath(), "utf8")));
       await createDataBackup("startup", 5 * 60 * 1000);
+      await createDailyBackup();
       return saved;
     } catch (error) {
       const recovered = await loadRecoveryData();
@@ -309,6 +340,7 @@ app.whenReady().then(() => {
       validateSavedData(JSON.parse(await fs.promises.readFile(temp, "utf8")));
       try { await fs.promises.copyFile(target, previous); } catch (error) { if (error.code !== "ENOENT") throw error; }
       await fs.promises.rename(temp, target);
+      await createDailyBackup();
       return { ok: true, path: target };
     };
     saveQueue = saveQueue.then(performSave, performSave);
@@ -316,6 +348,20 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("data:backup", async (_event, reason) => ({ ok: Boolean(await createDataBackup(reason || "manual")) }));
+  ipcMain.handle("diagnostic:save", async (_event, report) => {
+    const result = await dialog.showSaveDialog(mainWindow, { title: "Save anonymous diagnostic report", defaultPath: `Card-Sale-Manager-Diagnostic-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: "JSON report", extensions: ["json"] }] });
+    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+    const numbersOnly = (value = {}) => Object.fromEntries(Object.entries(value).filter(([, item]) => typeof item === "number" && Number.isFinite(item)));
+    const safeReport = {
+      generatedAt: new Date().toISOString(), appVersion: app.getVersion(), platform: process.platform, architecture: process.arch, electronVersion: process.versions.electron,
+      reportVersion: Number(report?.reportVersion || 1), description: String(report?.description || "").slice(0, 2000),
+      preferences: { theme: String(report?.preferences?.theme || "system"), compact: Boolean(report?.preferences?.compact), reducedMotion: Boolean(report?.preferences?.reducedMotion) },
+      totals: numbersOnly(report?.totals), activeSale: numbersOnly(report?.activeSale),
+      recentErrors: Array.isArray(report?.recentErrors) ? report.recentErrors.slice(-10).map((item) => ({ at: String(item?.at || ""), type: String(item?.type || "error"), message: String(item?.message || "").slice(0, 500) })) : []
+    };
+    await fs.promises.writeFile(result.filePath, JSON.stringify(safeReport, null, 2), "utf8");
+    return { success: true, filePath: result.filePath };
+  });
   ipcMain.handle("app:close-ready", async () => {
     clearTimeout(closeFallbackTimer);
     allowWindowClose = true;
@@ -464,6 +510,25 @@ app.whenReady().then(() => {
     const documentHtml = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>@page{size:${pageCss};margin:0}html,body{margin:0;background:#fff;color:#172333}*{box-sizing:border-box}${styles}</style></head><body>${body}</body></html>`;
     await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(documentHtml)}`);
     return new Promise((resolve) => printWindow.webContents.print({ silent: false, printBackground: true }, (success, reason) => { printWindow.close(); resolve({ success, reason }); }));
+  });
+
+  ipcMain.handle("packing:preview-pdf", async (_event, payload) => {
+    const title = String(payload?.title || "Packing slips").replace(/[<>]/g, "");
+    const previewWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+    const styles = String(payload?.styles || "");
+    const body = String(payload?.html || "");
+    const pageSize = ["letter", "half", "two-up", "label", "compact"].includes(payload?.pageSize) ? payload.pageSize : "letter";
+    const pageCss = pageSize === "half" ? "5.5in 8.5in" : pageSize === "label" ? "4in 6in" : pageSize === "compact" ? "4.25in 5.5in" : "letter";
+    await previewWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>@page{size:${pageCss};margin:0}html,body{margin:0;background:#fff;color:#172333}*{box-sizing:border-box}${styles}</style></head><body>${body}</body></html>`)}`);
+    const pdf = await previewWindow.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
+    previewWindow.close();
+    const previewFolder = path.join(app.getPath("temp"), "Card Sale Manager Previews");
+    await fs.promises.mkdir(previewFolder, { recursive: true });
+    const safeName = title.replace(/[\\/:*?"<>|]/g, "-").slice(0, 90) || "Packing slips";
+    const previewPath = path.join(previewFolder, `${safeName}-${Date.now()}-preview.pdf`);
+    await fs.promises.writeFile(previewPath, pdf);
+    const openError = await shell.openPath(previewPath);
+    return openError ? { success: false, reason: openError } : { success: true, filePath: previewPath };
   });
 
   ipcMain.handle("packing:export-pdf", async (_event, payload) => {
