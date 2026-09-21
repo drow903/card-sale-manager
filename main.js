@@ -1,5 +1,9 @@
 const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
 app.disableHardwareAcceleration();
+// Some Windows systems cannot start Chromium's separate GPU subprocess (0xC0000135).
+// The app uses local trusted content and software rendering, so keeping that work in-process
+// avoids the native breakpoint loop without changing printed or on-screen output.
+app.commandLine.appendSwitch("in-process-gpu");
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
@@ -24,6 +28,8 @@ if (process.env.CARD_SALE_DATA_DIR) {
   app.setPath("sessionData", path.join(stableUserData, "session"));
 }
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
 function dataPath() {
   const base = process.env.CARD_SALE_DATA_DIR || app.getPath("userData");
   return path.join(base, "card-sale-manager.json");
@@ -31,6 +37,21 @@ function dataPath() {
 
 function backupFolderPath() {
   return path.join(path.dirname(dataPath()), "backups");
+}
+
+function stabilityLogPath() {
+  return path.join(path.dirname(dataPath()), "stability.log");
+}
+
+function logStability(type, details = {}) {
+  const safeDetails = Object.fromEntries(Object.entries(details || {}).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value)));
+  const line = `${JSON.stringify({ at: new Date().toISOString(), type, ...safeDetails })}\n`;
+  fs.promises.mkdir(path.dirname(stabilityLogPath()), { recursive: true }).then(() => fs.promises.appendFile(stabilityLogPath(), line, "utf8")).catch(() => {});
+}
+
+function destroyTransientWindow(window) {
+  if (!window || window.isDestroyed()) return;
+  try { window.destroy(); } catch {}
 }
 
 function validateSavedData(value) {
@@ -249,6 +270,7 @@ function createWindow() {
     }
   });
   mainWindow.loadFile("index.html");
+  mainWindow.on("closed", () => { mainWindow = null; });
   mainWindow.on("close", (event) => {
     if (allowWindowClose || mainWindow.isDestroyed()) return;
     event.preventDefault();
@@ -256,7 +278,7 @@ function createWindow() {
     clearTimeout(closeFallbackTimer);
     closeFallbackTimer = setTimeout(() => {
       allowWindowClose = true;
-      if (!mainWindow.isDestroyed()) mainWindow.close();
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
     }, 5000);
   });
   if (process.env.CARD_SALE_CAPTURE_PATH) {
@@ -301,6 +323,7 @@ function createWindow() {
         await mainWindow.webContents.executeJavaScript("state.preferences.theme='light'; applyDisplayPreferences(); showView('help')");
       } else if (captureView === "pwe-label") {
         await mainWindow.webContents.executeJavaScript("showView('packing'); openPweLabelDesigner()");
+        if (captureName.includes("landscape")) await mainWindow.webContents.executeJavaScript("document.querySelector('#pweLabelOrientation').value='landscape'; updatePweLabelPreview()");
       } else if (["command", "sale", "dashboard", "orders", "packing", "live", "offers", "buyers", "health", "help"].includes(captureView)) {
         await mainWindow.webContents.executeJavaScript(`showView(${JSON.stringify(captureView)})`);
       }
@@ -312,7 +335,25 @@ function createWindow() {
   }
 }
 
+if (!hasSingleInstanceLock) app.quit();
+
+app.on("second-instance", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
+app.on("render-process-gone", (_event, webContents, details) => {
+  logStability("render-process-gone", { reason: details?.reason || "unknown", exitCode: details?.exitCode ?? -1 });
+});
+
+app.on("child-process-gone", (_event, details) => {
+  logStability("child-process-gone", { processType: details?.type || "unknown", reason: details?.reason || "unknown", exitCode: details?.exitCode ?? -1, name: details?.name || "" });
+});
+
 app.whenReady().then(() => {
+  if (!hasSingleInstanceLock) return;
   ipcMain.handle("data:load", async () => {
     try {
       const saved = validateSavedData(JSON.parse(await fs.promises.readFile(dataPath(), "utf8")));
@@ -348,6 +389,12 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("data:backup", async (_event, reason) => ({ ok: Boolean(await createDataBackup(reason || "manual")) }));
+  ipcMain.handle("diagnostic:native-events", async () => {
+    try {
+      const text = await fs.promises.readFile(stabilityLogPath(), "utf8");
+      return text.trim().split(/\r?\n/).slice(-10).map((line) => JSON.parse(line)).map((item) => ({ at: String(item.at || ""), type: String(item.type || "native"), processType: String(item.processType || ""), reason: String(item.reason || ""), exitCode: Number(item.exitCode ?? -1) }));
+    } catch { return []; }
+  });
   ipcMain.handle("diagnostic:save", async (_event, report) => {
     const result = await dialog.showSaveDialog(mainWindow, { title: "Save anonymous diagnostic report", defaultPath: `Card-Sale-Manager-Diagnostic-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: "JSON report", extensions: ["json"] }] });
     if (result.canceled || !result.filePath) return { success: false, canceled: true };
@@ -357,7 +404,8 @@ app.whenReady().then(() => {
       reportVersion: Number(report?.reportVersion || 1), description: String(report?.description || "").slice(0, 2000),
       preferences: { theme: String(report?.preferences?.theme || "system"), compact: Boolean(report?.preferences?.compact), reducedMotion: Boolean(report?.preferences?.reducedMotion) },
       totals: numbersOnly(report?.totals), activeSale: numbersOnly(report?.activeSale),
-      recentErrors: Array.isArray(report?.recentErrors) ? report.recentErrors.slice(-10).map((item) => ({ at: String(item?.at || ""), type: String(item?.type || "error"), message: String(item?.message || "").slice(0, 500) })) : []
+      recentErrors: Array.isArray(report?.recentErrors) ? report.recentErrors.slice(-10).map((item) => ({ at: String(item?.at || ""), type: String(item?.type || "error"), message: String(item?.message || "").slice(0, 500) })) : [],
+      nativeEvents: Array.isArray(report?.nativeEvents) ? report.nativeEvents.slice(-10).map((item) => ({ at: String(item?.at || ""), type: String(item?.type || "native"), processType: String(item?.processType || ""), reason: String(item?.reason || ""), exitCode: Number(item?.exitCode ?? -1) })) : []
     };
     await fs.promises.writeFile(result.filePath, JSON.stringify(safeReport, null, 2), "utf8");
     return { success: true, filePath: result.filePath };
@@ -365,7 +413,9 @@ app.whenReady().then(() => {
   ipcMain.handle("app:close-ready", async () => {
     clearTimeout(closeFallbackTimer);
     allowWindowClose = true;
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
+    }, 75);
     return true;
   });
 
@@ -505,11 +555,14 @@ app.whenReady().then(() => {
     const title = String(payload?.title || "Packing slip").replace(/[<>]/g, "");
     const body = String(payload?.html || "");
     const styles = String(payload?.styles || "");
-    const pageSize = ["letter", "half", "two-up", "label", "compact"].includes(payload?.pageSize) ? payload.pageSize : "letter";
-    const pageCss = pageSize === "half" ? "5.5in 8.5in" : pageSize === "label" ? "4in 6in" : pageSize === "compact" ? "4.25in 5.5in" : "letter";
+    const pageSize = ["letter", "half", "two-up", "label", "label-landscape", "compact"].includes(payload?.pageSize) ? payload.pageSize : "letter";
+    const pageCss = pageSize === "half" ? "5.5in 8.5in" : pageSize === "label" ? "4in 6in" : pageSize === "label-landscape" ? "6in 4in" : pageSize === "compact" ? "4.25in 5.5in" : "letter";
     const documentHtml = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>@page{size:${pageCss};margin:0}html,body{margin:0;background:#fff;color:#172333}*{box-sizing:border-box}${styles}</style></head><body>${body}</body></html>`;
     await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(documentHtml)}`);
-    return new Promise((resolve) => printWindow.webContents.print({ silent: false, printBackground: true }, (success, reason) => { printWindow.close(); resolve({ success, reason }); }));
+    return new Promise((resolve) => printWindow.webContents.print({ silent: false, printBackground: true }, (success, reason) => {
+      resolve({ success, reason });
+      setTimeout(() => destroyTransientWindow(printWindow), 75);
+    }));
   });
 
   ipcMain.handle("packing:preview-pdf", async (_event, payload) => {
@@ -517,11 +570,12 @@ app.whenReady().then(() => {
     const previewWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
     const styles = String(payload?.styles || "");
     const body = String(payload?.html || "");
-    const pageSize = ["letter", "half", "two-up", "label", "compact"].includes(payload?.pageSize) ? payload.pageSize : "letter";
-    const pageCss = pageSize === "half" ? "5.5in 8.5in" : pageSize === "label" ? "4in 6in" : pageSize === "compact" ? "4.25in 5.5in" : "letter";
+    const pageSize = ["letter", "half", "two-up", "label", "label-landscape", "compact"].includes(payload?.pageSize) ? payload.pageSize : "letter";
+    const pageCss = pageSize === "half" ? "5.5in 8.5in" : pageSize === "label" ? "4in 6in" : pageSize === "label-landscape" ? "6in 4in" : pageSize === "compact" ? "4.25in 5.5in" : "letter";
     await previewWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>@page{size:${pageCss};margin:0}html,body{margin:0;background:#fff;color:#172333}*{box-sizing:border-box}${styles}</style></head><body>${body}</body></html>`)}`);
-    const pdf = await previewWindow.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
-    previewWindow.close();
+    let pdf;
+    try { pdf = await previewWindow.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true }); }
+    finally { destroyTransientWindow(previewWindow); }
     const previewFolder = path.join(app.getPath("temp"), "Card Sale Manager Previews");
     await fs.promises.mkdir(previewFolder, { recursive: true });
     const safeName = title.replace(/[\\/:*?"<>|]/g, "-").slice(0, 90) || "Packing slips";
@@ -538,11 +592,12 @@ app.whenReady().then(() => {
     const pdfWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
     const styles = String(payload?.styles || "");
     const body = String(payload?.html || "");
-    const pageSize = ["letter", "half", "two-up", "label", "compact"].includes(payload?.pageSize) ? payload.pageSize : "letter";
-    const pageCss = pageSize === "half" ? "5.5in 8.5in" : pageSize === "label" ? "4in 6in" : pageSize === "compact" ? "4.25in 5.5in" : "letter";
+    const pageSize = ["letter", "half", "two-up", "label", "label-landscape", "compact"].includes(payload?.pageSize) ? payload.pageSize : "letter";
+    const pageCss = pageSize === "half" ? "5.5in 8.5in" : pageSize === "label" ? "4in 6in" : pageSize === "label-landscape" ? "6in 4in" : pageSize === "compact" ? "4.25in 5.5in" : "letter";
     await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>@page{size:${pageCss};margin:0}html,body{margin:0;background:#fff;color:#172333}*{box-sizing:border-box}${styles}</style></head><body>${body}</body></html>`)}`);
-    const pdf = await pdfWindow.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
-    pdfWindow.close();
+    let pdf;
+    try { pdf = await pdfWindow.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true }); }
+    finally { destroyTransientWindow(pdfWindow); }
     await fs.promises.writeFile(result.filePath, pdf);
     return { success: true, filePath: result.filePath };
   });

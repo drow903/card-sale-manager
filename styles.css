@@ -460,15 +460,21 @@ textarea { border: 1px solid #cfd7df; border-radius: 8px; padding: 10px 11px; re
 dialog:has(.label-designer-card) { width: min(980px, calc(100% - 24px)); }
 .label-designer-layout { display: grid; grid-template-columns: minmax(330px, .8fr) minmax(380px, 1.2fr); gap: 18px; }
 .label-controls { display: grid; gap: 12px; align-content: start; }
+.label-section-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; padding: 11px; border: 1px solid var(--border); border-radius: 9px; }
 .label-preview-panel { padding: 14px; border-radius: 11px; background: #dfe4e8; color: #172333; }
 .pwe-label-preview { --label-accent: #172333; width: min(400px, 100%); aspect-ratio: 2 / 3; margin: auto; background: white; box-shadow: 0 8px 20px rgba(0,0,0,.16); }
+.pwe-label-preview.landscape { width: min(600px, 100%); aspect-ratio: 3 / 2; }
 .pwe-label-preview .pwe-print-label { height: 100%; padding: 22px; display: flex; flex-direction: column; background: white; color: #172333; overflow: hidden; }
+.pwe-label-preview .pwe-print-label.padding-tight { padding: 14px; }.pwe-label-preview .pwe-print-label.padding-roomy { padding: 30px; }
+.pwe-label-preview .pwe-print-label.font-classic { font-family: Georgia, "Times New Roman", serif; }.pwe-label-preview .pwe-print-label.font-typewriter { font-family: Consolas, "Courier New", monospace; }
 .pwe-label-preview .pwe-return { font-size: 10px; line-height: 1.35; border-bottom: 2px solid var(--label-accent); padding-bottom: 9px; }
 .pwe-label-preview .pwe-heading { text-transform: uppercase; letter-spacing: .12em; font-size: 10px; font-weight: 900; color: var(--label-accent); margin: 23px 0 9px; }
 .pwe-label-preview .pwe-recipient { white-space: pre-line; font: 600 20px/1.4 "Segoe UI", sans-serif; }
+.pwe-label-preview .font-classic .pwe-recipient,.pwe-label-preview .font-typewriter .pwe-recipient { font-family: inherit; }.pwe-label-preview .align-center .pwe-heading,.pwe-label-preview .align-center .pwe-recipient { text-align: center; }
 .pwe-label-preview .pwe-order { margin-top: 16px; padding: 8px; border: 1px solid #ccd4dc; border-radius: 7px; font-size: 10px; }
 .pwe-label-preview .pwe-footer { margin-top: auto; border-top: 3px solid var(--label-accent); padding-top: 9px; text-align: center; font-weight: 800; font-size: 11px; }
 .pwe-label-preview .compact .pwe-recipient { font-size: 17px; }.pwe-label-preview .large .pwe-recipient { font-size: 23px; }
+.pwe-label-preview .landscape .pwe-heading { margin-top: 14px; }.pwe-label-preview .landscape .pwe-recipient { line-height: 1.25; }.pwe-label-preview .landscape .pwe-order { margin-top: 10px; }
 
 .setup-card { width: min(720px, calc(100vw - 40px)); }
 dialog:has(.setup-card) { width: min(720px, calc(100% - 24px)); }

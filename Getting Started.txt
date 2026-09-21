@@ -76,7 +76,9 @@ is ready to pack or ship.
     4 x 6 label, and compact inserts. The built-in Card Sale Manager logo and
     green accent are the default; a custom seller logo and colors can still
     replace them. PWE labels have a separate editable 4 x 6 thermal-label
-    designer.
+    designer with portrait and landscape layouts, font, alignment, padding,
+    color, and optional-section controls. The live preview matches the saved
+    orientation used for individual and batch printing.
 22. The Theme button cycles between System, Light, Dark, and High Contrast. The Motion button
     reduces animation. These preferences are remembered, but printed packing
     slips always use a clean white background.

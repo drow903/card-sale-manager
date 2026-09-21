@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("cardSale", {
   load: () => ipcRenderer.invoke("data:load"),
   save: (payload) => ipcRenderer.invoke("data:save", payload),
   backup: (reason) => ipcRenderer.invoke("data:backup", reason),
+  nativeDiagnosticEvents: () => ipcRenderer.invoke("diagnostic:native-events"),
   saveDiagnosticReport: (report) => ipcRenderer.invoke("diagnostic:save", report),
   chooseSpreadsheet: () => ipcRenderer.invoke("dialog:spreadsheet"),
   parseSpreadsheet: (filePath) => {

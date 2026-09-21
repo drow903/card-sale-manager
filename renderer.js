@@ -8,7 +8,7 @@ const fileUrl = (value) => value ? encodeURI(`file:///${value.replace(/\\/g, "/"
 const DEFAULT_TEMPLATE = "{year} {brand} {player} #{number} {grade} ({flaws}) - ${claimPrice}";
 const DEFAULT_CLAIM_WORDS = ["claim", "claimed", "take", "taken", "mine", "sold"];
 const DEFAULT_SALE_INTRO = "Welcome to {saleName}!\n\nI’ll be posting {cardCount} cards spanning {yearRange}. To claim a card, comment {claimWords} on the individual listing.\n\nShipping:\n• PWE: {pwePrice}\n• PMWT: {pmwtPrice}\n\nPlease keep claims in the order posted. Offers will be reviewed separately. Thanks, and have fun!";
-const DEFAULT_PWE_LABEL = { heading: "PLEASE DELIVER TO", returnName: "", returnAddress: "", footer: "Thank you! Please do not bend.", accent: "#071A2B", size: "standard", showOrder: true };
+const DEFAULT_PWE_LABEL = { heading: "PLEASE DELIVER TO", returnName: "", returnAddress: "", footer: "Thank you! Please do not bend.", accent: "#071A2B", orientation: "portrait", size: "standard", font: "modern", alignment: "left", padding: "standard", showReturn: true, showHeading: true, showOrder: true, showFooter: true };
 const BUILT_IN_BRAND_LOGO = `data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 140"><rect x="18" y="34" width="62" height="74" rx="7" fill="white" stroke="#2F6BFF" stroke-width="8" transform="rotate(-13 49 71)"/><rect x="32" y="24" width="62" height="78" rx="7" fill="white" stroke="#071A2B" stroke-width="8" transform="rotate(-4 63 63)"/><path d="M62 29h37c6 0 11 5 11 11v38l-29 33-29-29V40c0-6 4-11 10-11Z" fill="#19B56B" stroke="#071A2B" stroke-width="7"/><circle cx="92" cy="47" r="6" fill="#071A2B"/><path d="m66 73 11 11 21-24" fill="none" stroke="white" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><text x="132" y="66" fill="#071A2B" font-family="Segoe UI,Arial" font-size="42" font-weight="800">CARD SALE</text><text x="134" y="96" fill="#334155" font-family="Segoe UI,Arial" font-size="24" font-weight="700" letter-spacing="8">MANAGER</text><text x="188" y="121" fill="#119754" font-family="Segoe UI,Arial" font-size="18" font-weight="700">Post. Sell. Track.</text></svg>')}`;
 const PACKING_SECTIONS = [
   ["header", "Brand header"], ["buyer", "Buyer and order"], ["message", "Thank-you message"],
@@ -1856,29 +1856,38 @@ function applyImportPreset(id) {
   updateImportPreview();
 }
 
-const PWE_LABEL_STYLES = `body{margin:0;background:#fff;color:#172333;font-family:"Segoe UI",Arial,sans-serif}.pwe-print-label{width:4in;height:6in;padding:.23in;display:flex;flex-direction:column;border:0;page-break-after:always;overflow:hidden}.pwe-print-label:last-child{page-break-after:auto}.pwe-return{font-size:11px;line-height:1.35;border-bottom:2px solid var(--label-accent);padding-bottom:10px}.pwe-heading{text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:900;color:var(--label-accent);margin:28px 0 10px}.pwe-recipient{font-size:22px;line-height:1.42;font-style:normal;font-weight:600;white-space:pre-line}.pwe-order{margin-top:18px;padding:9px;border:1px solid #ccd4dc;border-radius:7px;font-size:11px}.pwe-footer{margin-top:auto;border-top:3px solid var(--label-accent);padding-top:10px;text-align:center;font-weight:800;font-size:12px}.pwe-print-label.compact .pwe-recipient{font-size:18px}.pwe-print-label.large .pwe-recipient{font-size:26px}`;
+const PWE_LABEL_STYLES = `body{margin:0;background:#fff;color:#172333;font-family:"Segoe UI",Arial,sans-serif}.pwe-print-label{width:4in;height:6in;padding:.23in;display:flex;flex-direction:column;border:0;page-break-after:always;overflow:hidden}.pwe-print-label.landscape{width:6in;height:4in}.pwe-print-label.padding-tight{padding:.15in}.pwe-print-label.padding-roomy{padding:.32in}.pwe-print-label.font-classic{font-family:Georgia,"Times New Roman",serif}.pwe-print-label.font-typewriter{font-family:Consolas,"Courier New",monospace}.pwe-print-label:last-child{page-break-after:auto}.pwe-return{font-size:11px;line-height:1.35;border-bottom:2px solid var(--label-accent);padding-bottom:10px}.pwe-heading{text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:900;color:var(--label-accent);margin:28px 0 10px}.pwe-recipient{font-size:22px;line-height:1.42;font-style:normal;font-weight:600;white-space:pre-line}.align-center .pwe-heading,.align-center .pwe-recipient{text-align:center}.pwe-order{margin-top:18px;padding:9px;border:1px solid #ccd4dc;border-radius:7px;font-size:11px}.pwe-footer{margin-top:auto;border-top:3px solid var(--label-accent);padding-top:10px;text-align:center;font-weight:800;font-size:12px}.pwe-print-label.compact .pwe-recipient{font-size:18px}.pwe-print-label.large .pwe-recipient{font-size:26px}.pwe-print-label.landscape .pwe-heading{margin-top:15px}.pwe-print-label.landscape .pwe-recipient{line-height:1.25}.pwe-print-label.landscape .pwe-order{margin-top:10px}`;
 
 function readPweLabelForm() {
-  return { heading: $("#pweLabelHeading").value.trim(), returnName: $("#pweReturnName").value.trim(), returnAddress: $("#pweReturnAddress").value.trim(), footer: $("#pweLabelFooter").value.trim(), accent: $("#pweLabelAccent").value, size: $("#pweLabelSize").value, showOrder: $("#pweShowOrder").checked };
+  return { heading: $("#pweLabelHeading").value.trim(), returnName: $("#pweReturnName").value.trim(), returnAddress: $("#pweReturnAddress").value.trim(), footer: $("#pweLabelFooter").value.trim(), accent: $("#pweLabelAccent").value, orientation: $("#pweLabelOrientation").value === "landscape" ? "landscape" : "portrait", size: $("#pweLabelSize").value, font: $("#pweLabelFont").value, alignment: $("#pweLabelAlignment").value, padding: $("#pweLabelPadding").value, showReturn: $("#pweShowReturn").checked, showHeading: $("#pweShowHeading").checked, showOrder: $("#pweShowOrder").checked, showFooter: $("#pweShowFooter").checked };
 }
 
 function pweLabelHtml(buyer, settings = ensurePweLabelSettings()) {
   const profile = buyerProfile(buyer); const order = orderFor(buyer); const cards = cardsForBuyer(buyer);
   order.orderNumber ||= `${String(activeSale().name || "SALE").replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase()}-${String(buyers().indexOf(buyer) + 1).padStart(3, "0")}`;
-  return `<article class="pwe-print-label ${escapeHtml(settings.size || "standard")}"><div class="pwe-return"><strong>${escapeHtml(settings.returnName || "Return address")}</strong><br>${escapeHtml(settings.returnAddress || "Add a return address in the label editor").replace(/\n/g, "<br>")}</div><div class="pwe-heading">${escapeHtml(settings.heading || "Please deliver to")}</div><address class="pwe-recipient"><strong>${escapeHtml(buyer)}</strong>\n${escapeHtml(profile.address || "Address not entered")}</address>${settings.showOrder ? `<div class="pwe-order">Order ${escapeHtml(order.orderNumber)} · ${cards.length} card${cards.length === 1 ? "" : "s"} · PWE</div>` : ""}<footer class="pwe-footer">${escapeHtml(settings.footer || "")}</footer></article>`;
+  const orientation = settings.orientation === "landscape" ? "landscape" : "portrait";
+  const font = ["classic", "typewriter"].includes(settings.font) ? settings.font : "modern";
+  const alignment = settings.alignment === "center" ? "center" : "left";
+  const padding = ["tight", "roomy"].includes(settings.padding) ? settings.padding : "standard";
+  const returnBlock = settings.showReturn === false ? "" : `<div class="pwe-return"><strong>${escapeHtml(settings.returnName || "Return address")}</strong><br>${escapeHtml(settings.returnAddress || "Add a return address in the label editor").replace(/\n/g, "<br>")}</div>`;
+  const headingBlock = settings.showHeading === false ? "" : `<div class="pwe-heading">${escapeHtml(settings.heading || "Please deliver to")}</div>`;
+  const orderBlock = settings.showOrder === false ? "" : `<div class="pwe-order">Order ${escapeHtml(order.orderNumber)} · ${cards.length} card${cards.length === 1 ? "" : "s"} · PWE</div>`;
+  const footerBlock = settings.showFooter === false ? "" : `<footer class="pwe-footer">${escapeHtml(settings.footer || "")}</footer>`;
+  return `<article class="pwe-print-label ${escapeHtml(settings.size || "standard")} ${orientation} font-${font} align-${alignment} padding-${padding}">${returnBlock}${headingBlock}<address class="pwe-recipient"><strong>${escapeHtml(buyer)}</strong>\n${escapeHtml(profile.address || "Address not entered")}</address>${orderBlock}${footerBlock}</article>`;
 }
 
 function updatePweLabelPreview() {
   const buyer = $("#packingBuyer").value || buyers()[0] || "Sample Buyer";
   const accent = /^#[0-9a-f]{6}$/i.test($("#pweLabelAccent").value) ? $("#pweLabelAccent").value : "#172333";
   pwePreviewSheet?.replaceSync(`#pweLabelPreview{--label-accent:${accent}}`);
+  $("#pweLabelPreview").classList.toggle("landscape", $("#pweLabelOrientation").value === "landscape");
   $("#pwePreviewBuyer").textContent = buyer;
   $("#pweLabelPreview").innerHTML = pweLabelHtml(buyer, readPweLabelForm());
 }
 
 function openPweLabelDesigner() {
   const settings = ensurePweLabelSettings();
-  $("#pweLabelHeading").value = settings.heading || ""; $("#pweReturnName").value = settings.returnName || ""; $("#pweReturnAddress").value = settings.returnAddress || ""; $("#pweLabelFooter").value = settings.footer || ""; $("#pweLabelAccent").value = settings.accent || "#172333"; $("#pweLabelSize").value = settings.size || "standard"; $("#pweShowOrder").checked = settings.showOrder !== false;
+  $("#pweLabelHeading").value = settings.heading || ""; $("#pweReturnName").value = settings.returnName || ""; $("#pweReturnAddress").value = settings.returnAddress || ""; $("#pweLabelFooter").value = settings.footer || ""; $("#pweLabelAccent").value = settings.accent || "#172333"; $("#pweLabelOrientation").value = settings.orientation === "landscape" ? "landscape" : "portrait"; $("#pweLabelSize").value = settings.size || "standard"; $("#pweLabelFont").value = ["classic", "typewriter"].includes(settings.font) ? settings.font : "modern"; $("#pweLabelAlignment").value = settings.alignment === "center" ? "center" : "left"; $("#pweLabelPadding").value = ["tight", "roomy"].includes(settings.padding) ? settings.padding : "standard"; $("#pweShowReturn").checked = settings.showReturn !== false; $("#pweShowHeading").checked = settings.showHeading !== false; $("#pweShowOrder").checked = settings.showOrder !== false; $("#pweShowFooter").checked = settings.showFooter !== false;
   updatePweLabelPreview(); $("#pweLabelDialog").showModal();
 }
 
@@ -1887,7 +1896,8 @@ async function outputPweLabels(names, action = "print") {
   if (!valid.length) return toast("Add a mailing address before printing a PWE label.");
   const settings = ensurePweLabelSettings();
   const accent = /^#[0-9a-f]{6}$/i.test(settings.accent) ? settings.accent : "#172333";
-  const payload = { title: valid.length === 1 ? `${valid[0]} PWE label` : `${activeSale().name} PWE labels`, html: valid.map((buyer) => pweLabelHtml(buyer, settings)).join(""), styles: PWE_LABEL_STYLES.replaceAll("var(--label-accent)", accent), pageSize: "label" };
+  const landscape = settings.orientation === "landscape";
+  const payload = { title: valid.length === 1 ? `${valid[0]} PWE label` : `${activeSale().name} PWE labels`, html: valid.map((buyer) => pweLabelHtml(buyer, settings)).join(""), styles: PWE_LABEL_STYLES.replaceAll("var(--label-accent)", accent), pageSize: landscape ? "label-landscape" : "label" };
   const result = action === "preview" ? await window.cardSale.previewPackingSlip(payload) : await window.cardSale.printPackingSlip(payload);
   if (!result?.success) return toast(action === "preview" ? "The PWE label preview could not be opened." : "The PWE labels were not printed.");
   toast(action === "preview" ? "PWE label preview opened." : `${valid.length} PWE label${valid.length === 1 ? "" : "s"} sent to the printer.`);
@@ -1918,9 +1928,10 @@ function openSetupWizard() {
   setupStep = 0; const sale = activeSale(); $("#setupSellerName").value = state.preferences?.sellerName || ""; $("#setupPwePrice").value = sale.pweShipping ?? 1; $("#setupPmwtPrice").value = sale.pmwtShipping ?? 5; $("#setupImageFolder").value = lookupSettings().primaryFolder || ""; renderSetupStep(); $("#setupWizardDialog").showModal();
 }
 
-function diagnosticReport() {
+async function diagnosticReport() {
   const description = scrubDiagnosticText($("#diagnosticDescription")?.value.trim() || "");
-  return { reportVersion: 1, appVersion: installedVersion, description, preferences: { theme: state.preferences?.theme, compact: Boolean(state.preferences?.compact), reducedMotion: Boolean(state.preferences?.reducedMotion) }, totals: { sales: state.sales.length, cards: state.sales.reduce((sum, sale) => sum + sale.cards.length, 0), buyerProfiles: Object.keys(state.buyerProfiles || {}).length, importPresets: importPresets().length }, activeSale: { cards: activeSale().cards.length, images: activeSale().images.length, orders: Object.keys(activeSale().orders || {}).length, pendingOffers: activeSale().cards.filter((card) => card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus || "pending")).length, healthIssues: healthIssues().length }, recentErrors: runtimeErrors.slice(-10) };
+  const nativeEvents = await window.cardSale.nativeDiagnosticEvents();
+  return { reportVersion: 2, appVersion: installedVersion, description, preferences: { theme: state.preferences?.theme, compact: Boolean(state.preferences?.compact), reducedMotion: Boolean(state.preferences?.reducedMotion) }, totals: { sales: state.sales.length, cards: state.sales.reduce((sum, sale) => sum + sale.cards.length, 0), buyerProfiles: Object.keys(state.buyerProfiles || {}).length, importPresets: importPresets().length }, activeSale: { cards: activeSale().cards.length, images: activeSale().images.length, orders: Object.keys(activeSale().orders || {}).length, pendingOffers: activeSale().cards.filter((card) => card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus || "pending")).length, healthIssues: healthIssues().length }, recentErrors: runtimeErrors.slice(-10), nativeEvents };
 }
 
 function openDiagnosticDialog() {
@@ -2408,8 +2419,8 @@ function bindEvents() {
   $("#walkthroughBackBtn").addEventListener("click", () => { walkthroughStep = Math.max(0, walkthroughStep - 1); renderWalkthrough(); });
   $("#walkthroughNextBtn").addEventListener("click", () => { if (walkthroughStep >= WALKTHROUGH_STEPS.length - 1) return $("#walkthroughDialog").close(); walkthroughStep += 1; renderWalkthrough(); });
   $("#walkthroughOpenBtn").addEventListener("click", () => { const view = WALKTHROUGH_STEPS[walkthroughStep].view; $("#walkthroughDialog").close(); showView(view); });
-  $("#copyDiagnosticBtn").addEventListener("click", () => copyText(JSON.stringify(diagnosticReport(), null, 2), "Anonymous diagnostic report copied."));
-  $("#downloadDiagnosticBtn").addEventListener("click", async () => { const result = await window.cardSale.saveDiagnosticReport(diagnosticReport()); if (result?.success) { $("#diagnosticDialog").close(); toast("Anonymous diagnostic report saved."); } });
+  $("#copyDiagnosticBtn").addEventListener("click", async () => copyText(JSON.stringify(await diagnosticReport(), null, 2), "Anonymous diagnostic report copied."));
+  $("#downloadDiagnosticBtn").addEventListener("click", async () => { const result = await window.cardSale.saveDiagnosticReport(await diagnosticReport()); if (result?.success) { $("#diagnosticDialog").close(); toast("Anonymous diagnostic report saved."); } });
   $("#refreshHealthBtn").addEventListener("click", () => { renderHealthCheck(); toast("Health check refreshed."); });
   $("#healthIssues").addEventListener("click", (event) => { const item = event.target.closest("[data-health-card], [data-health-buyer]"); if (!item) return; if (item.dataset.healthCard) { showView("sale"); openQuickEdit(item.dataset.healthCard); } if (item.dataset.healthBuyer) { state.selectedBuyer = item.dataset.healthBuyer; showView("orders"); renderOrders(); } });
   $("#fontSmallerBtn").addEventListener("click", () => { state.preferences ||= {}; state.preferences.fontScale = Math.max(.85, Number(state.preferences.fontScale || 1) - .05); applyDisplayPreferences(); saveSoon(); });
