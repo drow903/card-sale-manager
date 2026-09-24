@@ -2,7 +2,7 @@ const fs = require("fs");
 const vm = require("vm");
 
 const source = fs.readFileSync("renderer.js", "utf8").split("async function autoMatchImages")[0];
-const context = vm.createContext({ console, Date, Math, JSON, Set, Map, Intl });
+const context = vm.createContext({ console, Date, Math, JSON, Set, Map, Intl, window: { addEventListener: () => {} } });
 vm.runInContext(source, context);
 vm.runInContext(`
   state = {
