@@ -14,6 +14,31 @@ forward. Amber or red items need review. Its checklist links directly to
 pending offers, unpaid orders, address problems, missing images, and work that
 is ready to pack or ship.
 
+PORTABLE CSM FILES
+
+Choose Portable CSM file in the sidebar to save the complete workspace as a
+.csm file. Store it in OneDrive to open the same sale on another computer with
+Card Sale Manager installed. CSM continues keeping its normal local recovery
+copy while the portable file is open, and changes autosave to both locations.
+
+If OneDrive is in a different location, CSM first repairs image links using
+relative paths. If images are still missing, choose Relink image folder and
+select the main card-image folder once. Create package with images makes a
+self-contained folder when you do not want to rely on the original paths.
+
+Do not edit the same .csm file on two computers at once. CSM uses a lock file,
+opens a file read-only when it may be in use elsewhere, and refuses to replace
+a newer cloud revision without confirmation. Verified backups are stored in a
+.csm-backups folder beside the portable file. Ctrl+O opens a CSM file and
+Ctrl+S saves one.
+
+The Portable CSM file screen can restore those recovery copies, review missing
+images one at a time, and maintain the recent-file list. Recent files can be
+pinned, shown in File Explorer, or removed from the list. If a file has changed
+on another computer, CSM automatically saves a conflict copy and offers three
+choices: stay read-only, save the local work as a new file, or take over editing.
+Take over only after the other computer has closed the file.
+
 1. Double-click Card Sale Manager.exe.
 2. Choose New sale and give the sale a name.
 3. Choose Add single card for manual entry, or choose Import spreadsheet and
@@ -29,6 +54,8 @@ is ready to pack or ship.
    to every sale.
 6. Choose Auto-match card images. Unique 100% matches are attached automatically;
    genuinely ambiguous matches appear in the review screen with the card's flaws.
+   A purchase-date code is also auto-confirmed when only one copy of that card
+   has that purchase date. Same-card duplicates with the same date stay in review.
    Confirm cards one at a time; each confirmed
    row hides so you can move steadily down the list. Confirmed matches remain
    available through the Confirmed filter.
@@ -41,7 +68,9 @@ is ready to pack or ship.
    most recently hidden card or image.
 10. The Claims desk always mirrors every card in the sale workspace. Choose
     Claim or Offer, enter the buyer, and enter an accepted price for offers.
-    Offers below Purchase Price are highlighted.
+    Offers below Purchase Price are highlighted. A pending offer does not create
+    a permanent buyer profile; accepted claims, accepted offers, orders, and
+    manually saved profiles do.
 11. Choose PWE or PMWT for each buyer in Buyer orders, then review totals,
     discounts, and payment status.
 12. Delete unwanted cards from the sale workspace. In Packing, verify cards
@@ -50,6 +79,10 @@ is ready to pack or ship.
 13. Use row checkboxes for bulk deletion and image-review confirmation.
     Duplicate cards are labeled (1 of x). Date-coded filenames (MDDYYYY or
     MMDDYYYY) and a final sequence number such as 1 or 2 break ties.
+    Re-run lookup on a card to recheck it together with any cards that shared
+    the same suggestion. Re-run lookup for every sale deliberately resets and
+    rechecks all current and past-sale image links. One file can never be linked
+    to more than one listing anywhere in the workspace.
 14. The app checks for GitHub releases when it opens. Use Check for updates in
     the sidebar at any time. Confirm the update once and the app downloads and
     installs the Windows setup file automatically.

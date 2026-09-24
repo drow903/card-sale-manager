@@ -1,10 +1,11 @@
 node_modules/
+.electron-runner/
 .pnpm-store-local/
 .build-v070/
 .build-v071/
 release/
 
-.builder-cache/
+.builder-cache*/
 .electron-cache/
 .local-app-data/
 .roaming-app-data/

@@ -6,9 +6,11 @@ app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("in-process-gpu");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const https = require("https");
 const { spawn } = require("child_process");
 const QRCode = require("qrcode");
+const { automaticImageResolution, createEnvelope, imagePaths, parseEnvelope, portableData, relinkManifest, replacePaths } = require("./csm-files");
 
 const UPDATE_REPOSITORY = "drow903/card-sale-manager";
 
@@ -16,6 +18,9 @@ let mainWindow;
 let allowWindowClose = false;
 let closeFallbackTimer = null;
 let saveQueue = Promise.resolve();
+let activeCsmDocument = null;
+const csmInstanceId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+let pendingCsmPath = process.argv.find((value) => /\.csm$/i.test(String(value || ""))) || "";
 
 if (process.env.CARD_SALE_CAPTURE_PATH) app.disableHardwareAcceleration();
 
@@ -41,6 +46,201 @@ function backupFolderPath() {
 
 function stabilityLogPath() {
   return path.join(path.dirname(dataPath()), "stability.log");
+}
+
+function recentCsmPath() {
+  return path.join(path.dirname(dataPath()), "recent-csm-files.json");
+}
+
+function csmLockPath(filePath) {
+  return `${filePath}.lock`;
+}
+
+function csmStatus(extra = {}) {
+  return {
+    active: Boolean(activeCsmDocument),
+    path: activeCsmDocument?.path || "",
+    name: activeCsmDocument ? path.basename(activeCsmDocument.path) : "Local workspace",
+    readOnly: Boolean(activeCsmDocument?.readOnly),
+    conflict: Boolean(activeCsmDocument?.conflict),
+    missingImages: Number(activeCsmDocument?.missingImages?.length || 0),
+    revision: Number(activeCsmDocument?.revision || 0),
+    savedAt: activeCsmDocument?.envelope?.savedAt || "",
+    device: os.hostname(),
+    missingImageFiles: (activeCsmDocument?.missingImages || []).map((item) => ({ originalPath: item.originalPath || "", fileName: item.fileName || path.basename(item.originalPath || "") })),
+    ...extra
+  };
+}
+
+async function recentCsmFiles() {
+  try {
+    const values = JSON.parse(await fs.promises.readFile(recentCsmPath(), "utf8"));
+    return (Array.isArray(values) ? values : []).filter((item) => item?.path).map((item) => ({ ...item, pinned: Boolean(item.pinned), exists: fs.existsSync(item.path) })).sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.openedAt || "").localeCompare(String(a.openedAt || ""))).slice(0, 15);
+  } catch { return []; }
+}
+
+async function rememberCsmFile(filePath) {
+  const previous = await recentCsmFiles();
+  const existing = previous.find((item) => item.path.toLowerCase() === filePath.toLowerCase());
+  const next = [{ path: filePath, name: path.basename(filePath), openedAt: new Date().toISOString(), pinned: Boolean(existing?.pinned) }, ...previous.filter((item) => item.path.toLowerCase() !== filePath.toLowerCase())].slice(0, 15);
+  await fs.promises.mkdir(path.dirname(recentCsmPath()), { recursive: true });
+  await fs.promises.mkdir(path.dirname(recentCsmPath()), { recursive: true });
+  await fs.promises.writeFile(recentCsmPath(), JSON.stringify(next, null, 2), "utf8");
+  return next;
+}
+
+async function updateRecentCsmFile(filePath, action) {
+  const values = await recentCsmFiles();
+  const key = path.resolve(filePath).toLowerCase();
+  let next = values.map(({ exists, ...item }) => item);
+  if (action === "remove") next = next.filter((item) => path.resolve(item.path).toLowerCase() !== key);
+  if (action === "pin") next = next.map((item) => path.resolve(item.path).toLowerCase() === key ? { ...item, pinned: !item.pinned } : item);
+  await fs.promises.writeFile(recentCsmPath(), JSON.stringify(next, null, 2), "utf8");
+  return recentCsmFiles();
+}
+
+function activeCsmBackupFolder() {
+  if (!activeCsmDocument?.path) return "";
+  return path.join(path.dirname(activeCsmDocument.path), ".csm-backups", path.basename(activeCsmDocument.path, path.extname(activeCsmDocument.path)));
+}
+
+async function listCsmBackups() {
+  const folder = activeCsmBackupFolder();
+  if (!folder) return [];
+  let names;
+  try { names = (await fs.promises.readdir(folder)).filter((name) => name.endsWith(".csm")).sort().reverse(); } catch { return []; }
+  const backups = [];
+  for (const name of names.slice(0, 20)) {
+    const filePath = path.join(folder, name);
+    try {
+      const envelope = parseEnvelope(await fs.promises.readFile(filePath, "utf8"));
+      const stats = await fs.promises.stat(filePath);
+      backups.push({ path: filePath, name, savedAt: envelope.savedAt || stats.mtime.toISOString(), revision: Number(envelope.revision || 0), size: stats.size });
+    } catch {}
+  }
+  return backups;
+}
+
+function isActiveCsmBackup(filePath) {
+  const folder = activeCsmBackupFolder();
+  if (!folder) return false;
+  const relative = path.relative(path.resolve(folder), path.resolve(filePath));
+  return relative && !relative.startsWith("..") && !path.isAbsolute(relative) && path.extname(relative).toLowerCase() === ".csm";
+}
+
+function readCsmLock(filePath) {
+  try { return JSON.parse(fs.readFileSync(csmLockPath(filePath), "utf8")); } catch { return null; }
+}
+
+function writeCsmLock(filePath) {
+  const lock = { instanceId: csmInstanceId, device: os.hostname(), pid: process.pid, updatedAt: new Date().toISOString() };
+  fs.writeFileSync(csmLockPath(filePath), JSON.stringify(lock, null, 2), "utf8");
+}
+
+function releaseCsmLock(document = activeCsmDocument) {
+  if (!document?.path || document.readOnly) return;
+  const lockPath = csmLockPath(document.path);
+  try {
+    const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+    if (lock.instanceId === csmInstanceId) fs.unlinkSync(lockPath);
+  } catch {}
+}
+
+function activeForeignLock(filePath) {
+  const lock = readCsmLock(filePath);
+  if (!lock || lock.instanceId === csmInstanceId) return null;
+  const age = Date.now() - Date.parse(lock.updatedAt || 0);
+  return Number.isFinite(age) && age < 12 * 60 * 60 * 1000 ? lock : null;
+}
+
+async function writeCsmBackup(filePath, reason = "save", minimumAgeMs = 15 * 60 * 1000) {
+  if (!fs.existsSync(filePath)) return null;
+  const folder = path.join(path.dirname(filePath), ".csm-backups", path.basename(filePath, path.extname(filePath)));
+  await fs.promises.mkdir(folder, { recursive: true });
+  const existing = (await fs.promises.readdir(folder)).filter((name) => name.endsWith(".csm")).sort().reverse();
+  if (minimumAgeMs && existing[0]) {
+    const newest = await fs.promises.stat(path.join(folder, existing[0]));
+    if (Date.now() - newest.mtimeMs < minimumAgeMs) return path.join(folder, existing[0]);
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const destination = path.join(folder, `${stamp}-${String(reason).replace(/[^a-z0-9-]/gi, "-")}.csm`);
+  await fs.promises.copyFile(filePath, destination);
+  parseEnvelope(await fs.promises.readFile(destination, "utf8"));
+  const files = (await fs.promises.readdir(folder)).filter((name) => name.endsWith(".csm")).sort().reverse();
+  await Promise.all(files.slice(20).map((name) => fs.promises.unlink(path.join(folder, name)).catch(() => {})));
+  return destination;
+}
+
+async function writeCsmConflictCopy(payload, sourcePath) {
+  const folder = path.dirname(sourcePath);
+  const extension = path.extname(sourcePath) || ".csm";
+  const base = path.basename(sourcePath, extension);
+  const stamp = new Date().toISOString().replace("T", " ").replace(/:/g, "-").slice(0, 19);
+  let destination = path.join(folder, `${base} — Conflict Copy ${stamp}${extension}`);
+  let number = 2;
+  while (fs.existsSync(destination)) destination = path.join(folder, `${base} — Conflict Copy ${stamp} (${number++})${extension}`);
+  const envelope = await createEnvelope(payload, destination, app.getVersion(), 1);
+  await fs.promises.writeFile(destination, JSON.stringify(envelope, null, 2), "utf8");
+  parseEnvelope(await fs.promises.readFile(destination, "utf8"));
+  return destination;
+}
+
+async function openCsmDocument(filePath, options = {}) {
+  const resolvedPath = path.resolve(filePath);
+  if (path.extname(resolvedPath).toLowerCase() !== ".csm") throw new Error("Choose a Card Sale Manager .csm file.");
+  const envelope = parseEnvelope(await fs.promises.readFile(resolvedPath, "utf8"));
+  const foreignLock = activeForeignLock(resolvedPath);
+  if (foreignLock && !options.readOnly && !options.takeOver) return { success: false, locked: true, filePath: resolvedPath, device: String(foreignLock.device || "another computer"), updatedAt: foreignLock.updatedAt || "", cloudRevision: Number(envelope.revision || 0), localRevision: Number(activeCsmDocument?.revision || 0), cloudSavedAt: envelope.savedAt || "" };
+  const resolved = await automaticImageResolution(envelope, resolvedPath);
+  releaseCsmLock();
+  const readOnly = Boolean(options.readOnly);
+  activeCsmDocument = { path: resolvedPath, revision: Number(envelope.revision || 0), documentId: envelope.documentId, readOnly, conflict: false, envelope, missingImages: resolved.missing };
+  if (!readOnly) writeCsmLock(resolvedPath);
+  await rememberCsmFile(resolvedPath);
+  return { success: true, data: resolved.data, document: csmStatus(), autoRelinked: Object.keys(resolved.replacements).length, missingImages: resolved.missing.length };
+}
+
+async function saveActiveCsmDocument(payload, options = {}) {
+  if (!activeCsmDocument) return { saved: false, document: csmStatus() };
+  if (activeCsmDocument.readOnly && !options.force) return { saved: false, readOnly: true, document: csmStatus() };
+  let current = null;
+  try { current = parseEnvelope(await fs.promises.readFile(activeCsmDocument.path, "utf8")); } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  const changedElsewhere = current && (current.documentId !== activeCsmDocument.documentId || Number(current.revision || 0) !== Number(activeCsmDocument.revision || 0));
+  if (changedElsewhere && !options.force) {
+    const conflictCopyPath = await writeCsmConflictCopy(payload, activeCsmDocument.path);
+    const lock = activeForeignLock(activeCsmDocument.path);
+    activeCsmDocument.conflict = true;
+    activeCsmDocument.readOnly = true;
+    releaseCsmLock({ ...activeCsmDocument, readOnly: false });
+    return { saved: false, conflict: true, conflictCopyPath, cloudRevision: Number(current.revision || 0), localRevision: Number(activeCsmDocument.revision || 0), cloudSavedAt: current.savedAt || "", device: String(lock?.device || "another computer"), updatedAt: lock?.updatedAt || current.savedAt || "", document: csmStatus() };
+  }
+  const nextRevision = Math.max(Number(current?.revision || 0), Number(activeCsmDocument.revision || 0)) + 1;
+  const envelope = await createEnvelope(payload, activeCsmDocument.path, app.getVersion(), nextRevision);
+  envelope.documentId = activeCsmDocument.documentId || envelope.documentId;
+  const serialized = JSON.stringify(envelope, null, 2);
+  const temp = `${activeCsmDocument.path}.${csmInstanceId}.tmp`;
+  await writeCsmBackup(activeCsmDocument.path, options.reason || "pre-save", options.forceBackup ? 0 : undefined);
+  await fs.promises.writeFile(temp, serialized, "utf8");
+  parseEnvelope(await fs.promises.readFile(temp, "utf8"));
+  await fs.promises.rename(temp, activeCsmDocument.path);
+  activeCsmDocument.revision = nextRevision;
+  activeCsmDocument.documentId = envelope.documentId;
+  activeCsmDocument.envelope = envelope;
+  activeCsmDocument.missingImages = (envelope.imageManifest || []).filter((item) => !item.originalPath || !fs.existsSync(item.originalPath));
+  activeCsmDocument.conflict = false;
+  activeCsmDocument.readOnly = false;
+  writeCsmLock(activeCsmDocument.path);
+  await rememberCsmFile(activeCsmDocument.path);
+  return { saved: true, document: csmStatus() };
+}
+
+async function activateNewCsmDocument(filePath, payload) {
+  releaseCsmLock();
+  activeCsmDocument = { path: filePath, revision: 0, documentId: payload.portableDocumentId || "", readOnly: false, conflict: false, missingImages: [] };
+  const result = await saveActiveCsmDocument(payload, { force: true, reason: "created" });
+  return { success: true, ...result, document: csmStatus() };
 }
 
 function logStability(type, details = {}) {
@@ -285,7 +485,7 @@ function createWindow() {
     mainWindow.webContents.once("did-finish-load", async () => {
       await new Promise((resolve) => setTimeout(resolve, 1200));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
-      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "parser", "quick-edit", "closing", "copied", "folders"].find((view) => captureName.includes(view)) || "");
+      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "parser", "quick-edit", "closing", "copied", "folders", "csm-file"].find((view) => captureName.includes(view)) || "");
       if (captureView === "match-review") {
         await mainWindow.webContents.executeJavaScript("autoMatchImages()");
         await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -324,6 +524,11 @@ function createWindow() {
       } else if (captureView === "pwe-label") {
         await mainWindow.webContents.executeJavaScript("showView('packing'); openPweLabelDesigner()");
         if (captureName.includes("landscape")) await mainWindow.webContents.executeJavaScript("document.querySelector('#pweLabelOrientation').value='landscape'; updatePweLabelPreview()");
+      } else if (captureView === "csm-file") {
+        await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item) => item.close())");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await mainWindow.webContents.executeJavaScript("document.querySelector('#csmFileBtn').click()");
+        await new Promise((resolve) => setTimeout(resolve, 350));
       } else if (["command", "sale", "dashboard", "orders", "packing", "live", "offers", "buyers", "health", "help"].includes(captureView)) {
         await mainWindow.webContents.executeJavaScript(`showView(${JSON.stringify(captureView)})`);
       }
@@ -337,12 +542,16 @@ function createWindow() {
 
 if (!hasSingleInstanceLock) app.quit();
 
-app.on("second-instance", () => {
+app.on("second-instance", (_event, commandLine) => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+  const requestedFile = commandLine.find((value) => /\.csm$/i.test(String(value || "")));
+  if (requestedFile) mainWindow.webContents.send("csm:open-request", requestedFile);
 });
+
+app.on("before-quit", () => releaseCsmLock());
 
 app.on("render-process-gone", (_event, webContents, details) => {
   logStability("render-process-gone", { reason: details?.reason || "unknown", exitCode: details?.exitCode ?? -1 });
@@ -355,6 +564,22 @@ app.on("child-process-gone", (_event, details) => {
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return;
   ipcMain.handle("data:load", async () => {
+    if (activeCsmDocument?.envelope) {
+      const resolved = await automaticImageResolution(activeCsmDocument.envelope, activeCsmDocument.path);
+      activeCsmDocument.missingImages = resolved.missing;
+      return { ...resolved.data, __csmDocument: csmStatus(), __csmAutoRelinked: Object.keys(resolved.replacements).length, __csmMissingImages: resolved.missing.length };
+    }
+    if (pendingCsmPath) {
+      const requestedPath = pendingCsmPath;
+      pendingCsmPath = "";
+      try {
+        let opened = await openCsmDocument(requestedPath);
+        if (opened.locked) opened = await openCsmDocument(requestedPath, { readOnly: true });
+        if (opened.success) return { ...opened.data, __csmDocument: opened.document, __csmAutoRelinked: opened.autoRelinked, __csmMissingImages: opened.missingImages };
+      } catch (error) {
+        logStability("csm-command-line-open-failed", { reason: String(error.message || "open failed").slice(0, 160) });
+      }
+    }
     try {
       const saved = validateSavedData(JSON.parse(await fs.promises.readFile(dataPath(), "utf8")));
       await createDataBackup("startup", 5 * 60 * 1000);
@@ -382,13 +607,114 @@ app.whenReady().then(() => {
       try { await fs.promises.copyFile(target, previous); } catch (error) { if (error.code !== "ENOENT") throw error; }
       await fs.promises.rename(temp, target);
       await createDailyBackup();
-      return { ok: true, path: target };
+      const csm = await saveActiveCsmDocument(payload);
+      return { ok: true, path: target, csm };
     };
     saveQueue = saveQueue.then(performSave, performSave);
     return saveQueue;
   });
 
   ipcMain.handle("data:backup", async (_event, reason) => ({ ok: Boolean(await createDataBackup(reason || "manual")) }));
+  ipcMain.handle("csm:status", async () => ({ document: csmStatus(), recent: await recentCsmFiles(), backups: await listCsmBackups() }));
+  ipcMain.handle("csm:open", async (_event, requestedPath, options = {}) => {
+    let filePath = requestedPath;
+    if (!filePath) {
+      const result = await dialog.showOpenDialog(mainWindow, { title: "Open a Card Sale Manager file", properties: ["openFile"], filters: [{ name: "Card Sale Manager files", extensions: ["csm"] }] });
+      if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true };
+      [filePath] = result.filePaths;
+    }
+    try { return await openCsmDocument(filePath, options); }
+    catch (error) { return { success: false, message: error.code === "ENOENT" ? "That CSM file is not available. If it is stored in OneDrive, make sure it is downloaded on this computer." : error.message }; }
+  });
+  ipcMain.handle("csm:save-as", async (_event, payload) => {
+    const defaultName = `${String(payload?.sales?.find((sale) => sale.id === payload.activeSaleId)?.name || "Card Sale").replace(/[<>:"/\\|?*]+/g, "-")}.csm`;
+    const result = await dialog.showSaveDialog(mainWindow, { title: "Save Card Sale Manager file", defaultPath: defaultName, filters: [{ name: "Card Sale Manager files", extensions: ["csm"] }] });
+    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+    try { return await activateNewCsmDocument(result.filePath.toLowerCase().endsWith(".csm") ? result.filePath : `${result.filePath}.csm`, payload); }
+    catch (error) { return { success: false, message: error.message }; }
+  });
+  ipcMain.handle("csm:save", async (_event, payload, options = {}) => {
+    try {
+      if (!activeCsmDocument) return { success: false, needsSaveAs: true };
+      const result = await saveActiveCsmDocument(payload, { ...options, reason: "manual", forceBackup: true });
+      return { success: Boolean(result.saved), ...result };
+    } catch (error) { return { success: false, message: error.message }; }
+  });
+  ipcMain.handle("csm:detach", async () => {
+    releaseCsmLock();
+    activeCsmDocument = null;
+    return { success: true, document: csmStatus(), recent: await recentCsmFiles() };
+  });
+  ipcMain.handle("csm:recent-action", async (_event, filePath, action) => {
+    if (!["pin", "remove", "reveal"].includes(action) || !filePath) return { success: false };
+    if (action === "reveal") {
+      if (fs.existsSync(filePath)) shell.showItemInFolder(filePath);
+      else if (fs.existsSync(path.dirname(filePath))) await shell.openPath(path.dirname(filePath));
+      return { success: true, recent: await recentCsmFiles() };
+    }
+    return { success: true, recent: await updateRecentCsmFile(filePath, action) };
+  });
+  ipcMain.handle("csm:restore-backup", async (_event, backupPath) => {
+    if (!activeCsmDocument || !isActiveCsmBackup(backupPath)) return { success: false, message: "That recovery copy does not belong to the open CSM file." };
+    try {
+      const envelope = parseEnvelope(await fs.promises.readFile(backupPath, "utf8"));
+      const resolved = await automaticImageResolution(envelope, activeCsmDocument.path);
+      const saved = await saveActiveCsmDocument(resolved.data, { force: true, reason: "before-restore", forceBackup: true });
+      return { success: true, data: resolved.data, document: saved.document, missingImages: resolved.missing.length };
+    } catch (error) { return { success: false, message: error.message }; }
+  });
+  ipcMain.handle("csm:reveal", async (_event, target = "file") => {
+    if (!activeCsmDocument?.path) return false;
+    if (target === "backups") {
+      const folder = activeCsmBackupFolder();
+      if (folder && fs.existsSync(folder)) return shell.openPath(folder);
+      return false;
+    }
+    shell.showItemInFolder(activeCsmDocument.path);
+    return true;
+  });
+  ipcMain.handle("csm:relink", async () => {
+    if (!activeCsmDocument?.envelope) return { success: false, message: "Open a CSM file first." };
+    const result = await dialog.showOpenDialog(mainWindow, { title: "Choose the main card image folder", properties: ["openDirectory"] });
+    if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true };
+    const missing = activeCsmDocument.missingImages?.length ? activeCsmDocument.missingImages : activeCsmDocument.envelope.imageManifest || [];
+    const linked = await relinkManifest(missing, result.filePaths[0]);
+    activeCsmDocument.missingImages = linked.unresolved;
+    return { success: true, root: result.filePaths[0], replacements: linked.replacements, relinked: Object.keys(linked.replacements).length, unresolved: linked.unresolved.length, document: csmStatus() };
+  });
+  ipcMain.handle("csm:package", async (_event, payload) => {
+    const result = await dialog.showOpenDialog(mainWindow, { title: "Choose where to create the portable CSM package", properties: ["openDirectory", "createDirectory"] });
+    if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true };
+    const saleName = String(payload?.sales?.find((sale) => sale.id === payload.activeSaleId)?.name || "Card Sale").replace(/[<>:"/\\|?*]+/g, "-");
+    let packageFolder = path.join(result.filePaths[0], `${saleName} CSM Package`);
+    let suffix = 2;
+    while (fs.existsSync(packageFolder)) packageFolder = path.join(result.filePaths[0], `${saleName} CSM Package ${suffix++}`);
+    const imagesFolder = path.join(packageFolder, "Images");
+    await fs.promises.mkdir(imagesFolder, { recursive: true });
+    const packagedData = portableData(payload);
+    const replacements = {};
+    const usedNames = new Set();
+    let copied = 0; let missing = 0;
+    for (const originalPath of imagePaths(packagedData)) {
+      if (!fs.existsSync(originalPath)) { missing += 1; continue; }
+      const extension = path.extname(originalPath);
+      const stem = path.basename(originalPath, extension).replace(/[<>:"/\\|?*]+/g, "-") || "image";
+      let name = `${stem}${extension}`; let number = 2;
+      while (usedNames.has(name.toLowerCase()) || fs.existsSync(path.join(imagesFolder, name))) name = `${stem}-${number++}${extension}`;
+      usedNames.add(name.toLowerCase());
+      const destination = path.join(imagesFolder, name);
+      await fs.promises.copyFile(originalPath, destination);
+      replacements[originalPath] = destination;
+      copied += 1;
+    }
+    const adjusted = replacePaths(packagedData, replacements);
+    adjusted.lookupSettings = { primaryFolder: imagesFolder, additionalFolders: [], excludedFolders: [] };
+    const csmPath = path.join(packageFolder, `${saleName}.csm`);
+    const envelope = await createEnvelope(adjusted, csmPath, app.getVersion(), 1);
+    await fs.promises.writeFile(csmPath, JSON.stringify(envelope, null, 2), "utf8");
+    parseEnvelope(await fs.promises.readFile(csmPath, "utf8"));
+    return { success: true, folder: packageFolder, csmPath, copied, missing };
+  });
   ipcMain.handle("diagnostic:native-events", async () => {
     try {
       const text = await fs.promises.readFile(stabilityLogPath(), "utf8");

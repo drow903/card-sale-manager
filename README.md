@@ -10,6 +10,9 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Uses a complete Card Sale Manager identity across the Windows icon, sidebar, light and dark themes, onboarding, walkthrough, Help guide, and default packing-slip design.
 - Formats each card into a copy-ready sale listing.
 - Matches local images using year folders, player names, card numbers, seven- or eight-digit purchase-date codes, and duplicate sequence numbers.
+- Auto-confirms a purchase-date filename match when that date identifies only one copy of the card; duplicate same-date copies still require review.
+- Re-runs lookup for one card together with every card that shared its suggested image, or deliberately rechecks confirmed images across every current and past sale.
+- Enforces one image file per listing across the entire saved workspace, not only the active sale.
 - Supports manual image attachment and native drag-out to Facebook.
 - Adds a dedicated Offers desk after Claims Desk, with list price, private purchase price, offer status, and buyer details in one place.
 - Keeps offers out of buyer orders and sales totals until accepted; rejected offers return cards to the open pool.
@@ -23,10 +26,19 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Provides PWE and PMWT shipping options.
 - Generates buyer summaries and tracking messages from editable saved templates.
 - Keeps sale data stored locally on the computer.
+- Saves and opens portable `.csm` workspace files from OneDrive or another synced folder while retaining the normal local recovery copy.
+- Detects newer cloud copies and active-file locks, creates verified portable-file backups, and opens potentially conflicting files read-only.
+- Relinks moved OneDrive images automatically from relative paths or with a one-time image-folder selection, and can create a portable folder containing the CSM file and its images.
+- Reviews unresolved images inside the CSM file screen, where each link can be replaced manually or intentionally left unmatched.
+- Restores verified portable-file recovery copies without leaving the app.
+- Protects cloud edits with automatic conflict copies and a takeover screen showing the other device, activity time, and revisions.
+- Pins, reveals, removes, and clearly marks unavailable entries in the recent CSM file list.
 - Includes Live Sale Mode, a Facebook claim-comment parser, and an unrecognized-comment review queue.
 - Provides sale closing, carryover, health-check, version restore, and undo workflows.
 - Tracks private profit and inventory aging information with sortable profit columns.
 - Stores buyer profiles, tags, notes, purchase patterns, and repeat-buyer alerts.
+- Deletes unused buyer profiles while protecting profiles that still own cards or orders.
+- Avoids creating permanent buyer profiles for pending offers; profiles begin with an accepted claim or offer, an order, or an intentional manual save.
 - Remembers buyer aliases and address history, and flags missing, incomplete, or duplicate mailing addresses.
 - Generates editable sale-introduction posts from the current sale and saved shipping settings.
 - Includes a Packing Slip Studio with saved branded templates, logos, custom colors and messages, local QR codes, links, card thumbnails, configurable sections, live previews, and letter/half-sheet/4×6/compact layouts.
