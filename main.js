@@ -44,6 +44,20 @@ function backupFolderPath() {
   return path.join(path.dirname(dataPath()), "backups");
 }
 
+function updateArchiveFolderPath() {
+  return path.join(path.dirname(dataPath()), "update-archives");
+}
+
+function legacyDataPaths() {
+  if (process.env.CARD_SALE_DATA_DIR) return [];
+  const appData = app.getPath("appData");
+  const current = path.resolve(dataPath()).toLowerCase();
+  return ["Card Sale Manager", "card-sale-manager-desktop", "CardSaleManager"]
+    .map((folder) => path.join(appData, folder, "card-sale-manager.json"))
+    .filter((candidate, index, values) => path.resolve(candidate).toLowerCase() !== current
+      && values.findIndex((value) => path.resolve(value).toLowerCase() === path.resolve(candidate).toLowerCase()) === index);
+}
+
 function stabilityLogPath() {
   return path.join(path.dirname(dataPath()), "stability.log");
 }
@@ -306,13 +320,78 @@ async function createDailyBackup() {
   }
 }
 
-async function loadRecoveryData() {
-  const candidates = [`${dataPath()}.previous`];
-  try {
-    const backups = (await fs.promises.readdir(backupFolderPath())).filter((name) => name.endsWith(".json")).sort().reverse();
-    candidates.push(...backups.map((name) => path.join(backupFolderPath(), name)));
-  } catch {}
+async function copyVerifiedWorkspace(source, destination, parser) {
+  const serialized = await fs.promises.readFile(source, "utf8");
+  parser(serialized);
+  await fs.promises.mkdir(path.dirname(destination), { recursive: true });
+  await fs.promises.writeFile(destination, serialized, "utf8");
+  parser(await fs.promises.readFile(destination, "utf8"));
+  return destination;
+}
+
+async function createUpdateArchive(version) {
+  const safeVersion = String(version || "unknown").replace(/[^a-z0-9.-]+/gi, "-");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const folder = path.join(updateArchiveFolderPath(), `v${safeVersion.replace(/^v/i, "")}`, stamp);
+  const archived = { folder, localWorkspace: "", portableWorkspace: "" };
+  await fs.promises.mkdir(folder, { recursive: true });
+  if (fs.existsSync(dataPath())) {
+    archived.localWorkspace = await copyVerifiedWorkspace(
+      dataPath(),
+      path.join(folder, "card-sale-manager.json"),
+      (text) => validateSavedData(JSON.parse(text))
+    );
+  }
+  if (activeCsmDocument?.path && fs.existsSync(activeCsmDocument.path)) {
+    archived.portableWorkspace = await copyVerifiedWorkspace(
+      activeCsmDocument.path,
+      path.join(folder, path.basename(activeCsmDocument.path)),
+      parseEnvelope
+    );
+  }
+  if (!archived.localWorkspace && !archived.portableWorkspace) {
+    throw new Error("No saved workspace was available to archive before the update.");
+  }
+  await fs.promises.writeFile(path.join(folder, "archive-info.json"), JSON.stringify({
+    createdAt: new Date().toISOString(),
+    updatingTo: version,
+    appVersion: app.getVersion(),
+    localWorkspace: archived.localWorkspace ? path.basename(archived.localWorkspace) : "",
+    portableWorkspace: archived.portableWorkspace ? path.basename(archived.portableWorkspace) : ""
+  }, null, 2), "utf8");
+  return archived;
+}
+
+async function recoveryCandidates() {
+  const candidates = new Set([`${dataPath()}.previous`]);
+  const addJsonFiles = async (folder, recursive = false) => {
+    let entries;
+    try { entries = await fs.promises.readdir(folder, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const itemPath = path.join(folder, entry.name);
+      if (entry.isDirectory() && recursive) await addJsonFiles(itemPath, true);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith(".json")) candidates.add(itemPath);
+    }
+  };
+  await addJsonFiles(backupFolderPath(), true);
+  await addJsonFiles(updateArchiveFolderPath(), true);
+  for (const legacyPath of legacyDataPaths()) {
+    candidates.add(legacyPath);
+    candidates.add(`${legacyPath}.previous`);
+    await addJsonFiles(path.join(path.dirname(legacyPath), "backups"), true);
+  }
+  const available = [];
   for (const candidate of candidates) {
+    try {
+      const stats = await fs.promises.stat(candidate);
+      if (stats.isFile()) available.push({ path: candidate, modifiedAt: stats.mtimeMs });
+    } catch {}
+  }
+  return available.sort((a, b) => b.modifiedAt - a.modifiedAt).map((item) => item.path);
+}
+
+async function loadRecoveryData() {
+  for (const candidate of await recoveryCandidates()) {
     try {
       const recovered = validateSavedData(JSON.parse(await fs.promises.readFile(candidate, "utf8")));
       return { ...recovered, __recovery: { source: candidate } };
@@ -587,7 +666,26 @@ app.whenReady().then(() => {
       return saved;
     } catch (error) {
       const recovered = await loadRecoveryData();
-      if (recovered) return recovered;
+      if (recovered) {
+        const recoverySource = recovered.__recovery.source;
+        const restored = { ...recovered };
+        delete restored.__recovery;
+        try {
+          const target = dataPath();
+          await fs.promises.mkdir(path.dirname(target), { recursive: true });
+          if (fs.existsSync(target)) {
+            const corruptName = `${target}.unreadable-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+            await fs.promises.copyFile(target, corruptName);
+          }
+          const temp = `${target}.recovered.tmp`;
+          await fs.promises.writeFile(temp, JSON.stringify(restored, null, 2), "utf8");
+          validateSavedData(JSON.parse(await fs.promises.readFile(temp, "utf8")));
+          await fs.promises.rename(temp, target);
+        } catch (restoreError) {
+          logStability("recovery-promotion-failed", { reason: String(restoreError.message || "recovery promotion failed").slice(0, 160) });
+        }
+        return { ...restored, __recovery: { source: recoverySource } };
+      }
       if (error.code === "ENOENT") return null;
       throw error;
     }
@@ -808,6 +906,7 @@ app.whenReady().then(() => {
     const destination = path.join(updateFolder, assetName);
     try {
       await createDataBackup(`before-update-${version}`);
+      await createUpdateArchive(version);
       await fs.promises.mkdir(updateFolder, { recursive: true });
       await downloadUpdate(url, destination, (details) => event.sender.send("app:update-progress", details));
       const handle = await fs.promises.open(destination, "r");

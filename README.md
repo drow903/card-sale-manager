@@ -9,7 +9,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Opens with a Sale Command Center that prioritizes pending offers, address problems, unpaid orders, missing images, and ready-to-ship work.
 - Uses a complete Card Sale Manager identity across the Windows icon, sidebar, light and dark themes, onboarding, walkthrough, Help guide, and default packing-slip design.
 - Formats each card into a copy-ready sale listing.
-- Matches local images using year folders, player names, card numbers, seven- or eight-digit purchase-date codes, and duplicate sequence numbers.
+- Matches local images using year folders, player names, card numbers, five- to eight-digit purchase-date codes (including `MMDDYY` such as `091326`), and duplicate sequence numbers.
 - Auto-confirms a purchase-date filename match when that date identifies only one copy of the card; duplicate same-date copies still require review.
 - Re-runs lookup for one card together with every card that shared its suggested image, or deliberately rechecks confirmed images across every current and past sale.
 - Enforces one image file per listing across the entire saved workspace, not only the active sale.
@@ -17,11 +17,18 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Adds a dedicated Offers desk after Claims Desk, with list price, private purchase price, offer status, and buyer details in one place.
 - Keeps offers out of buyer orders and sales totals until accepted; rejected offers return cards to the open pool.
 - Supports accepted, rejected, and countered offers with editable copy-ready counter messages.
+- Builds multi-card bundle offers from selected listings and proportionally distributes the final accepted or countered total across the cards to the exact cent.
+- Retains extra spreadsheet columns as typed custom fields that can be searched, edited, inserted into listing templates, printed on packing slips, and used for sorting or grouping.
+- Includes Card Pulling Mode with buyer filtering, pull progress, printable pull sheets, and multi-level sorting/grouping by location or any standard or imported custom field.
+- Keeps listing references sequential after deletion, sorting, or reordering while permanent internal IDs preserve claims, offers, images, and history; references can also be frozen after posting starts.
+- Adds a notification center for offers, payment, addresses, image problems, pulling, packing, tracking, shipping, profit warnings, and portable-file issues, with direct links, snoozing, and dismissal.
+- Adds a Shipping Batch Manager for filtering and grouping orders, combined packing-slip printing, PWE labels, bulk tracking assignment, buyer-message copying, and batch shipment completion.
 - Supports bulk card deletion, bulk image confirmation, and duplicate-card labels.
 - Keeps image lookup and exclusion folders shared across sales.
 - Checks GitHub releases when the app opens and, after confirmation, downloads and installs signed release installers automatically.
 - Creates verified rolling recovery backups, saves again on close, and refuses to update until current sales are safely backed up.
-- Creates a rotating daily backup and a separate automatic backup immediately before every approved update.
+- Creates rotating daily backups plus a permanent, non-rotating update archive containing the local workspace and any open portable `.csm` file before every approved update.
+- Searches verified backups, daily copies, permanent update archives, and legacy application-data folders before ever treating an installation as a first run.
 - Supports exact numeric card positioning in addition to custom drag-and-drop ordering.
 - Provides PWE and PMWT shipping options.
 - Generates buyer summaries and tracking messages from editable saved templates.
@@ -37,7 +44,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Provides sale closing, carryover, health-check, version restore, and undo workflows.
 - Tracks private profit and inventory aging information with sortable profit columns.
 - Stores buyer profiles, tags, notes, purchase patterns, and repeat-buyer alerts.
-- Deletes unused buyer profiles while protecting profiles that still own cards or orders.
+- Keeps buyer profiles until the user explicitly deletes them; updates and startup cleanup never remove profiles automatically.
 - Avoids creating permanent buyer profiles for pending offers; profiles begin with an accepted claim or offer, an order, or an intentional manual save.
 - Remembers buyer aliases and address history, and flags missing, incomplete, or duplicate mailing addresses.
 - Generates editable sale-introduction posts from the current sale and saved shipping settings.

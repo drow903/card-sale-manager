@@ -47,7 +47,8 @@ const starterSale = {
     { id: uid(), ref: "3", year: "1968", set: "Ice Legends", number: "30", name: "Noah Reed", condition: "VG", price: 15, purchasePrice: 7, purchaseDate: "", notes: "Soft lower-left corner", status: "claimed", buyer: "Alex Sample", claimPrice: 14, claimType: "claim", claimedAt: new Date().toISOString(), imagePath: "" }
   ],
   images: [],
-  orders: { "Alex Sample": { status: "awaiting", shippingMethod: "PWE", discount: 0 } }
+  orders: { "Alex Sample": { status: "awaiting", shippingMethod: "PWE", discount: 0 } },
+  bundles: []
 };
 
 let state = { sales: [starterSale], activeSaleId: starterSale.id, selectedBuyer: "Mike R", filter: "all", query: "", claimQuery: "", lookupSettings: { primaryFolder: "", additionalFolders: [], excludedFolders: [] } };
@@ -63,6 +64,9 @@ let liveIndex = 0;
 let profileQuery = "";
 let packingDesignerDraft = null;
 let packingBulkSelection = new Set();
+let shippingBatchSelection = new Set();
+let notificationCategory = "all";
+let showSnoozedNotifications = false;
 let setupStep = 0;
 let walkthroughStep = 0;
 let installedVersion = "";
@@ -80,6 +84,62 @@ const pwePreviewSheet = typeof CSSStyleSheet !== "undefined" ? new CSSStyleSheet
 if (pwePreviewSheet && typeof document !== "undefined" && document.adoptedStyleSheets) document.adoptedStyleSheets = [...document.adoptedStyleSheets, pwePreviewSheet];
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
+
+const BUILT_IN_CARD_FIELDS = [
+  ["ref", "Reference"], ["buyer", "Buyer"], ["year", "Year"], ["set", "Brand"], ["name", "Player"], ["number", "Card number"],
+  ["condition", "Grade"], ["price", "Claim price"], ["purchasePrice", "Purchase price"], ["purchaseDate", "Purchase date"]
+];
+
+function customFieldKey(label, sale = activeSale()) {
+  const base = String(label || "field").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "field";
+  const used = new Set((sale.customFieldDefinitions || []).map((field) => field.key));
+  let key = base; let suffix = 2;
+  while (used.has(key)) key = `${base}_${suffix++}`;
+  return key;
+}
+
+function customFields(sale = activeSale()) {
+  sale.customFieldDefinitions ||= [];
+  return sale.customFieldDefinitions;
+}
+
+function ensureCustomField(label, type = "text", sale = activeSale(), preferredKey = "") {
+  const normalized = String(label || "").trim().toLowerCase();
+  let field = customFields(sale).find((item) => item.label.toLowerCase() === normalized || (preferredKey && item.key === preferredKey));
+  if (!field) {
+    field = { id: uid(), key: preferredKey && !customFields(sale).some((item) => item.key === preferredKey) ? preferredKey : customFieldKey(label, sale), label: String(label || "Custom field").trim(), type, private: true, includeListing: false, includePacking: false };
+    sale.customFieldDefinitions.push(field);
+  }
+  return field;
+}
+
+function customFieldValue(card, key) { return card?.customFields?.[key] ?? ""; }
+
+function cardSortValue(card, key) {
+  if (!key) return "";
+  if (key.startsWith("custom:")) return customFieldValue(card, key.slice(7));
+  if (key === "buyer") return card.buyer || "";
+  return card[key] ?? "";
+}
+
+function compareCardValues(a, b, key) {
+  const left = cardSortValue(a, key); const right = cardSortValue(b, key);
+  const numeric = left !== "" && right !== "" && Number.isFinite(Number(left)) && Number.isFinite(Number(right));
+  return numeric ? Number(left) - Number(right) : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function referenceOrderedCards(sale = activeSale()) { return sortedSaleCards(sale); }
+
+function renumberCardReferences(sale = activeSale(), { force = false, audit = true } = {}) {
+  sale.autoReferences ??= true;
+  sale.referencesFrozen ??= false;
+  if (!force && (!sale.autoReferences || sale.referencesFrozen)) return false;
+  const ordered = referenceOrderedCards(sale);
+  const changed = ordered.some((card, index) => String(card.ref) !== String(index + 1));
+  ordered.forEach((card, index) => { card.ref = String(index + 1); });
+  if (changed && audit) recordAudit("references", `Renumbered ${ordered.length} card references`, {}, sale);
+  return changed;
+}
 
 function saleSnapshotData(sale) {
   const data = clone(sale);
@@ -262,6 +322,15 @@ function normalizePurchaseDate(value) {
   if (value == null || value === "") return "";
   const raw = String(value).trim();
   let digits = raw.replace(/\D/g, "");
+  if (/^\d{5}$/.test(digits)) digits = `0${digits}`;
+  if (/^\d{6}$/.test(digits)) {
+    const month = Number(digits.slice(0, 2));
+    const day = Number(digits.slice(2, 4));
+    if (month < 1 || month > 12 || day < 1 || day > 31) return raw;
+    const shortYear = Number(digits.slice(4));
+    const fullYear = shortYear >= 70 ? 1900 + shortYear : 2000 + shortYear;
+    return `${digits.slice(0, 4)}${fullYear}`;
+  }
   if (/^\d{7}$/.test(digits)) digits = `0${digits}`;
   if (/^\d{8}$/.test(digits)) {
     const firstFour = Number(digits.slice(0, 4));
@@ -490,8 +559,11 @@ function formatLine(card, template = activeSale().template) {
     claimPrice: formattedPrice,
     price: formattedPrice
   };
-  let line = template.replace(/\{(ref|year|brand|player|number|flaws|grade|claimPrice|set|name|condition|price|notes)\}/g, (_match, key) => values[key] ?? "")
+  customFields().forEach((field) => { values[field.key] = customFieldValue(card, field.key); });
+  let line = template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, key) => values[key] ?? "")
     .replace(/\(\s*\)/g, "").replace(/#\s*(?=\(|-|$)/g, "").replace(/\s+([,)])/g, "$1").replace(/([(])\s+/g, "$1").replace(/\s+/g, " ").replace(/ -\s*- /g, " - ").trim();
+  const extras = customFields().filter((field) => field.includeListing && !template.includes(`{${field.key}}`) && customFieldValue(card, field.key) !== "").map((field) => `${field.label}: ${customFieldValue(card, field.key)}`);
+  if (extras.length) line = /\s-\s\$/.test(line) ? line.replace(/\s-\s\$/, ` · ${extras.join(" · ")} - $`) : `${line} · ${extras.join(" · ")}`;
   const duplicate = duplicateInfo(card).label;
   if (duplicate) line = /\s-\s\$/.test(line) ? line.replace(/\s-\s\$/, ` ${duplicate} - $`) : `${line} ${duplicate}`;
   return line;
@@ -509,6 +581,9 @@ function render() {
   renderOffers();
   renderOrders();
   renderPacking();
+  renderPulling();
+  renderShippingBatches();
+  renderNotifications();
   renderDashboard();
   renderLiveSale();
   renderBuyerProfiles();
@@ -519,7 +594,10 @@ function render() {
 
 function renderCommandCenter() {
   const sale = activeSale();
-  const pendingOffers = sale.cards.filter((card) => card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus || "pending"));
+  const pendingOffers = [
+    ...sale.cards.filter((card) => !card.bundleId && card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus || "pending")),
+    ...(sale.bundles || []).filter((bundle) => ["pending", "countered"].includes(bundle.status || "pending"))
+  ];
   const buyerNames = buyers();
   const unpaid = buyerNames.filter((buyer) => !["paid", "packed", "shipped"].includes(orderFor(buyer).status));
   const addressIssues = buyerNames.filter((buyer) => addressWarnings(buyer).length);
@@ -546,6 +624,61 @@ function renderCommandCenter() {
   $("#commandActivity").innerHTML = activity.length ? activity.map((item) => `<div class="timeline-item"><strong>${escapeHtml(item.message)}</strong><p>${new Date(item.at).toLocaleString()}</p></div>`).join("") : `<div class="empty-state"><p>Sale activity will appear here.</p></div>`;
 }
 
+function notificationState(sale = activeSale()) {
+  sale.notificationState ||= { dismissed: {}, snoozed: {} };
+  sale.notificationState.dismissed ||= {}; sale.notificationState.snoozed ||= {};
+  return sale.notificationState;
+}
+
+function saleNotifications() {
+  const sale = activeSale(); const items = [];
+  const add = (id, category, title, detail, view, options = {}) => items.push({ id, category, title, detail, view, ...options });
+  const bundleIds = new Set((sale.bundles || []).filter((bundle) => ["pending", "countered"].includes(bundle.status)).map((bundle) => bundle.id));
+  (sale.bundles || []).filter((bundle) => bundleIds.has(bundle.id)).forEach((bundle) => add(`bundle:${bundle.id}`, "offers", `Bundle offer from ${bundle.buyer}`, `${bundle.cardIds.length} cards · ${money(bundleDecisionPrice(bundle))}`, "offers", { urgent: true }));
+  sale.cards.filter((card) => !card.bundleId && card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus || "pending")).forEach((card) => add(`offer:${card.id}`, "offers", `Offer awaiting a decision`, `${card.ref} · ${card.name} · ${money(offerDecisionPrice(card))}`, "offers", { cardId: card.id, urgent: true }));
+  sale.cards.filter((card) => card.status === "available" && !card.imagePath).forEach((card) => add(`image:${card.id}`, "images", "Card is missing an image", `${card.ref} · ${card.year} ${card.set} ${card.name}`, "sale", { cardId: card.id }));
+  sale.cards.filter(cardInOrder).forEach((card) => { const price = Number(card.claimPrice ?? card.price); if (Number(card.purchasePrice) > 0 && price < Number(card.purchasePrice)) add(`below-cost:${card.id}`, "profit", "Sale price is below purchase cost", `${card.ref} · ${card.name} · ${money(price)} vs ${money(card.purchasePrice)} cost`, "dashboard", { cardId: card.id }); });
+  buyers().forEach((buyer) => {
+    const order = orderFor(buyer); const cards = cardsForBuyer(buyer); const encoded = encodeURIComponent(buyer);
+    if (!buyerProfile(buyer).address?.trim()) add(`address:${encoded}`, "orders", "Buyer address is missing", buyer, "orders", { buyer, urgent: true });
+    if (!order.shippingMethod) add(`shipping:${encoded}`, "orders", "Shipping method is not selected", buyer, "orders", { buyer });
+    if (!["paid", "packed", "shipped"].includes(order.status)) add(`unpaid:${encoded}`, "payment", "Order is not marked paid", buyer, "orders", { buyer });
+    if (cards.length && cards.every((card) => card.pulled) && cards.some((card) => !card.packed)) add(`pulled:${encoded}`, "packing", "Pulled order is ready to pack", `${buyer} · ${cards.length} cards`, "packing", { buyer });
+    if (cards.length && cards.every((card) => card.packed) && order.status !== "shipped" && order.shippingMethod === "PMWT" && !order.trackingNumber) add(`tracking:${encoded}`, "shipping", "Packed PMWT order needs tracking", buyer, "packing", { buyer, urgent: true });
+    if (cards.length && cards.every((card) => card.packed) && order.status !== "shipped") add(`ship:${encoded}`, "shipping", "Order is ready to ship", `${buyer} · ${order.shippingMethod || "shipping needed"}`, "batches", { buyer });
+  });
+  if (portableDocument.conflict) add("csm:conflict", "data", "Portable CSM file changed elsewhere", "Open the CSM file manager before saving over another computer’s work.", "help", { urgent: true });
+  if (portableDocument.missingImages) add("csm:images", "data", "Portable file has unresolved images", `${portableDocument.missingImages} image paths need review.`, "sale", { urgent: true });
+  return items;
+}
+
+function visibleNotifications({ includeSnoozed = showSnoozedNotifications } = {}) {
+  const saved = notificationState(); const now = Date.now();
+  return saleNotifications().filter((item) => !saved.dismissed[item.id] && (includeSnoozed || !saved.snoozed[item.id] || Number(saved.snoozed[item.id]) <= now));
+}
+
+function renderNotifications() {
+  if (!$("#notificationList")) return;
+  const all = visibleNotifications();
+  const categories = [...new Set(all.map((item) => item.category))];
+  if (notificationCategory !== "all" && !categories.includes(notificationCategory)) notificationCategory = "all";
+  $("#notificationFilters").innerHTML = [`<button class="${notificationCategory === "all" ? "primary" : "secondary"}" data-notification-category="all">All (${all.length})</button>`, ...categories.map((category) => `<button class="${notificationCategory === category ? "primary" : "secondary"}" data-notification-category="${escapeHtml(category)}">${escapeHtml(category[0].toUpperCase() + category.slice(1))} (${all.filter((item) => item.category === category).length})</button>`)].join("");
+  const shown = all.filter((item) => notificationCategory === "all" || item.category === notificationCategory);
+  $("#notificationList").innerHTML = shown.length ? shown.map((item) => `<article class="notification-item ${item.urgent ? "urgent" : ""}" data-notification-id="${escapeHtml(item.id)}"><span>${item.urgent ? "!" : "•"}</span><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.detail)}</p></div><div class="notification-actions"><button class="primary" data-open-notification="${escapeHtml(item.id)}">Open</button><button class="secondary" data-snooze-notification="${escapeHtml(item.id)}">Snooze 1 day</button><button class="row-action danger-link" data-dismiss-notification="${escapeHtml(item.id)}">Dismiss</button></div></article>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>You’re caught up</h3><p>No active notifications match this view.</p></div>`;
+  const activeCount = visibleNotifications({ includeSnoozed: false }).length;
+  $("#notificationNavCount").textContent = activeCount; $("#notificationNavCount").classList.toggle("hidden", activeCount === 0);
+  $("#showSnoozedNotificationsBtn").textContent = showSnoozedNotifications ? "Hide snoozed" : "Show snoozed";
+}
+
+function openNotification(id) {
+  const item = saleNotifications().find((notification) => notification.id === id); if (!item) return;
+  if (item.buyer) state.selectedBuyer = item.buyer;
+  showView(item.view);
+  if (item.view === "orders") renderOrders();
+  if (item.view === "packing" && item.buyer) { $("#packingBuyer").value = item.buyer; renderPacking(); }
+  if (item.cardId && item.view === "sale") openQuickEdit(item.cardId);
+}
+
 function renderStats() {
   const sale = activeSale();
   const sold = sale.cards.filter(cardInOrder);
@@ -563,6 +696,7 @@ function renderStats() {
 
 function sortedSaleCards(sale = activeSale(), cards = sale.cards) {
   return cards.slice().sort((a, b) => {
+    if (String(sale.sortMode).startsWith("field:")) return compareCardValues(a, b, `custom:${String(sale.sortMode).slice(6)}`) || Number(a.sourceOrder ?? a.ref) - Number(b.sourceOrder ?? b.ref);
     if (sale.sortMode === "year") return String(a.year).localeCompare(String(b.year), undefined, { numeric: true }) || String(a.name).localeCompare(String(b.name));
     if (sale.sortMode === "player") return String(a.name).localeCompare(String(b.name)) || Number(a.sourceOrder ?? a.ref) - Number(b.sourceOrder ?? b.ref);
     if (sale.sortMode === "price-asc") return Number(a.price) - Number(b.price);
@@ -575,6 +709,8 @@ function sortedSaleCards(sale = activeSale(), cards = sale.cards) {
 function renderListings() {
   const sale = activeSale();
   sale.sortMode ||= "spreadsheet";
+  $$("#listingSort option[data-custom-sort]").forEach((option) => option.remove());
+  customFields(sale).forEach((field) => { const option = new Option(field.label, `field:${field.key}`); option.dataset.customSort = "true"; $("#listingSort").add(option); });
   $("#listingSort").value = sale.sortMode;
   const query = state.query.toLowerCase();
   const cards = sortedSaleCards(sale, sale.cards.filter((card) => {
@@ -584,7 +720,7 @@ function renderListings() {
       || (state.filter === "claimed" && card.status !== "available")
       || (state.filter === "with-image" && Boolean(card.imagePath))
       || (state.filter === "missing-image" && !card.imagePath));
-    return filterMatch && Object.values(card).join(" ").toLowerCase().includes(query);
+    return filterMatch && [...Object.values(card).filter((value) => typeof value !== "object"), ...Object.values(card.customFields || {})].join(" ").toLowerCase().includes(query);
   }));
   const validIds = new Set(sale.cards.map((card) => card.id));
   selectedListingIds = new Set([...selectedListingIds].filter((id) => validIds.has(id)));
@@ -619,6 +755,8 @@ function updateListingBulkControls(visibleCards = []) {
   $("#listingSelectionCount").textContent = `${selectedListingIds.size} selected`;
   $("#deleteSelectedCardsBtn").disabled = selectedListingIds.size === 0;
   $("#bulkEditBtn").disabled = selectedListingIds.size === 0;
+  const selectedCards = activeSale().cards.filter((card) => selectedListingIds.has(card.id));
+  $("#bundleOfferBtn").disabled = selectedCards.length < 2 || selectedCards.some((card) => card.status !== "available" || card.buyer || card.bundleId);
   $("#selectAllListings").checked = visibleIds.length > 0 && checked === visibleIds.length;
   $("#selectAllListings").indeterminate = checked > 0 && checked < visibleIds.length;
 }
@@ -658,7 +796,7 @@ function renderClaims() {
   const claims = (sale.audit?.length ? sale.audit : legacyClaims).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
   $("#buyerNames").innerHTML = allBuyerNames().flatMap((buyer) => [buyer, ...buyerProfile(buyer).aliases]).map((buyer) => `<option value="${escapeHtml(buyer)}"></option>`).join("");
   const query = String(state.claimQuery || "").toLowerCase();
-  const cards = sale.cards.filter((card) => Object.values(card).join(" ").toLowerCase().includes(query));
+  const cards = sale.cards.filter((card) => [...Object.values(card).filter((value) => typeof value !== "object"), ...Object.values(card.customFields || {})].join(" ").toLowerCase().includes(query));
   $("#claimRows").innerHTML = cards.map((card) => {
     const effectivePrice = Number(card.offerPrice ?? card.claimPrice ?? card.price);
     const belowCost = Number(card.purchasePrice) > 0 && effectivePrice < Number(card.purchasePrice);
@@ -673,9 +811,19 @@ function offerDecisionPrice(card) {
 }
 
 function renderOffers() {
-  const allOffers = activeSale().cards.filter((card) => card.claimType === "offer" && card.offerPrice != null && card.buyer);
+  const sale = activeSale();
+  sale.bundles ||= [];
+  const statusForCard = (card) => card.offerStatus || (card.status === "claimed" ? "accepted" : "pending");
+  const cardRecords = sale.cards.filter((card) => !card.bundleId && card.claimType === "offer" && card.offerPrice != null && card.buyer).map((card) => ({
+    kind: "card", id: card.id, card, cards: [card], buyer: card.buyer, listed: Number(card.price || 0), offered: Number(card.offerPrice || 0), decision: offerDecisionPrice(card), cost: Number(card.purchasePrice || 0), status: statusForCard(card)
+  }));
+  const bundleRecords = sale.bundles.map((bundle) => {
+    const cards = bundleCards(bundle, sale);
+    return { kind: "bundle", id: bundle.id, bundle, cards, buyer: bundle.buyer, listed: Number(bundle.listedPrice || cards.reduce((sum, card) => sum + Number(card.price || 0), 0)), offered: Number(bundle.offerPrice || 0), decision: bundleDecisionPrice(bundle), cost: cards.reduce((sum, card) => sum + Number(card.purchasePrice || 0), 0), status: bundle.status || "pending" };
+  }).filter((record) => record.cards.length >= 2 && record.status !== "rejected");
+  const allOffers = [...bundleRecords, ...cardRecords];
   const settings = offerDeskSettings();
-  const buyerNames = [...new Set(allOffers.map((card) => card.buyer))].sort((a, b) => a.localeCompare(b));
+  const buyerNames = [...new Set(allOffers.map((record) => record.buyer))].sort((a, b) => a.localeCompare(b));
   if (settings.buyer !== "all" && !buyerNames.includes(settings.buyer)) settings.buyer = "all";
   const buyerFilter = $("#offerBuyerFilter");
   buyerFilter.innerHTML = `<option value="all">All buyers</option>${buyerNames.map((buyer) => `<option value="${escapeHtml(buyer)}" ${settings.buyer === buyer ? "selected" : ""}>${escapeHtml(buyer)}</option>`).join("")}`;
@@ -683,45 +831,45 @@ function renderOffers() {
   $("#offerStatusFilter").value = settings.status;
   $("#offerMarginFilter").value = settings.margin;
   const query = settings.query.trim().toLowerCase();
-  const statusFor = (card) => card.offerStatus || (card.status === "claimed" ? "accepted" : "pending");
-  const offers = allOffers.filter((card) => {
-    const status = statusFor(card);
-    const price = offerDecisionPrice(card);
-    const cost = Number(card.purchasePrice);
-    const searchText = [card.ref, card.year, card.set, card.number, card.name, card.buyer].join(" ").toLowerCase();
+  const offers = allOffers.filter((record) => {
+    const searchText = [record.buyer, record.kind, ...record.cards.flatMap((card) => [card.ref, card.year, card.set, card.number, card.name])].join(" ").toLowerCase();
     if (query && !searchText.includes(query)) return false;
-    if (settings.status !== "all" && status !== settings.status) return false;
-    if (settings.buyer !== "all" && card.buyer !== settings.buyer) return false;
-    if (settings.margin === "below-cost" && !(cost > 0 && price < cost)) return false;
-    if (settings.margin === "above-cost" && !(cost > 0 && price >= cost)) return false;
-    if (settings.margin === "no-cost" && cost > 0) return false;
+    if (settings.status !== "all" && record.status !== settings.status) return false;
+    if (settings.buyer !== "all" && record.buyer !== settings.buyer) return false;
+    if (settings.margin === "below-cost" && !(record.cost > 0 && record.decision < record.cost)) return false;
+    if (settings.margin === "above-cost" && !(record.cost > 0 && record.decision >= record.cost)) return false;
+    if (settings.margin === "no-cost" && record.cost > 0) return false;
     return true;
   }).sort((a, b) => {
     const values = {
-      card: (card) => `${card.year} ${card.set} ${card.name} ${card.number}`,
-      buyer: (card) => card.buyer,
-      listed: (card) => Number(card.price || 0),
-      offer: (card) => offerDecisionPrice(card),
-      cost: (card) => Number(card.purchasePrice || 0),
-      status: (card) => ({ pending: 0, countered: 1, accepted: 2 })[statusFor(card)] ?? 9
+      card: (record) => record.kind === "bundle" ? `Bundle ${record.cards[0]?.sourceOrder || 0}` : `${record.card.year} ${record.card.set} ${record.card.name} ${record.card.number}`,
+      buyer: (record) => record.buyer,
+      listed: (record) => record.listed,
+      offer: (record) => record.decision,
+      cost: (record) => record.cost,
+      status: (record) => ({ pending: 0, countered: 1, accepted: 2 })[record.status] ?? 9
     };
     const getter = values[settings.sortKey] || values.card;
     const left = getter(a); const right = getter(b);
     const result = typeof left === "number" ? left - right : String(left).localeCompare(String(right), undefined, { numeric: true });
-    return (settings.sortDirection === "desc" ? -result : result) || Number(a.sourceOrder || 0) - Number(b.sourceOrder || 0);
+    return (settings.sortDirection === "desc" ? -result : result) || Number(a.cards[0]?.sourceOrder || 0) - Number(b.cards[0]?.sourceOrder || 0);
   });
-  const pending = allOffers.filter((card) => statusFor(card) !== "accepted");
+  const pending = allOffers.filter((record) => record.status !== "accepted");
   $("#pendingOfferCount").textContent = `${pending.length} pending`;
   $("#offerShownCount").textContent = `${offers.length} of ${allOffers.length} shown`;
   $$('[data-offer-sort]').forEach((button) => { button.querySelector("span").textContent = settings.sortKey === button.dataset.offerSort ? (settings.sortDirection === "asc" ? "▲" : "▼") : ""; });
   $("#offersEmpty").classList.toggle("hidden", offers.length !== 0);
-  $("#offerRows").innerHTML = offers.map((card) => {
-    const status = card.offerStatus || (card.status === "claimed" ? "accepted" : "pending");
-    const accepted = status === "accepted";
-    const proposedPrice = offerDecisionPrice(card);
-    const belowCost = Number(card.purchasePrice) > 0 && proposedPrice < Number(card.purchasePrice);
-    const statusLabel = accepted ? `Accepted at ${money(card.claimPrice ?? proposedPrice)}` : status === "countered" ? `Countered at ${money(card.counterPrice)}` : "Awaiting decision";
-    return `<tr data-offer-row="${card.id}"><td><div class="offer-card-cell">${card.imagePath ? `<img src="${fileUrl(card.imagePath)}" alt="" />` : `<span class="offer-card-placeholder">${escapeHtml(card.ref)}</span>`}<div><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)}</strong><small>${escapeHtml(card.condition || "No grade")}${card.notes && !/^none$/i.test(card.notes) ? ` · ${escapeHtml(card.notes)}` : ""}</small></div></div></td><td><strong>${escapeHtml(card.buyer)}</strong></td><td class="money">${money(card.price)}</td><td><strong class="money">${money(card.offerPrice)}</strong>${card.counterPrice != null ? `<small class="offer-note">Your counter: ${money(card.counterPrice)}</small>` : ""}</td><td><strong class="money">${card.purchasePrice !== "" && card.purchasePrice != null ? money(card.purchasePrice) : "—"}</strong>${belowCost ? `<small class="cost-warning">Decision price is below cost</small>` : ""}</td><td><span class="status ${accepted ? "accepted" : status === "countered" ? "countered" : "pending"}">${escapeHtml(statusLabel)}</span></td><td>${accepted ? `<span class="accepted-note">Added to ${escapeHtml(card.buyer)}’s order</span>` : `<div class="offer-actions"><button class="primary" data-accept-offer="${card.id}">Accept ${money(proposedPrice)}</button><button class="secondary" data-counter-offer="${card.id}">${status === "countered" ? "Revise counter" : "Counter"}</button><button class="secondary danger-button" data-reject-offer="${card.id}">Reject</button></div>`}</td></tr>`;
+  $("#offerRows").innerHTML = offers.map((record) => {
+    const accepted = record.status === "accepted";
+    const belowCost = record.cost > 0 && record.decision < record.cost;
+    const statusLabel = accepted ? `Accepted at ${money(record.decision)}` : record.status === "countered" ? `Countered at ${money(record.decision)}` : "Awaiting decision";
+    if (record.kind === "bundle") {
+      const cardList = record.cards.map((card) => `${card.ref} · ${card.name}`).join(" · ");
+      const firstImage = record.cards.find((card) => card.imagePath)?.imagePath;
+      return `<tr data-bundle-offer-row="${record.id}"><td><div class="offer-card-cell">${firstImage ? `<img src="${fileUrl(firstImage)}" alt="" />` : `<span class="offer-card-placeholder">B</span>`}<div><strong>${record.cards.length}-card bundle</strong><span class="bundle-badge">Bundle offer</span><small class="bundle-card-list">${escapeHtml(cardList)}</small></div></div></td><td><strong>${escapeHtml(record.buyer)}</strong></td><td class="money">${money(record.listed)}</td><td><strong class="money">${money(record.offered)}</strong>${record.bundle.counterPrice != null ? `<small class="offer-note">Your counter: ${money(record.bundle.counterPrice)}</small>` : ""}</td><td><strong class="money">${record.cost > 0 ? money(record.cost) : "—"}</strong>${belowCost ? `<small class="cost-warning">Bundle decision is below total cost</small>` : ""}</td><td><span class="status ${accepted ? "accepted" : record.status === "countered" ? "countered" : "pending"}">${escapeHtml(statusLabel)}</span></td><td>${accepted ? `<span class="accepted-note">${record.cards.length} cards added to ${escapeHtml(record.buyer)}’s order</span>` : `<div class="offer-actions"><button class="primary" data-accept-bundle="${record.id}">Accept ${money(record.decision)}</button><button class="secondary" data-counter-bundle="${record.id}">${record.status === "countered" ? "Revise counter" : "Counter"}</button><button class="secondary danger-button" data-reject-bundle="${record.id}">Reject</button></div>`}</td></tr>`;
+    }
+    const card = record.card;
+    return `<tr data-offer-row="${card.id}"><td><div class="offer-card-cell">${card.imagePath ? `<img src="${fileUrl(card.imagePath)}" alt="" />` : `<span class="offer-card-placeholder">${escapeHtml(card.ref)}</span>`}<div><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)}</strong><small>${escapeHtml(card.condition || "No grade")}${card.notes && !/^none$/i.test(card.notes) ? ` · ${escapeHtml(card.notes)}` : ""}</small></div></div></td><td><strong>${escapeHtml(record.buyer)}</strong></td><td class="money">${money(record.listed)}</td><td><strong class="money">${money(record.offered)}</strong>${card.counterPrice != null ? `<small class="offer-note">Your counter: ${money(card.counterPrice)}</small>` : ""}</td><td><strong class="money">${card.purchasePrice !== "" && card.purchasePrice != null ? money(record.cost) : "—"}</strong>${belowCost ? `<small class="cost-warning">Decision price is below cost</small>` : ""}</td><td><span class="status ${accepted ? "accepted" : record.status === "countered" ? "countered" : "pending"}">${escapeHtml(statusLabel)}</span></td><td>${accepted ? `<span class="accepted-note">Added to ${escapeHtml(record.buyer)}’s order</span>` : `<div class="offer-actions"><button class="primary" data-accept-offer="${card.id}">Accept ${money(record.decision)}</button><button class="secondary" data-counter-offer="${card.id}">${record.status === "countered" ? "Revise counter" : "Counter"}</button><button class="secondary danger-button" data-reject-offer="${card.id}">Reject</button></div>`}</td></tr>`;
   }).join("");
 }
 
@@ -821,6 +969,152 @@ function renderOrderDetail() {
         <button class="row-action message-template-link" id="editMessageTemplatesBtn">Edit message templates</button>
       </aside>
     </div>`;
+}
+
+function pullingSortFields() {
+  return [...BUILT_IN_CARD_FIELDS, ...customFields().map((field) => [`custom:${field.key}`, field.label])];
+}
+
+function pullingSettings() {
+  const sale = activeSale();
+  sale.pullingSettings ||= { buyer: "all", primary: "custom:storage_location", secondary: "buyer", group: "custom:storage_location", query: "", hidePulled: false };
+  const keys = new Set(pullingSortFields().map(([key]) => key));
+  if (!keys.has(sale.pullingSettings.primary)) sale.pullingSettings.primary = customFields().length ? `custom:${customFields()[0].key}` : "buyer";
+  if (!keys.has(sale.pullingSettings.secondary)) sale.pullingSettings.secondary = "ref";
+  if (sale.pullingSettings.group !== "none" && !keys.has(sale.pullingSettings.group)) sale.pullingSettings.group = sale.pullingSettings.primary;
+  return sale.pullingSettings;
+}
+
+function pullingCards() {
+  const settings = pullingSettings();
+  const query = String(settings.query || "").trim().toLowerCase();
+  return activeSale().cards.filter(cardInOrder).filter((card) => {
+    if (settings.buyer !== "all" && card.buyer !== settings.buyer) return false;
+    if (settings.hidePulled && card.pulled) return false;
+    const searchable = [card.ref, card.buyer, card.year, card.set, card.name, card.number, card.condition, ...Object.values(card.customFields || {})].join(" ").toLowerCase();
+    return !query || searchable.includes(query);
+  }).sort((a, b) => compareCardValues(a, b, settings.primary) || compareCardValues(a, b, settings.secondary) || Number(a.ref) - Number(b.ref));
+}
+
+function populatePullingControls() {
+  const settings = pullingSettings();
+  const options = pullingSortFields().map(([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join("");
+  [["#pullingPrimarySort", settings.primary], ["#pullingSecondarySort", settings.secondary]].forEach(([selector, value]) => { $(selector).innerHTML = options; $(selector).value = value; });
+  $("#pullingGroupBy").innerHTML = `<option value="none">No grouping</option>${options}`; $("#pullingGroupBy").value = settings.group;
+  $("#pullingBuyerFilter").innerHTML = `<option value="all">All buyers</option>${buyers().map((buyer) => `<option value="${escapeHtml(buyer)}">${escapeHtml(buyer)}</option>`).join("")}`; $("#pullingBuyerFilter").value = settings.buyer;
+  $("#pullingSearch").value = settings.query || ""; $("#pullingHidePulled").checked = Boolean(settings.hidePulled);
+}
+
+function pullGroupLabel(card, key) {
+  if (!key || key === "none") return "All cards";
+  const label = pullingSortFields().find(([fieldKey]) => fieldKey === key)?.[1] || key;
+  return `${label}: ${cardSortValue(card, key) || "Not entered"}`;
+}
+
+function renderPulling() {
+  if (!$("#pullingCards")) return;
+  populatePullingControls();
+  const cards = pullingCards();
+  const all = activeSale().cards.filter(cardInOrder);
+  const pulled = all.filter((card) => card.pulled).length;
+  $("#pullingProgress").innerHTML = `<strong>${pulled} of ${all.length} sold cards pulled</strong><span>${cards.length} shown · ${all.length ? Math.round((pulled / all.length) * 100) : 0}% complete</span>`;
+  $("#pullingCheckAllBtn").disabled = !cards.length;
+  $("#pullingCheckAllBtn").textContent = cards.length && cards.every((card) => card.pulled) ? "Mark shown unpulled" : "Mark shown pulled";
+  const groups = new Map();
+  cards.forEach((card) => { const label = pullGroupLabel(card, pullingSettings().group); if (!groups.has(label)) groups.set(label, []); groups.get(label).push(card); });
+  $("#pullingCards").innerHTML = groups.size ? [...groups].map(([label, groupCards]) => `<section class="pulling-group"><h3><span>${escapeHtml(label)} · ${groupCards.filter((card) => card.pulled).length}/${groupCards.length}</span><button type="button" class="row-action" data-pull-group="${escapeHtml(label)}">${groupCards.every((card) => card.pulled) ? "Unpull group" : "Pull group"}</button></h3>${groupCards.map((card) => {
+    const custom = customFields().filter((field) => customFieldValue(card, field.key) !== "").map((field) => `<span>${escapeHtml(field.label)}: ${escapeHtml(customFieldValue(card, field.key))}</span>`).join("");
+    return `<label class="pull-card ${card.pulled ? "pulled" : ""}"><input type="checkbox" data-pull-card="${card.id}" ${card.pulled ? "checked" : ""} />${card.imagePath ? `<img src="${fileUrl(card.imagePath)}" alt="" />` : `<span class="pull-thumb">${escapeHtml(card.ref)}</span>`}<span><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)}</strong><small>${escapeHtml(card.condition || "No grade")} · ${escapeHtml(card.buyer || "No buyer")}</small></span><span class="pull-meta">${custom || "No custom location data"}</span><strong>${money(card.claimPrice ?? card.price)}</strong></label>`;
+  }).join("")}</section>`).join("") : `<div class="empty-state"><h3>No cards match this pulling view</h3><p>Adjust the buyer, search, or Hide pulled setting.</p></div>`;
+}
+
+async function previewPullSheet() {
+  const cards = pullingCards();
+  if (!cards.length) return toast("No cards are shown to print.");
+  const group = pullingSettings().group;
+  const rows = cards.map((card) => `<tr><td>${escapeHtml(card.ref)}</td><td>${escapeHtml(cardSortValue(card, group) || "—")}</td><td><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)}</strong></td><td>${escapeHtml(card.buyer)}</td><td>□</td></tr>`).join("");
+  const html = `<article class="slip-page"><h1>${escapeHtml(activeSale().name)} — Pull sheet</h1><p>Sorted by ${escapeHtml(pullingSortFields().find(([key]) => key === pullingSettings().primary)?.[1] || "card")}</p><table class="slip-table"><thead><tr><th>Ref</th><th>Group / location</th><th>Card</th><th>Buyer</th><th>Pulled</th></tr></thead><tbody>${rows}</tbody></table></article>`;
+  const result = await window.cardSale.previewPackingSlip({ title: `${activeSale().name} pull sheet`, html, styles: PACKING_PRINT_STYLES, pageSize: "letter" });
+  if (!result?.success) toast("The pull-sheet preview could not be opened.");
+}
+
+function shippingBatches(sale = activeSale()) { sale.shippingBatches ||= []; return sale.shippingBatches; }
+
+function batchCandidateBuyers() {
+  const status = $("#batchOrderStatus")?.value || "ready";
+  const shipping = $("#batchShippingFilter")?.value || "all";
+  return buyers().filter((buyer) => {
+    const order = orderFor(buyer); const cards = cardsForBuyer(buyer); const packed = cards.length && cards.every((card) => card.packed);
+    if (status === "ready" && !(packed || ["packed", "shipped"].includes(order.status))) return false;
+    if (status === "paid" && !["paid", "packed", "shipped"].includes(order.status)) return false;
+    return shipping === "all" || order.shippingMethod === shipping;
+  });
+}
+
+function renderShippingBatches() {
+  if (!$("#shippingBatchList")) return;
+  const candidates = batchCandidateBuyers();
+  shippingBatchSelection = new Set([...shippingBatchSelection].filter((buyer) => candidates.includes(buyer)));
+  $("#batchSelectAll").checked = candidates.length > 0 && candidates.every((buyer) => shippingBatchSelection.has(buyer));
+  $("#batchSelectionCount").textContent = `${shippingBatchSelection.size} selected · ${candidates.length} shown`;
+  $("#createShippingBatchBtn").disabled = shippingBatchSelection.size === 0;
+  $("#batchOrderCandidates").innerHTML = candidates.length ? candidates.map((buyer) => { const order = orderFor(buyer); const cards = cardsForBuyer(buyer); return `<label class="batch-candidate"><input type="checkbox" data-batch-buyer="${escapeHtml(buyer)}" ${shippingBatchSelection.has(buyer) ? "checked" : ""} /><span><strong>${escapeHtml(buyer)}</strong><small>${cards.length} cards · ${cards.filter((card) => card.packed).length}/${cards.length} packed</small></span><span>${escapeHtml(order.shippingMethod || "Shipping needed")}</span><span>${escapeHtml(order.status || "awaiting")}</span></label>`; }).join("") : `<div class="empty-state"><p>No orders match these batch filters.</p></div>`;
+  $("#shippingBatchList").innerHTML = shippingBatches().length ? shippingBatches().slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map((batch) => {
+    const validBuyers = batch.buyers.filter((buyer) => buyers().includes(buyer)); const tracked = validBuyers.filter((buyer) => orderFor(buyer).trackingNumber).length;
+    const batchDate = batch.shippingDate ? new Date(`${batch.shippingDate}T12:00:00`) : new Date(batch.createdAt);
+    return `<article class="shipping-batch"><div><strong>${escapeHtml(batch.name)}</strong><small>${batchDate.toLocaleDateString()} · ${validBuyers.length} orders · ${tracked} tracking numbers</small><small>${batch.shippedAt ? `Shipped ${new Date(batch.shippedAt).toLocaleString()}` : validBuyers.join(" · ")}</small></div><div class="shipping-batch-actions"><button class="secondary" data-edit-batch="${batch.id}">Tracking</button><button class="secondary" data-preview-batch="${batch.id}">Preview slips</button><button class="secondary" data-print-batch="${batch.id}">Print slips</button><button class="secondary" data-label-batch="${batch.id}">PWE labels</button><button class="secondary" data-copy-batch="${batch.id}">Copy messages</button><button class="primary" data-ship-batch="${batch.id}" ${batch.shippedAt ? "disabled" : ""}>${batch.shippedAt ? "Shipped" : "Mark shipped"}</button><button class="row-action danger-link" data-delete-batch="${batch.id}">Delete</button></div></article>`;
+  }).join("") : `<div class="empty-state"><h3>No shipping batches yet</h3><p>Select orders above to create the first batch.</p></div>`;
+}
+
+function openShippingBatch(batchId = "") {
+  const batch = shippingBatches().find((item) => item.id === batchId);
+  const names = batch ? batch.buyers.filter((buyer) => buyers().includes(buyer)) : [...shippingBatchSelection];
+  if (!names.length) return toast("Select at least one order for the batch.");
+  $("#shippingBatchId").value = batch?.id || "";
+  $("#shippingBatchDialogTitle").textContent = batch ? `Edit ${batch.name}` : "Create shipping batch";
+  $("#shippingBatchName").value = batch?.name || `Shipping batch ${shippingBatches().length + 1}`;
+  $("#shippingBatchDate").value = batch?.shippingDate || new Date().toISOString().slice(0, 10);
+  $("#shippingBatchSummary").textContent = `${names.length} orders: ${names.join(", ")}`;
+  $("#shippingBatchTracking").value = names.map((buyer) => `${buyer}: ${orderFor(buyer).trackingNumber || ""}`).join("\n");
+  $("#shippingBatchDialog").dataset.buyers = JSON.stringify(names);
+  $("#shippingBatchDialog").showModal();
+}
+
+function parseBatchTracking(names, textValue) {
+  const lines = String(textValue || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const assigned = {};
+  lines.forEach((line, index) => {
+    const colon = line.indexOf(":");
+    if (colon > 0) {
+      const typedBuyer = line.slice(0, colon).trim(); const buyer = names.find((name) => name.toLowerCase() === typedBuyer.toLowerCase());
+      if (buyer) assigned[buyer] = line.slice(colon + 1).trim();
+    } else if (names[index]) assigned[names[index]] = line;
+  });
+  return assigned;
+}
+
+function saveShippingBatch() {
+  const sale = activeSale(); const id = $("#shippingBatchId").value; const names = JSON.parse($("#shippingBatchDialog").dataset.buyers || "[]");
+  const name = $("#shippingBatchName").value.trim(); if (!name) return toast("Enter a batch name.");
+  let batch = shippingBatches(sale).find((item) => item.id === id);
+  if (!batch) { batch = { id: uid(), createdAt: new Date().toISOString(), buyers: names }; sale.shippingBatches.push(batch); }
+  Object.assign(batch, { name, shippingDate: $("#shippingBatchDate").value, buyers: names });
+  const tracking = parseBatchTracking(names, $("#shippingBatchTracking").value);
+  Object.entries(tracking).forEach(([buyer, number]) => { orderFor(buyer).trackingNumber = number; });
+  recordAudit("shipping-batch", `${id ? "Updated" : "Created"} shipping batch ${name} with ${names.length} orders`);
+  $("#shippingBatchDialog").close(); shippingBatchSelection.clear(); saveSoon(); render(); toast("Shipping batch saved.");
+}
+
+async function copyBatchMessages(batch) {
+  const messages = batch.buyers.filter((buyer) => buyers().includes(buyer)).map((buyer) => `${buyer}\n${trackingMessage(buyer)}`).join("\n\n————————\n\n");
+  if (!messages) return toast("This batch has no active orders.");
+  await copyText(messages, "Batch shipping messages copied.");
+}
+
+function markBatchShipped(batch) {
+  if (!window.confirm(`Mark all ${batch.buyers.length} orders in “${batch.name}” shipped?`)) return;
+  batch.buyers.forEach((buyer) => { if (buyers().includes(buyer)) orderFor(buyer).status = "shipped"; });
+  batch.shippedAt = new Date().toISOString(); recordAudit("shipping-batch", `Marked ${batch.name} shipped`); saveSoon(); render(); toast("Shipping batch marked shipped.");
 }
 
 function renderPacking() {
@@ -968,11 +1262,11 @@ function renderLiveSale() {
 }
 
 function showView(view) {
-  const refresh = { command: renderCommandCenter, sale: () => { renderListings(); renderImages(); }, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck, help: () => {} };
+  const refresh = { command: renderCommandCenter, sale: () => { renderListings(); renderImages(); }, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, pulling: renderPulling, batches: renderShippingBatches, notifications: renderNotifications, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck, help: () => {} };
   refresh[view]?.();
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `${view}View`));
-  const labels = { command: "COMMAND CENTER", sale: "SALE WORKSPACE", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK", help: "HELP & GUIDE" };
+  const labels = { command: "COMMAND CENTER", sale: "SALE WORKSPACE", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", pulling: "CARD PULLING", batches: "SHIPPING BATCHES", notifications: "NOTIFICATIONS", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK", help: "HELP & GUIDE" };
   $("#viewEyebrow").textContent = labels[view];
 }
 
@@ -981,12 +1275,19 @@ function openQuickEdit(cardId) {
   if (!card) return;
   $("#quickEditCardId").value = card.id; $("#quickEditTitle").textContent = card.name || "Edit card";
   $("#quickYear").value = card.year || ""; $("#quickBrand").value = card.set || ""; $("#quickPlayer").value = card.name || ""; $("#quickNumber").value = card.number || ""; $("#quickGrade").value = card.condition || ""; $("#quickFlaws").value = /^none$/i.test(card.notes || "") ? "" : card.notes || ""; $("#quickPrice").value = card.price ?? ""; $("#quickPurchasePrice").value = card.purchasePrice ?? ""; $("#quickPurchaseDate").value = card.purchaseDate || "";
+  $("#quickCustomFields").innerHTML = customFields().length ? `<strong>Custom fields</strong>${customFields().map((field) => {
+    const value = customFieldValue(card, field.key);
+    if (field.type === "checkbox") return `<label class="check-label"><input data-quick-custom="${escapeHtml(field.key)}" type="checkbox" ${value === true || value === "true" || value === 1 ? "checked" : ""} /> ${escapeHtml(field.label)}</label>`;
+    const inputType = field.type === "number" || field.type === "currency" ? "number" : field.type === "date" ? "date" : "text";
+    return `<label>${escapeHtml(field.label)}<input data-quick-custom="${escapeHtml(field.key)}" type="${inputType}" ${field.type === "currency" ? 'step="0.01"' : ""} value="${escapeHtml(value)}" /></label>`;
+  }).join("")}` : "";
   updateQuickEditPreview(); $("#quickEditDrawer").classList.add("open"); $("#quickEditDrawer").setAttribute("aria-hidden", "false");
 }
 
 function updateQuickEditPreview() {
   const source = activeSale().cards.find((item) => item.id === $("#quickEditCardId").value) || {};
-  const card = { ...source, year: $("#quickYear").value, set: $("#quickBrand").value, name: $("#quickPlayer").value, number: $("#quickNumber").value, condition: $("#quickGrade").value, notes: $("#quickFlaws").value, price: $("#quickPrice").value };
+  const card = { ...source, customFields: { ...(source.customFields || {}) }, year: $("#quickYear").value, set: $("#quickBrand").value, name: $("#quickPlayer").value, number: $("#quickNumber").value, condition: $("#quickGrade").value, notes: $("#quickFlaws").value, price: $("#quickPrice").value };
+  $$('[data-quick-custom]').forEach((input) => { card.customFields[input.dataset.quickCustom] = input.type === "checkbox" ? input.checked : input.value; });
   $("#quickEditPreview").textContent = formatLine(card);
 }
 
@@ -996,6 +1297,8 @@ function saveQuickEdit() {
   const card = activeSale().cards.find((item) => item.id === $("#quickEditCardId").value); if (!card) return;
   snapshotSale(`Before editing ${card.ref} · ${card.name}`);
   Object.assign(card, { year: $("#quickYear").value.trim(), set: $("#quickBrand").value.trim(), name: $("#quickPlayer").value.trim(), number: $("#quickNumber").value.trim(), condition: $("#quickGrade").value.trim(), notes: $("#quickFlaws").value.trim(), price: Number($("#quickPrice").value || 0), purchasePrice: $("#quickPurchasePrice").value === "" ? "" : Number($("#quickPurchasePrice").value), purchaseDate: normalizePurchaseDate($("#quickPurchaseDate").value) });
+  card.customFields ||= {};
+  $$('[data-quick-custom]').forEach((input) => { card.customFields[input.dataset.quickCustom] = input.type === "checkbox" ? input.checked : input.value.trim(); });
   recordAudit("edit", `Updated ${card.ref} · ${card.name}`, { cardId: card.id }); closeQuickEdit(); saveSoon(); render(); toast("Card updated.");
 }
 
@@ -1025,8 +1328,9 @@ function addSingleCard() {
   if (!draft.name) return toast("Enter the player name.");
   const nextRef = Math.max(0, ...sale.cards.map((card) => Number(card.ref) || 0)) + 1;
   const nextOrder = Math.max(0, ...sale.cards.map((card) => Number(card.sourceOrder) || 0)) + 1;
-  const card = { id: uid(), ref: String(nextRef), sourceOrder: nextOrder, customOrder: sale.cards.length + 1, ...draft, imagePath: "", status: "available" };
+  const card = { id: uid(), ref: String(nextRef), sourceOrder: nextOrder, customOrder: sale.cards.length + 1, ...draft, customFields: {}, imagePath: "", status: "available" };
   sale.cards.push(card);
+  renumberCardReferences(sale, { audit: false });
   recordAudit("manual-add", `Added ${card.ref} · ${card.name}`, { cardId: card.id });
   $("#addCardDialog").close();
   resetListingView();
@@ -1049,6 +1353,7 @@ function moveCardToPosition(cardId) {
   ordered.splice(position - 1, 0, card);
   ordered.forEach((item, index) => item.customOrder = index + 1);
   sale.sortMode = "custom";
+  renumberCardReferences(sale, { audit: false });
   saveSoon(); renderListings(); toast(`${card.name} moved to position ${position}.`);
 }
 
@@ -1064,7 +1369,7 @@ function finishCloseSale() {
   if ($("#closeSaleUnsoldAction").value === "new") {
     const name = $("#closeSaleName").value.trim(); if (!name) return toast("Enter a name for the carryover sale.");
     const percent = Number($("#closeSalePercent").value || 0); const cards = sale.cards.filter((card) => card.status === "available").map((card, index) => ({ ...clone(card), id: uid(), ref: String(index + 1), sourceOrder: index + 1, customOrder: index + 1, price: Math.max(0, Number(card.price) * (1 + percent / 100)), hiddenAfterCopy: false }));
-    const next = { id: uid(), name, pweShipping: sale.pweShipping, pmwtShipping: sale.pmwtShipping, template: sale.template, cards, images: clone(sale.images.filter((image) => cards.some((card) => card.imagePath === image.path))), orders: {}, versions: [], audit: [], sortMode: "spreadsheet" }; state.sales.push(next); recordAudit("close", `Created ${name} with ${cards.length} unsold cards`, {}, sale);
+    const next = { id: uid(), name, pweShipping: sale.pweShipping, pmwtShipping: sale.pmwtShipping, template: sale.template, cards, images: clone(sale.images.filter((image) => cards.some((card) => card.imagePath === image.path))), orders: {}, bundles: [], shippingBatches: [], customFieldDefinitions: clone(customFields(sale)), versions: [], audit: [], sortMode: "spreadsheet" }; state.sales.push(next); recordAudit("close", `Created ${name} with ${cards.length} unsold cards`, {}, sale);
   }
   sale.closedAt = new Date().toISOString(); recordAudit("close", "Sale closed with the closing assistant"); $("#closeSaleDialog").close(); saveSoon(); render(); toast("Sale closing steps completed.");
 }
@@ -1093,6 +1398,14 @@ function autoMap(headers) {
   return Object.fromEntries(Object.entries(aliases).map(([field, candidates]) => [field, headers.find((header) => candidates.includes(header.toLowerCase().trim())) || ""]));
 }
 
+function renderCustomImportColumns() {
+  if (!pendingSheet) return;
+  const mapped = new Set($$("[data-map]").map((select) => select.value).filter(Boolean));
+  pendingSheet.customSelections ||= {};
+  const headers = pendingSheet.headers.filter((header) => !mapped.has(header));
+  $("#customImportColumns").innerHTML = headers.map((header) => `<label><input type="checkbox" data-custom-import="${escapeHtml(header)}" ${pendingSheet.customSelections[header] === false ? "" : "checked"} />${escapeHtml(header)}</label>`).join("") || `<span class="muted">Every column is already mapped.</span>`;
+}
+
 async function importSpreadsheet() {
   const path = await window.cardSale.chooseSpreadsheet();
   if (!path) return;
@@ -1102,6 +1415,7 @@ async function importSpreadsheet() {
   pendingSheet = { ...parsed, path, headers, mapping: autoMap(headers) };
   const fields = [["year", "Year"], ["set", "Brand"], ["name", "Player"], ["number", "Number"], ["notes", "Flaw(s)"], ["condition", "Grade"], ["price", "Claim Price"], ["purchasePrice", "Purchase Price"], ["purchaseDate", "Purchase Date"]];
   $("#mappingGrid").innerHTML = fields.map(([field, label]) => `<label>${label}<select data-map="${field}"><option value="">Not included</option>${headers.map((header) => `<option value="${escapeHtml(header)}" ${pendingSheet.mapping[field] === header ? "selected" : ""}>${escapeHtml(header)}</option>`).join("")}</select></label>`).join("");
+  renderCustomImportColumns();
   renderImportPresetOptions();
   $("#listingTemplate").value = activeSale().template;
   updateImportPreview();
@@ -1114,6 +1428,7 @@ function updateImportPreview() {
   const sample = {};
   $$("[data-map]").forEach((select) => sample[select.dataset.map] = row[select.value] || "");
   $("#importPreview").textContent = formatLine(sample, $("#listingTemplate").value);
+  renderCustomImportColumns();
   updateImportReview();
 }
 
@@ -1145,14 +1460,18 @@ function confirmImport(event) {
   sale.template = $("#listingTemplate").value;
   const start = sale.cards.length;
   const folder = pendingSheet.path.replace(/[\\/][^\\/]+$/, "");
+  const customHeaders = $$("[data-custom-import]:checked").map((input) => input.dataset.customImport);
+  const importedCustomFields = customHeaders.map((header) => ensureCustomField(header, "text", sale));
   const imported = pendingSheet.rows.map((row, index) => {
     const value = (field) => mapping[field] ? row[mapping[field]] : "";
-    const card = { id: uid(), ref: String(start + index + 1), sourceOrder: start + index + 1, customOrder: start + index + 1, year: value("year"), set: value("set"), number: value("number"), name: value("name"), condition: value("condition"), price: Number(String(value("price")).replace(/[$,]/g, "")) || 0, purchasePrice: value("purchasePrice") === "" ? "" : Number(String(value("purchasePrice")).replace(/[$,]/g, "")) || 0, purchaseDate: normalizePurchaseDate(value("purchaseDate")), notes: value("notes"), imagePath: "", status: "available" };
+    const customValues = Object.fromEntries(importedCustomFields.map((field, fieldIndex) => [field.key, row[customHeaders[fieldIndex]] ?? ""]));
+    const card = { id: uid(), ref: String(start + index + 1), sourceOrder: start + index + 1, customOrder: start + index + 1, year: value("year"), set: value("set"), number: value("number"), name: value("name"), condition: value("condition"), price: Number(String(value("price")).replace(/[$,]/g, "")) || 0, purchasePrice: value("purchasePrice") === "" ? "" : Number(String(value("purchasePrice")).replace(/[$,]/g, "")) || 0, purchaseDate: normalizePurchaseDate(value("purchaseDate")), notes: value("notes"), customFields: customValues, imagePath: "", status: "available" };
     const remembered = state.manualMatchMemory?.[normalizedCardKey(card)];
     if (remembered) card.rememberedImagePath = remembered;
     return card;
   });
   sale.cards.push(...imported);
+  renumberCardReferences(sale, { audit: false });
   imported.forEach((card) => {
     const remembered = card.rememberedImagePath;
     delete card.rememberedImagePath;
@@ -1187,14 +1506,14 @@ function cardLastName(name) {
 }
 
 function imageDateCodes(image) {
-  return (String(image?.stem || "").match(/(?<!\d)\d{7,8}(?!\d)/g) || [])
+  return (String(image?.stem || "").match(/(?<!\d)\d{5,8}(?!\d)/g) || [])
     .map(normalizePurchaseDate)
     .filter((value) => /^\d{8}$/.test(value));
 }
 
 function imageSequenceNumber(image) {
   const stem = String(image?.stem || "").trim();
-  const match = stem.match(/(?:^|[^\d])(\d{7,8})(?:[^\d]+(\d+))\s*$/);
+  const match = stem.match(/(?:^|[^\d])(\d{5,8})(?:[^\d]+(\d+))\s*$/);
   return match?.[2] ? Number(match[2]) : null;
 }
 
@@ -1255,7 +1574,7 @@ function proposedImageMatch(card, images, sale = activeSale()) {
   const samePlayerSameYear = candidates.filter((candidate) => candidate.reasons.includes("year folder") && candidate.reasons.some((reason) => ["full player name", "exact surname", "surname", "player name"].includes(reason)));
   const ambiguous = Boolean(top && next && samePlayerSameYear.length > 1 && top.score === next.score);
   const purchaseDate = normalizePurchaseDate(card.purchaseDate);
-  const sameCardDateCount = allCardRecords().filter((record) => normalizedCardKey(record.card) === normalizedCardKey(card) && normalizePurchaseDate(record.card.purchaseDate) === purchaseDate).length;
+  const sameCardDateCount = sale.cards.filter((item) => normalizedCardKey(item) === normalizedCardKey(card) && normalizePurchaseDate(item.purchaseDate) === purchaseDate).length;
   const dateMatches = candidates.filter((candidate) => candidate.reasons.includes("purchase date code"));
   const dateIdentifiesCard = Boolean(top && top.reasons.includes("purchase date code") && top.reasons.includes("year folder") && top.reasons.some((reason) => ["exact card number", "card number", "full player name", "exact surname", "surname", "player name"].includes(reason)));
   const uniquePurchaseDateMatch = /^\d{8}$/.test(purchaseDate) && sameCardDateCount === 1 && dateMatches.length === 1 && dateMatches[0] === top && dateIdentifiesCard;
@@ -1515,6 +1834,7 @@ function deleteSelectedMatches() {
   state.sales.forEach((sale) => {
     const removed = sale.cards.filter((card) => ids.has(card.id));
     sale.cards = sale.cards.filter((card) => !ids.has(card.id));
+    renumberCardReferences(sale, { audit: false });
     removed.forEach((card) => { if (card.imagePath && !sale.cards.some((item) => item.imagePath === card.imagePath)) sale.images = sale.images.filter((image) => image.path !== card.imagePath); });
   });
   pendingMatches.review = pendingMatches.review.filter((match) => !ids.has(match.card.id));
@@ -1556,9 +1876,11 @@ async function chooseManualImage(cardId) {
 function deleteCard(cardId) {
   const sale = activeSale();
   const card = sale.cards.find((item) => item.id === cardId);
+  if (unresolvedBundleForCard(card, sale)) return toast("Accept or reject the bundle offer before deleting one of its cards.");
   if (!card || !window.confirm(`Remove ${card.year} ${card.set} #${card.number} ${card.name} from this sale?`)) return;
   snapshotSale(`Before deleting ${card.ref} · ${card.name}`);
   sale.cards = sale.cards.filter((item) => item.id !== cardId);
+  renumberCardReferences(sale, { audit: false });
   if (card.imagePath && !sale.cards.some((item) => item.imagePath === card.imagePath)) sale.images = sale.images.filter((image) => image.path !== card.imagePath);
   recordAudit("delete", `Deleted ${card.ref} · ${card.name}`, { cardId: card.id });
   saveSoon(); renderStats(); renderListings(); renderImages(); toast("Card removed from the sale.");
@@ -1566,15 +1888,98 @@ function deleteCard(cardId) {
 
 function deleteSelectedCards() {
   const count = selectedListingIds.size;
+  if (activeSale().cards.some((card) => selectedListingIds.has(card.id) && unresolvedBundleForCard(card))) return toast("Accept or reject bundle offers before deleting their cards.");
   if (!count || !window.confirm(`Remove ${count} selected card${count === 1 ? "" : "s"} from this sale?`)) return;
   const sale = activeSale();
   snapshotSale(`Before deleting ${count} cards`);
   const removed = sale.cards.filter((card) => selectedListingIds.has(card.id));
   sale.cards = sale.cards.filter((card) => !selectedListingIds.has(card.id));
+  renumberCardReferences(sale, { audit: false });
   removed.forEach((card) => { if (card.imagePath && !sale.cards.some((item) => item.imagePath === card.imagePath)) sale.images = sale.images.filter((image) => image.path !== card.imagePath); });
   selectedListingIds.clear();
   recordAudit("delete", `Deleted ${count} selected cards`);
   saveSoon(); renderStats(); renderListings(); renderImages(); toast(`${count} cards removed from the sale.`);
+}
+
+function proportionalBundlePrices(cards, total) {
+  const totalCents = Math.max(0, Math.round(Number(total || 0) * 100));
+  if (!cards.length) return [];
+  const weights = cards.map((card) => Math.max(0, Number(card.price || 0)));
+  const weightTotal = weights.reduce((sum, value) => sum + value, 0);
+  const rawShares = weights.map((weight) => weightTotal > 0 ? (totalCents * weight / weightTotal) : (totalCents / cards.length));
+  const cents = rawShares.map(Math.floor);
+  let remaining = totalCents - cents.reduce((sum, value) => sum + value, 0);
+  rawShares.map((value, index) => ({ index, remainder: value - cents[index] }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index)
+    .forEach((item) => { if (remaining > 0) { cents[item.index] += 1; remaining -= 1; } });
+  return cents.map((value) => value / 100);
+}
+
+function bundleCards(bundle, sale = activeSale()) {
+  const ids = new Set(bundle?.cardIds || []);
+  return sale.cards.filter((card) => ids.has(card.id));
+}
+
+function unresolvedBundleForCard(card, sale = activeSale()) {
+  if (!card?.bundleId) return null;
+  return (sale.bundles || []).find((bundle) => bundle.id === card.bundleId && bundle.status !== "accepted") || null;
+}
+
+function updateBundleOfferPreview() {
+  const cards = activeSale().cards.filter((card) => selectedListingIds.has(card.id));
+  const listTotal = cards.reduce((sum, card) => sum + Number(card.price || 0), 0);
+  const entered = $("#bundleOfferPrice").value;
+  const offerTotal = entered === "" ? listTotal : Math.max(0, Number(entered));
+  const shares = proportionalBundlePrices(cards, offerTotal);
+  $("#bundleListTotal").textContent = money(listTotal);
+  $("#bundleDiscountTotal").textContent = money(Math.max(0, listTotal - offerTotal));
+  $("#bundleOfferPreview").innerHTML = cards.map((card, index) => `<tr><td><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)}</strong></td><td class="money">${money(card.price)}</td><td class="money">${money(shares[index])}</td></tr>`).join("");
+}
+
+function openBundleOffer() {
+  const selected = activeSale().cards.filter((card) => selectedListingIds.has(card.id));
+  if (selected.length < 2) return toast("Select at least two available cards for a bundle offer.");
+  if (selected.some((card) => card.status !== "available" || card.buyer || card.bundleId)) return toast("Bundle offers can only include currently available cards.");
+  const listTotal = selected.reduce((sum, card) => sum + Number(card.price || 0), 0);
+  $("#bundleOfferCount").textContent = `${selected.length} selected cards totaling ${money(listTotal)}.`;
+  $("#bundleOfferBuyer").value = "";
+  $("#bundleOfferPrice").value = listTotal.toFixed(2);
+  $("#bundleOfferNote").value = "";
+  updateBundleOfferPreview();
+  $("#bundleOfferDialog").showModal();
+}
+
+function createBundleOffer() {
+  const sale = activeSale();
+  const cards = sale.cards.filter((card) => selectedListingIds.has(card.id));
+  const buyer = canonicalBuyerName($("#bundleOfferBuyer").value);
+  const offerPrice = Number($("#bundleOfferPrice").value);
+  if (cards.length < 2 || cards.some((card) => card.status !== "available" || card.buyer || card.bundleId)) return toast("The selected cards are no longer available as one bundle.");
+  if (!buyer) return toast("Enter the buyer’s name.");
+  if (!Number.isFinite(offerPrice) || offerPrice < 0) return toast("Enter a valid bundle offer price.");
+  const listedPrice = cards.reduce((sum, card) => sum + Number(card.price || 0), 0);
+  const shares = proportionalBundlePrices(cards, offerPrice);
+  const now = new Date().toISOString();
+  const bundle = { id: uid(), buyer, cardIds: cards.map((card) => card.id), listedPrice, offerPrice, status: "pending", receivedAt: now, note: $("#bundleOfferNote").value.trim() };
+  snapshotSale(`Before creating ${cards.length}-card bundle offer`);
+  sale.bundles ||= [];
+  sale.bundles.push(bundle);
+  cards.forEach((card, index) => {
+    card.status = "offered";
+    card.buyer = buyer;
+    card.claimType = "offer";
+    card.offerPrice = shares[index];
+    card.offerStatus = "pending";
+    card.offerReceivedAt = now;
+    card.claimedAt = now;
+    card.claimUpdatedAt = now;
+    card.claimNote = bundle.note;
+    card.bundleId = bundle.id;
+  });
+  recordAudit("bundle-offer", `${money(offerPrice)} bundle offer from ${buyer} for ${cards.length} cards listed at ${money(listedPrice)}`, { bundleId: bundle.id, buyer });
+  selectedListingIds.clear();
+  $("#bundleOfferDialog").close();
+  saveSoon(); render(); toast(`Bundle offer sent to Offers for ${buyer}.`);
 }
 
 function deleteActiveSale() {
@@ -1585,7 +1990,7 @@ function deleteActiveSale() {
   undoStack.push({ deletedSale: clone(sale), deletedIndex });
   state.sales = state.sales.filter((item) => item.id !== sale.id);
   if (!state.sales.length) {
-    const replacement = { id: uid(), name: "New sale", pweShipping: 1, pmwtShipping: 5, template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {} };
+    const replacement = { id: uid(), name: "New sale", pweShipping: 1, pmwtShipping: 5, template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], shippingBatches: [], customFieldDefinitions: [] };
     state.sales.push(replacement);
   }
   state.activeSaleId = state.sales[0].id;
@@ -1596,6 +2001,7 @@ function deleteActiveSale() {
 
 function assignBuyer(cardId, buyerName, offeredPrice, claimType = "claim", claimNote = "") {
   const card = activeSale().cards.find((item) => item.id === cardId);
+  if (unresolvedBundleForCard(card)) return toast("Manage this card through its bundle in the Offers tab.");
   const buyer = canonicalBuyerName(buyerName);
   if (!card || !buyer) return toast("Enter a buyer name first.");
   const hasOffer = claimType === "offer";
@@ -1664,9 +2070,87 @@ function rejectOffer(cardId) {
   if (!window.confirm(`Reject ${buyer || "this buyer"}’s ${money(card.offerPrice)} offer and return the card to the open pool?`)) return;
   snapshotSale(`Before rejecting offer on ${card.ref}`);
   card.status = "available";
-  ["buyer", "claimPrice", "offerPrice", "offerStatus", "counterPrice", "counteredAt", "offerReceivedAt", "offerAcceptedAt", "claimedAt", "claimUpdatedAt", "claimType", "claimNote", "packed"].forEach((key) => delete card[key]);
+  ["buyer", "claimPrice", "offerPrice", "offerStatus", "counterPrice", "counteredAt", "offerReceivedAt", "offerAcceptedAt", "claimedAt", "claimUpdatedAt", "claimType", "claimNote", "pulled", "pulledAt", "packed"].forEach((key) => delete card[key]);
   recordAudit("offer-rejected", `Rejected ${buyer || "buyer"} offer for ${card.ref} · ${card.name}`, { cardId: card.id, buyer });
   saveSoon(); render(); toast(`${card.ref} returned to the open pool.`);
+}
+
+function bundleDecisionPrice(bundle) {
+  return Number(bundle.counterPrice != null ? bundle.counterPrice : bundle.offerPrice);
+}
+
+function acceptBundleOffer(bundleId) {
+  const sale = activeSale();
+  const bundle = (sale.bundles || []).find((item) => item.id === bundleId);
+  const cards = bundleCards(bundle, sale);
+  const acceptedPrice = bundleDecisionPrice(bundle);
+  if (!bundle || cards.length < 2 || bundle.status === "accepted") return;
+  if (!Number.isFinite(acceptedPrice) || acceptedPrice < 0) return toast("This bundle does not have a valid price.");
+  const shares = proportionalBundlePrices(cards, acceptedPrice);
+  const originalShares = proportionalBundlePrices(cards, bundle.offerPrice);
+  const now = new Date().toISOString();
+  snapshotSale(`Before accepting ${cards.length}-card bundle`);
+  bundle.status = "accepted";
+  bundle.acceptedPrice = acceptedPrice;
+  bundle.acceptedAt = now;
+  cards.forEach((card, index) => {
+    card.status = "claimed";
+    card.offerStatus = "accepted";
+    card.offerPrice = originalShares[index];
+    card.claimPrice = shares[index];
+    if (bundle.counterPrice != null) card.counterPrice = shares[index];
+    else delete card.counterPrice;
+    card.offerAcceptedAt = now;
+    card.claimUpdatedAt = now;
+  });
+  orderFor(bundle.buyer);
+  state.selectedBuyer = bundle.buyer;
+  recordAudit("bundle-accepted", `Accepted ${money(acceptedPrice)} bundle offer from ${bundle.buyer} for ${cards.length} cards`, { bundleId: bundle.id, buyer: bundle.buyer });
+  saveSoon(); render(); toast(`${cards.length} cards added to ${bundle.buyer}’s order at ${money(acceptedPrice)} total.`);
+}
+
+function rejectBundleOffer(bundleId) {
+  const sale = activeSale();
+  const bundle = (sale.bundles || []).find((item) => item.id === bundleId);
+  const cards = bundleCards(bundle, sale);
+  if (!bundle || bundle.status === "accepted") return;
+  if (!window.confirm(`Reject ${bundle.buyer}’s ${money(bundle.offerPrice)} offer for all ${cards.length} cards and return them to the open pool?`)) return;
+  snapshotSale(`Before rejecting ${cards.length}-card bundle`);
+  cards.forEach((card) => {
+    card.status = "available";
+    ["buyer", "claimPrice", "offerPrice", "offerStatus", "counterPrice", "counteredAt", "offerReceivedAt", "offerAcceptedAt", "claimedAt", "claimUpdatedAt", "claimType", "claimNote", "pulled", "pulledAt", "packed", "bundleId"].forEach((key) => delete card[key]);
+  });
+  sale.bundles = (sale.bundles || []).filter((item) => item.id !== bundleId);
+  recordAudit("bundle-rejected", `Rejected ${bundle.buyer}’s ${money(bundle.offerPrice)} bundle offer for ${cards.length} cards`, { bundleId, buyer: bundle.buyer });
+  saveSoon(); render(); toast(`${cards.length} cards returned to the open pool.`);
+}
+
+function bundleCounterOfferMessage(bundle, counterPrice) {
+  const buyer = String(bundle.buyer || "").trim();
+  const cards = bundleCards(bundle);
+  const values = {
+    firstName: buyer.split(/\s+/)[0] || buyer,
+    buyer,
+    card: `bundle of ${cards.length} cards`,
+    listPrice: money(bundle.listedPrice),
+    offerPrice: money(bundle.offerPrice),
+    counterPrice: money(counterPrice)
+  };
+  return (ensureMessageTemplates().counterOffer || DEFAULT_MESSAGE_TEMPLATES.counterOffer).replace(/\{(firstName|buyer|card|listPrice|offerPrice|counterPrice)\}/g, (_match, key) => values[key] ?? "").trim();
+}
+
+function openBundleCounterOffer(bundleId) {
+  const bundle = (activeSale().bundles || []).find((item) => item.id === bundleId);
+  if (!bundle || bundle.status === "accepted") return;
+  const initial = Number(bundle.counterPrice ?? bundle.listedPrice);
+  $("#counterOfferCardId").value = "";
+  $("#counterOfferBundleId").value = bundle.id;
+  $("#counterOfferTitle").textContent = `${bundleCards(bundle).length}-card bundle · ${bundle.buyer}`;
+  $("#counterListPrice").textContent = money(bundle.listedPrice);
+  $("#counterOriginalPrice").textContent = money(bundle.offerPrice);
+  $("#counterOfferPrice").value = Number.isFinite(initial) ? initial.toFixed(2) : "";
+  $("#counterOfferMessage").value = bundleCounterOfferMessage(bundle, initial);
+  $("#counterOfferDialog").showModal();
 }
 
 function counterOfferMessage(card, counterPrice) {
@@ -1687,6 +2171,7 @@ function openCounterOffer(cardId) {
   if (!card || card.claimType !== "offer" || card.offerStatus === "accepted") return;
   const initial = Number(card.counterPrice ?? card.price);
   $("#counterOfferCardId").value = card.id;
+  $("#counterOfferBundleId").value = "";
   $("#counterOfferTitle").textContent = `${card.ref} · ${card.name}`;
   $("#counterListPrice").textContent = money(card.price);
   $("#counterOriginalPrice").textContent = money(card.offerPrice);
@@ -1696,6 +2181,25 @@ function openCounterOffer(cardId) {
 }
 
 async function copyCounterOffer() {
+  const bundle = (activeSale().bundles || []).find((item) => item.id === $("#counterOfferBundleId").value);
+  if (bundle) {
+    const counterPrice = Number($("#counterOfferPrice").value);
+    if (!Number.isFinite(counterPrice) || counterPrice < 0) return toast("Enter a valid counter price.");
+    const message = $("#counterOfferMessage").value.trim();
+    if (!message) return toast("Enter a counter message.");
+    const copied = await window.cardSale.copyText(message).catch(() => false);
+    if (!copied) return toast("The counter message could not be copied.");
+    snapshotSale(`Before countering ${bundleCards(bundle).length}-card bundle`);
+    bundle.counterPrice = counterPrice;
+    bundle.status = "countered";
+    bundle.counteredAt = new Date().toISOString();
+    const shares = proportionalBundlePrices(bundleCards(bundle), counterPrice);
+    bundleCards(bundle).forEach((card, index) => { card.offerStatus = "countered"; card.counterPrice = shares[index]; card.counteredAt = bundle.counteredAt; });
+    recordAudit("bundle-countered", `Countered ${bundle.buyer} at ${money(counterPrice)} for ${bundleCards(bundle).length}-card bundle`, { bundleId: bundle.id, buyer: bundle.buyer });
+    $("#counterOfferDialog").close();
+    saveSoon(); render(); toast("Bundle counter message copied and offer updated.");
+    return;
+  }
   const card = activeSale().cards.find((item) => item.id === $("#counterOfferCardId").value);
   const counterPrice = Number($("#counterOfferPrice").value);
   if (!card || !Number.isFinite(counterPrice) || counterPrice < 0) return toast("Enter a valid counter price.");
@@ -1714,6 +2218,7 @@ async function copyCounterOffer() {
 
 function clearClaim(cardId) {
   const card = activeSale().cards.find((item) => item.id === cardId);
+  if (unresolvedBundleForCard(card)) return toast("Reject the bundle from Offers to return all of its cards to the open pool.");
   if (!card) return;
   snapshotSale(`Before clearing claim on ${card.ref}`);
   const priorBuyer = card.buyer;
@@ -1729,6 +2234,8 @@ function clearClaim(cardId) {
   delete card.claimedAt;
   delete card.claimUpdatedAt;
   delete card.claimType;
+  delete card.pulled;
+  delete card.pulledAt;
   delete card.packed;
   delete card.claimNote;
   recordAudit("claim-cleared", `Cleared claim on ${card.ref} · ${card.name}`, { cardId: card.id, buyer: priorBuyer });
@@ -1917,7 +2424,7 @@ async function buildPackingSlip(buyer, design = ensurePackingSettings()) {
   const brand = `<section class="slip-brand"><div class="slip-brand-main">${logoData ? `<img class="slip-logo${appBrand ? " app-brand-logo" : ""}" src="${logoData}" alt="" />` : ""}${appBrand ? "" : `<div><h1>${escapeHtml(design.brandName || sale.name)}</h1><p>${escapeHtml(design.contact || "")}</p></div>`}</div><div class="slip-muted">${escapeHtml(sale.name)}</div></section>${design.header ? `<div class="slip-header">${escapeHtml(design.header)}</div>` : ""}`;
   const buyerBlock = `<section class="slip-order"><div><h2>${escapeHtml(buyer)}</h2>${design.showAddress ? `<p>${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p>` : ""}</div><div>${design.showOrderNumber ? `<p><strong>Order:</strong> ${escapeHtml(order.orderNumber)}</p>` : ""}${design.showPayment ? `<p><strong>Payment:</strong> ${escapeHtml(order.paymentMethod || "Not recorded")}</p>` : ""}${design.showShipping ? `<p><strong>Shipping:</strong> ${escapeHtml(order.shippingMethod || "")}</p>` : ""}<p><strong>Cards:</strong> ${cards.length}</p></div></section>`;
   const message = design.thanks || order.packingSlipNote ? `<section class="slip-message">${escapeHtml(design.thanks || "")}${order.packingSlipNote ? `<div class="slip-note">${escapeHtml(order.packingSlipNote)}</div>` : ""}</section>` : "";
-  const items = `<table class="slip-table"><thead><tr>${design.showThumbnails ? "<th></th>" : ""}<th>Ref</th><th>Card</th>${design.showPrices ? "<th class=\"price\">Price</th>" : ""}</tr></thead><tbody>${cards.map((card, index) => `<tr>${design.showThumbnails ? `<td>${thumbData[index] ? `<img class="slip-thumb" src="${thumbData[index]}" alt="" />` : ""}</td>` : ""}<td><strong>${escapeHtml(card.ref)}</strong></td><td><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong>${design.showDetails ? `<div class="slip-card-detail">${[card.condition, card.notes && String(card.notes).toLowerCase() !== "none" ? card.notes : ""].filter(Boolean).map(escapeHtml).join(" · ")}</div>` : ""}</td>${design.showPrices ? `<td class="price">${money(card.claimPrice ?? card.price)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
+  const items = `<table class="slip-table"><thead><tr>${design.showThumbnails ? "<th></th>" : ""}<th>Ref</th><th>Card</th>${design.showPrices ? "<th class=\"price\">Price</th>" : ""}</tr></thead><tbody>${cards.map((card, index) => { const packingFields = customFields().filter((field) => field.includePacking && customFieldValue(card, field.key) !== "").map((field) => `${field.label}: ${customFieldValue(card, field.key)}`); return `<tr>${design.showThumbnails ? `<td>${thumbData[index] ? `<img class="slip-thumb" src="${thumbData[index]}" alt="" />` : ""}</td>` : ""}<td><strong>${escapeHtml(card.ref)}</strong></td><td><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong>${design.showDetails ? `<div class="slip-card-detail">${[card.condition, card.notes && String(card.notes).toLowerCase() !== "none" ? card.notes : "", ...packingFields].filter(Boolean).map(escapeHtml).join(" · ")}</div>` : ""}</td>${design.showPrices ? `<td class="price">${money(card.claimPrice ?? card.price)}</td>` : ""}</tr>`; }).join("")}</tbody></table>`;
   const totals = design.showPrices ? `<section class="slip-totals"><div class="slip-total-line"><span>Cards</span><strong>${money(subtotal)}</strong></div><div class="slip-total-line"><span>${escapeHtml(order.shippingMethod || "Shipping")}</span><strong>${money(shipping)}</strong></div>${discount ? `<div class="slip-total-line"><span>Discount</span><strong>−${money(discount)}</strong></div>` : ""}<div class="slip-total-line grand"><span>Total</span><span>${money(total)}</span></div></section>` : "";
   const policy = design.returnPolicy ? `<section class="slip-policy"><strong>Questions or concerns?</strong><br>${escapeHtml(design.returnPolicy)}</section>` : "";
   const qr = qrData || design.socialLink ? `<section class="slip-links"><div><strong>Stay connected</strong>${design.socialLink ? `<p>${escapeHtml(design.socialLink)}</p>` : ""}${qrValue ? `<p class="slip-muted">Scan to open ${escapeHtml(design.qrType === "social" ? "our page" : design.qrType)}.</p>` : ""}</div>${qrData ? `<img src="${qrData}" alt="QR code" />` : ""}</section>` : "";
@@ -2064,6 +2571,65 @@ function renderImportPresetOptions(selectedId = "") {
   $("#deleteImportPresetBtn").disabled = !selectedId;
 }
 
+function renderCustomFieldManager() {
+  const fields = customFields();
+  $("#customFieldList").innerHTML = fields.length ? fields.map((field) => `<div class="custom-field-row" data-custom-field-row="${field.id}"><input data-custom-field-label="${field.id}" value="${escapeHtml(field.label)}" aria-label="Field name" /><select data-custom-field-type="${field.id}">${["text", "number", "date", "currency", "checkbox"].map((type) => `<option value="${type}" ${field.type === type ? "selected" : ""}>${type[0].toUpperCase()}${type.slice(1)}</option>`).join("")}</select><label><input type="checkbox" data-custom-field-private="${field.id}" ${field.private !== false ? "checked" : ""} /> Private</label><label><input type="checkbox" data-custom-field-listing="${field.id}" ${field.includeListing ? "checked" : ""} /> Listing</label><label><input type="checkbox" data-custom-field-packing="${field.id}" ${field.includePacking ? "checked" : ""} /> Packing slip</label><button type="button" class="row-action danger-link" data-delete-custom-field="${field.id}">Delete</button><small>Template field: <code>{${escapeHtml(field.key)}}</code></small></div>`).join("") : `<div class="empty-state"><h3>No custom fields yet</h3><p>Import an additional spreadsheet column or add one above.</p></div>`;
+}
+
+function addCustomField() {
+  const label = $("#newCustomFieldName").value.trim();
+  if (!label) return toast("Enter a field name.");
+  const existing = customFields().find((field) => field.label.toLowerCase() === label.toLowerCase());
+  if (existing) return toast("That custom field already exists.");
+  ensureCustomField(label, $("#newCustomFieldType").value);
+  $("#newCustomFieldName").value = "";
+  renderCustomFieldManager(); saveSoon(); renderPulling(); toast("Custom field added.");
+}
+
+function updateCustomFieldDefinition(target) {
+  const id = target.dataset.customFieldLabel || target.dataset.customFieldType || target.dataset.customFieldPrivate || target.dataset.customFieldListing || target.dataset.customFieldPacking;
+  const field = customFields().find((item) => item.id === id);
+  if (!field) return;
+  if (target.dataset.customFieldLabel) field.label = target.value.trim() || field.label;
+  if (target.dataset.customFieldType) field.type = target.value;
+  if (target.dataset.customFieldPrivate) field.private = target.checked;
+  if (target.dataset.customFieldListing) field.includeListing = target.checked;
+  if (target.dataset.customFieldPacking) field.includePacking = target.checked;
+  saveSoon();
+}
+
+function deleteCustomField(id) {
+  const sale = activeSale();
+  const field = customFields(sale).find((item) => item.id === id);
+  if (!field || !window.confirm(`Delete the custom field “${field.label}” and its values from this sale?`)) return;
+  snapshotSale(`Before deleting custom field ${field.label}`);
+  sale.customFieldDefinitions = customFields(sale).filter((item) => item.id !== id);
+  sale.cards.forEach((card) => { if (card.customFields) delete card.customFields[field.key]; });
+  renderCustomFieldManager(); saveSoon(); render(); toast("Custom field deleted.");
+}
+
+function openReferenceSettings() {
+  const sale = activeSale();
+  sale.autoReferences ??= true; sale.referencesFrozen ??= false;
+  const ordered = referenceOrderedCards(sale);
+  const changes = ordered.filter((card, index) => String(card.ref) !== String(index + 1)).length;
+  $("#referencePreview").textContent = `${sale.cards.length} cards · ${changes ? `${changes} references will change` : "references are already sequential"}. ${sale.cards.some((card) => card.claimedAt || card.hiddenAfterCopy) ? "Some cards have already been posted or claimed; their permanent IDs will remain unchanged." : "No posted claims will be affected."}`;
+  $("#automaticReferences").checked = sale.autoReferences;
+  $("#freezeReferences").checked = sale.referencesFrozen;
+  $("#referenceDialog").showModal();
+}
+
+function saveReferenceSettings(renumberNow = false) {
+  const sale = activeSale();
+  sale.autoReferences = $("#automaticReferences").checked;
+  sale.referencesFrozen = $("#freezeReferences").checked;
+  if (renumberNow) {
+    snapshotSale("Before renumbering card references");
+    renumberCardReferences(sale, { force: true });
+  }
+  saveSoon(); render(); $("#referenceDialog").close(); toast(renumberNow ? "Card references renumbered." : "Reference settings saved.");
+}
+
 function applyImportPreset(id) {
   const preset = importPresets().find((item) => item.id === id);
   if (!preset || !pendingSheet) return;
@@ -2122,10 +2688,11 @@ async function outputPweLabels(names, action = "print") {
 const WALKTHROUGH_STEPS = [
   { title: "Welcome to Card Sale Manager", body: "Post. Sell. Track. The Command Center is your daily checklist from first claim to final shipment.", tips: ["Green actions move work forward", "Amber and red are reserved for items needing attention"], image: "assets/brand-logo-dark.svg", view: "command" },
   { title: "Import and prepare listings", body: "Import your spreadsheet, choose a saved column preset, review warnings, and match each card to its image.", tips: ["Purchase data stays private", "Copying text and dragging an image are separate actions"], image: "assets/help/workspace.png", view: "sale" },
-  { title: "Record claims and offers", body: "Claims Desk contains every sale card. Assign a buyer, record an offer, or paste comments into the parser.", tips: ["Accepted offers become orders", "Audit timestamps preserve what happened"], image: "assets/help/offers.png", view: "claims" },
+  { title: "Record claims and offers", body: "Claims Desk contains every sale card. Assign a buyer, record an offer, paste comments into the parser, or select several available listings to build one bundle offer.", tips: ["Accepted bundles split the final price proportionally across every card", "Accepted offers become orders", "Audit timestamps preserve what happened"], image: "assets/help/offers.png", view: "claims" },
   { title: "Confirm buyer orders", body: "Choose shipping, validate the mailing address, record payment, and copy the buyer summary.", tips: ["PWE or PMWT can be overridden", "Costs never appear in customer messages"], image: "assets/help/orders.png", view: "orders" },
   { title: "Pack and print", body: "Check cards as they are packed, preview packing slips, print PWE thermal labels, and add tracking.", tips: ["Packed buyers are marked in the menu", "Print previews use the final PDF layout"], image: "assets/help/packing.png", view: "packing" },
-  { title: "Your work is protected", body: "The green indicator confirms a local save. Daily rotating backups and pre-update backups protect your sales.", tips: ["Open the data folder from the sidebar", "Anonymous diagnostics contain no buyer or card details"], image: "assets/brand-logo-dark.svg", view: "help" }
+  { title: "Pull and ship in batches", body: "Card Pulling Mode sorts sold cards by location or any imported field. Shipping Batches then groups completed orders for labels, slips, tracking, messages, and shipment.", tips: ["Use two sort levels and an optional group", "The Notification Center links directly to unfinished work"], image: "assets/help/packing.png", view: "pulling" },
+  { title: "Your work is protected", body: "The green indicator confirms a local save. Daily copies rotate, while permanent update archives preserve the local workspace, portable file, sales, and buyer profiles.", tips: ["Open the data folder from the sidebar", "Updates never prune buyer profiles", "Anonymous diagnostics contain no buyer or card details"], image: "assets/brand-logo-dark.svg", view: "help" }
 ];
 
 function renderWalkthrough() {
@@ -2223,10 +2790,12 @@ function applyCarryover() {
   let destination = state.sales.find((sale) => sale.id === $("#carryoverDestination").value);
   const newName = $("#carryoverNewSale").value.trim();
   if (newName) {
-    destination = { id: uid(), name: newName, pweShipping: source.pweShipping, pmwtShipping: source.pmwtShipping, template: source.template, cards: [], images: [], orders: {}, versions: [], audit: [] };
+    destination = { id: uid(), name: newName, pweShipping: source.pweShipping, pmwtShipping: source.pmwtShipping, template: source.template, cards: [], images: [], orders: {}, bundles: [], shippingBatches: [], customFieldDefinitions: clone(customFields(source)), versions: [], audit: [] };
     state.sales.push(destination);
   }
   if (!destination) return toast("Choose a destination or enter a new sale name.");
+  destination.customFieldDefinitions ||= [];
+  customFields(source).forEach((field) => { if (!destination.customFieldDefinitions.some((item) => item.key === field.key)) destination.customFieldDefinitions.push(clone(field)); });
   snapshotSale(`Before receiving ${cards.length} carryover cards`, destination);
   const percent = Number($("#carryoverPricePercent").value || 0);
   const start = destination.cards.length;
@@ -2236,7 +2805,7 @@ function applyCarryover() {
     copy.id = uid(); copy.ref = String(start + index + 1); copy.sourceOrder = start + index + 1; copy.customOrder = start + index + 1;
     copy.price = Math.max(0, Math.round(Number(copy.price) * (1 + percent / 100) * 100) / 100);
     copy.status = "available";
-    ["buyer", "claimPrice", "offerPrice", "claimedAt", "claimUpdatedAt", "claimType", "claimNote", "packed", "hiddenAfterCopy", "completedBy", "completedAt"].forEach((key) => delete copy[key]);
+    ["buyer", "claimPrice", "offerPrice", "offerStatus", "counterPrice", "counteredAt", "offerReceivedAt", "offerAcceptedAt", "claimedAt", "claimUpdatedAt", "claimType", "claimNote", "pulled", "pulledAt", "packed", "bundleId", "hiddenAfterCopy", "completedBy", "completedAt"].forEach((key) => delete copy[key]);
     if (copy.imagePath) {
       const imageKey = copy.imagePath.toLowerCase();
       if (usedDestinationImages.has(imageKey)) copy.imagePath = "";
@@ -2297,8 +2866,43 @@ function applyParsedClaims() {
 
 function bindEvents() {
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
+  $("#customFieldsBtn").addEventListener("click", () => { renderCustomFieldManager(); $("#customFieldsDialog").showModal(); });
+  $("#addCustomFieldBtn").addEventListener("click", addCustomField);
+  $("#customFieldList").addEventListener("change", (event) => updateCustomFieldDefinition(event.target));
+  $("#customFieldList").addEventListener("click", (event) => { const id = event.target.dataset.deleteCustomField; if (id) deleteCustomField(id); });
+  $("#renumberCardsBtn").addEventListener("click", openReferenceSettings);
+  $("#applyReferenceSettingsBtn").addEventListener("click", () => saveReferenceSettings(false));
+  $("#renumberNowBtn").addEventListener("click", () => saveReferenceSettings(true));
   $("#commandView").addEventListener("click", (event) => { const view = event.target.closest("[data-command-view]")?.dataset.commandView; if (view) showView(view); });
   $("#refreshCommandBtn").addEventListener("click", renderCommandCenter);
+  [["#pullingBuyerFilter", "buyer"], ["#pullingPrimarySort", "primary"], ["#pullingSecondarySort", "secondary"], ["#pullingGroupBy", "group"]].forEach(([selector, key]) => $(selector).addEventListener("change", (event) => { pullingSettings()[key] = event.target.value; saveSoon(); renderPulling(); }));
+  $("#pullingSearch").addEventListener("input", (event) => { pullingSettings().query = event.target.value; renderPulling(); });
+  $("#pullingHidePulled").addEventListener("change", (event) => { pullingSettings().hidePulled = event.target.checked; saveSoon(); renderPulling(); });
+  $("#pullingCards").addEventListener("change", (event) => { const card = activeSale().cards.find((item) => item.id === event.target.dataset.pullCard); if (!card) return; card.pulled = event.target.checked; card.pulledAt = card.pulled ? new Date().toISOString() : ""; saveSoon(); renderPulling(); renderNotifications(); });
+  $("#pullingCards").addEventListener("click", (event) => { const label = event.target.dataset.pullGroup; if (!label) return; const cards = pullingCards().filter((card) => pullGroupLabel(card, pullingSettings().group) === label); const value = cards.some((card) => !card.pulled); cards.forEach((card) => { card.pulled = value; card.pulledAt = value ? new Date().toISOString() : ""; }); saveSoon(); renderPulling(); renderNotifications(); });
+  $("#pullingCheckAllBtn").addEventListener("click", () => { const cards = pullingCards(); const value = cards.some((card) => !card.pulled); cards.forEach((card) => { card.pulled = value; card.pulledAt = value ? new Date().toISOString() : ""; }); saveSoon(); renderPulling(); renderNotifications(); toast(value ? "Shown cards marked pulled." : "Shown cards marked unpulled."); });
+  $("#pullingPrintBtn").addEventListener("click", previewPullSheet);
+  [["#batchOrderStatus"], ["#batchShippingFilter"]].forEach(([selector]) => $(selector).addEventListener("change", renderShippingBatches));
+  $("#batchSelectAll").addEventListener("change", (event) => { batchCandidateBuyers().forEach((buyer) => event.target.checked ? shippingBatchSelection.add(buyer) : shippingBatchSelection.delete(buyer)); renderShippingBatches(); });
+  $("#batchOrderCandidates").addEventListener("change", (event) => { const buyer = event.target.dataset.batchBuyer; if (!buyer) return; event.target.checked ? shippingBatchSelection.add(buyer) : shippingBatchSelection.delete(buyer); renderShippingBatches(); });
+  $("#createShippingBatchBtn").addEventListener("click", () => openShippingBatch());
+  $("#saveShippingBatchBtn").addEventListener("click", saveShippingBatch);
+  $("#shippingBatchList").addEventListener("click", async (event) => {
+    const id = event.target.dataset.editBatch || event.target.dataset.previewBatch || event.target.dataset.printBatch || event.target.dataset.labelBatch || event.target.dataset.copyBatch || event.target.dataset.shipBatch || event.target.dataset.deleteBatch;
+    const batch = shippingBatches().find((item) => item.id === id); if (!batch) return;
+    const names = batch.buyers.filter((buyer) => buyers().includes(buyer));
+    if (event.target.dataset.editBatch) openShippingBatch(id);
+    if (event.target.dataset.previewBatch) await outputPackingSlips(names, "preview");
+    if (event.target.dataset.printBatch) await outputPackingSlips(names);
+    if (event.target.dataset.labelBatch) await outputPweLabels(names.filter((buyer) => orderFor(buyer).shippingMethod === "PWE"));
+    if (event.target.dataset.copyBatch) await copyBatchMessages(batch);
+    if (event.target.dataset.shipBatch) markBatchShipped(batch);
+    if (event.target.dataset.deleteBatch && window.confirm(`Delete shipping batch “${batch.name}”? Orders and tracking numbers will be kept.`)) { activeSale().shippingBatches = shippingBatches().filter((item) => item.id !== id); saveSoon(); renderShippingBatches(); }
+  });
+  $("#notificationFilters").addEventListener("click", (event) => { if (event.target.dataset.notificationCategory) { notificationCategory = event.target.dataset.notificationCategory; renderNotifications(); } });
+  $("#notificationList").addEventListener("click", (event) => { const openId = event.target.dataset.openNotification; const snoozeId = event.target.dataset.snoozeNotification; const dismissId = event.target.dataset.dismissNotification; if (openId) openNotification(openId); if (snoozeId) { notificationState().snoozed[snoozeId] = Date.now() + 86400000; saveSoon(); renderNotifications(); } if (dismissId) { notificationState().dismissed[dismissId] = new Date().toISOString(); saveSoon(); renderNotifications(); } });
+  $("#showSnoozedNotificationsBtn").addEventListener("click", () => { showSnoozedNotifications = !showSnoozedNotifications; renderNotifications(); });
+  $("#clearDismissedNotificationsBtn").addEventListener("click", () => { notificationState().dismissed = {}; saveSoon(); renderNotifications(); toast("Dismissed notifications restored."); });
   $("#helpView").addEventListener("click", (event) => { const view = event.target.closest("[data-help-view]")?.dataset.helpView; if (view) showView(view); });
   $("#startWalkthroughBtn").addEventListener("click", openWalkthrough);
   $("#openSetupWizardBtn").addEventListener("click", openSetupWizard);
@@ -2321,12 +2925,23 @@ function bindEvents() {
     const acceptId = event.target.dataset.acceptOffer;
     const rejectId = event.target.dataset.rejectOffer;
     const counterId = event.target.dataset.counterOffer;
+    const acceptBundleId = event.target.dataset.acceptBundle;
+    const rejectBundleId = event.target.dataset.rejectBundle;
+    const counterBundleId = event.target.dataset.counterBundle;
     if (acceptId) acceptOffer(acceptId);
     if (rejectId) rejectOffer(rejectId);
     if (counterId) openCounterOffer(counterId);
+    if (acceptBundleId) acceptBundleOffer(acceptBundleId);
+    if (rejectBundleId) rejectBundleOffer(rejectBundleId);
+    if (counterBundleId) openBundleCounterOffer(counterBundleId);
   });
   $("#editCounterTemplateBtn").addEventListener("click", openMessageTemplates);
   $("#counterOfferPrice").addEventListener("input", (event) => {
+    const bundle = (activeSale().bundles || []).find((item) => item.id === $("#counterOfferBundleId").value);
+    if (bundle) {
+      $("#counterOfferMessage").value = bundleCounterOfferMessage(bundle, Number(event.target.value));
+      return;
+    }
     const card = activeSale().cards.find((item) => item.id === $("#counterOfferCardId").value);
     if (card) $("#counterOfferMessage").value = counterOfferMessage(card, Number(event.target.value));
   });
@@ -2352,6 +2967,9 @@ function bindEvents() {
   $("#addFolderBtn").addEventListener("click", () => addImages("folder"));
   $("#autoMatchBtn").addEventListener("click", autoMatchImages);
   $("#forceAllImageLookupBtn").addEventListener("click", forceAllImageLookup);
+  $("#bundleOfferBtn").addEventListener("click", openBundleOffer);
+  $("#bundleOfferPrice").addEventListener("input", updateBundleOfferPreview);
+  $("#createBundleOfferBtn").addEventListener("click", createBundleOffer);
   $("#bulkEditBtn").addEventListener("click", openBulkEdit);
   $("#applyBulkEditBtn").addEventListener("click", applyBulkEdit);
   $("#carryoverBtn").addEventListener("click", openCarryover);
@@ -2363,11 +2981,11 @@ function bindEvents() {
   $("#deleteSaleBtn").addEventListener("click", deleteActiveSale);
   $("#createSaleBtn").addEventListener("click", (event) => {
     event.preventDefault(); const name = $("#newSaleName").value.trim(); if (!name) return;
-    const sale = { id: uid(), name, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, additionalLookupFolders: [], excludedLookupFolders: [] };
+    const sale = { id: uid(), name, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], shippingBatches: [], customFieldDefinitions: [], additionalLookupFolders: [], excludedLookupFolders: [] };
     state.sales.push(sale); state.activeSaleId = sale.id; state.selectedBuyer = ""; resetListingView(); $("#newSaleDialog").close(); saveSoon(); render(); toast("New sale created.");
   });
   $("#saleSelect").addEventListener("change", (event) => { state.activeSaleId = event.target.value; state.selectedBuyer = ""; resetListingView(); saveSoon(); render(); });
-  $("#listingSort").addEventListener("change", (event) => { activeSale().sortMode = event.target.value; saveSoon(); renderListings(); });
+  $("#listingSort").addEventListener("change", (event) => { activeSale().sortMode = event.target.value; renumberCardReferences(activeSale(), { audit: false }); saveSoon(); renderListings(); });
   $$("[data-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; $$("[data-filter]").forEach((item) => item.classList.toggle("active", item === button)); renderListings(); }));
   $("#cardSearch").addEventListener("input", (event) => { state.query = event.target.value; renderListings(); });
   $("#listingRows").addEventListener("click", (event) => {
@@ -2402,6 +3020,7 @@ function bindEvents() {
     const ordered = activeSale().cards.slice().sort((a, b) => Number(a.customOrder ?? a.sourceOrder ?? a.ref) - Number(b.customOrder ?? b.sourceOrder ?? b.ref));
     const from = ordered.findIndex((card) => card.id === draggedListingId); const to = ordered.findIndex((card) => card.id === target.dataset.listingRow);
     const [moved] = ordered.splice(from, 1); ordered.splice(to, 0, moved); ordered.forEach((card, index) => card.customOrder = index + 1);
+    renumberCardReferences(activeSale(), { audit: false });
     draggedListingId = ""; saveSoon(); renderListings();
   });
   $("#selectAllListings").addEventListener("change", (event) => {
@@ -2466,6 +3085,7 @@ function bindEvents() {
     setTimeout(() => row.classList.remove("focus-flash"), 1600);
   });
   $("#mappingGrid").addEventListener("change", updateImportPreview);
+  $("#customImportColumns").addEventListener("change", (event) => { if (pendingSheet && event.target.dataset.customImport) pendingSheet.customSelections[event.target.dataset.customImport] = event.target.checked; });
   $("#listingTemplate").addEventListener("input", updateImportPreview);
   $("#confirmImportBtn").addEventListener("click", confirmImport);
   $("#applyMatchesBtn").addEventListener("click", applyReviewedMatches);
@@ -2759,6 +3379,12 @@ async function init() {
       sale.additionalLookupFolders ||= [];
       sale.excludedLookupFolders ||= [];
       sale.orders ||= {};
+      sale.bundles ||= [];
+      sale.shippingBatches ||= [];
+      sale.customFieldDefinitions ||= [];
+      sale.notificationState ||= { dismissed: {}, snoozed: {} };
+      sale.autoReferences ??= true;
+      sale.referencesFrozen ??= false;
       sale.images ||= [];
       sale.versions ||= [];
       sale.audit ||= [];
@@ -2766,6 +3392,7 @@ async function init() {
       sale.sortMode ||= "spreadsheet";
       const usedImages = new Set();
       sale.cards.forEach((card, index) => {
+        card.customFields ||= {};
         card.sourceOrder ??= index + 1;
         card.customOrder ??= card.sourceOrder;
         card.purchaseDate = normalizePurchaseDate(card.purchaseDate);
@@ -2787,12 +3414,10 @@ async function init() {
       });
       Object.values(sale.orders).forEach((order) => { if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : ""; order.packingNotes ||= ""; order.packingSlipNote ||= ""; order.packingSlipPrintCount ||= 0; });
     });
-    const orderBuyers = new Set(state.sales.flatMap((sale) => sale.cards.filter(cardInOrder).map((card) => card.buyer).filter(Boolean)));
     Object.entries(state.buyerProfiles).forEach(([name, profile]) => {
       profile.tags ||= []; profile.aliases ||= []; profile.previousAddresses ||= [];
       const hasSavedDetails = Boolean(String(profile.address || "").trim() || String(profile.notes || "").trim() || profile.tags.length || profile.aliases.length || profile.previousAddresses.length);
       if (hasSavedDetails) profile.manuallySaved ??= true;
-      if (!orderBuyers.has(name) && !hasSavedDetails && !profile.manuallySaved) delete state.buyerProfiles[name];
     });
     undoStack = state.sales.flatMap((sale) => [
       ...sale.cards.filter((card) => card.hiddenAfterCopy).map((card) => ({ saleId: sale.id, cardId: card.id, at: card.completedAt || "" })),

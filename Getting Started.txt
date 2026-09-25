@@ -71,14 +71,18 @@ Take over only after the other computer has closed the file.
     Offers below Purchase Price are highlighted. A pending offer does not create
     a permanent buyer profile; accepted claims, accepted offers, orders, and
     manually saved profiles do.
+    To record one offer for several cards, select the available cards in Sale
+    Workspace and choose Bundle offer. Enter the buyer and the total offer.
+    Accepting or countering the bundle distributes that exact total across the
+    cards in proportion to their list prices, including any penny adjustment.
 11. Choose PWE or PMWT for each buyer in Buyer orders, then review totals,
     discounts, and payment status.
 12. Delete unwanted cards from the sale workspace. In Packing, verify cards
     individually or choose Check all cards, enter the tracking number, and copy
     the ready-to-send shipping message.
 13. Use row checkboxes for bulk deletion and image-review confirmation.
-    Duplicate cards are labeled (1 of x). Date-coded filenames (MDDYYYY or
-    MMDDYYYY) and a final sequence number such as 1 or 2 break ties.
+    Duplicate cards are labeled (1 of x). Date-coded filenames (MMDDYY, MDDYYYY,
+    or MMDDYYYY) and a final sequence number such as 1 or 2 break ties.
     Re-run lookup on a card to recheck it together with any cards that shared
     the same suggestion. Re-run lookup for every sale deliberately resets and
     rechecks all current and past-sale image links. One file can never be linked
@@ -88,6 +92,24 @@ Take over only after the other computer has closed the file.
     installs the Windows setup file automatically.
 15. Use Live Sale Mode for a keyboard-first posting workflow. Press ? inside
     the app to see all available shortcuts.
+16. Extra spreadsheet columns can be retained as Custom Fields. Use Custom
+    fields in Sale Workspace to control whether each field stays private,
+    appears in copied listings, or prints on packing slips. These fields are
+    also searchable and available as listing and pulling sort options.
+17. Use References in Sale Workspace to keep listing numbers sequential after
+    deletion or reordering. CSM's permanent internal card IDs keep images,
+    claims, offers, and audit history connected even when a reference changes.
+    Freeze references once posted if you do not want automatic renumbering.
+18. Card Pulling Mode can sort and group sold cards by buyer, year, player,
+    price, purchase date, location, or any imported custom field. Check cards
+    as they are pulled or preview a printable pull sheet in the same order.
+19. The Notification Center collects pending offers, unpaid orders, missing
+    addresses, unmatched images, below-cost sales, pulling/packing work,
+    missing tracking, and portable-file warnings. Open an item to jump directly
+    to it, or snooze/dismiss it.
+20. Shipping Batches group multiple orders for one mailing trip. A batch can
+    print combined slips and PWE labels, assign tracking from pasted lines,
+    copy every buyer's shipping message, and mark all included orders shipped.
 16. The Facebook claim parser recognizes configurable words such as claim,
     claimed, take, taken, mine, and sold. Lines it cannot match remain in the
     unrecognized-comment queue for review.
@@ -118,6 +140,12 @@ Take over only after the other computer has closed the file.
 
 Data is saved automatically on this computer and again when the app closes.
 Verified recovery backups are also created before updates and retained locally.
+Every approved update additionally creates a permanent, non-rotating archive
+under the app data folder's update-archives directory. It includes the complete
+local workspace and any open portable .csm file. Update archives are never
+removed by CSM. Startup also checks daily backups, update archives, and older
+CSM data folders before showing first-run content. Buyer profiles remain saved
+until you deliberately delete them from Buyer Profiles.
 The sidebar displays the latest successful autosave time.
 
 DEFAULT LISTING FORMAT

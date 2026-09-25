@@ -1,6 +1,6 @@
 {
   "name": "card-sale-manager",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Local-first card sale workflow manager",
   "main": "main.js",
   "type": "commonjs",
@@ -55,6 +55,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
       "installerHeaderIcon": "assets/icon.ico",
