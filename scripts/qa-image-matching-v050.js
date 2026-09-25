@@ -8,7 +8,8 @@ vm.runInContext(`
   state = {
     sales: [{ id: "qa", images: [], cards: [
       { id: "one", year: "1961", set: "Topps", number: "20", name: "Robin Roberts", purchaseDate: "9182026" },
-      { id: "two", year: "1961", set: "Topps", number: "20", name: "Robin Roberts", purchaseDate: "9182026" }
+      { id: "two", year: "1961", set: "Topps", number: "20", name: "Robin Roberts", purchaseDate: "9182026" },
+      { id: "short-date", year: "1961", set: "Topps", number: "35", name: "Hank Aaron", purchaseDate: "09/13/2026" }
     ] }],
     activeSaleId: "qa"
   };
@@ -30,10 +31,17 @@ const results = vm.runInContext(`(() => {
     { stem: "Mantle", relativePath: "1961/Mantle front.jpg", path: "mantle-front.jpg" },
     { stem: "Mantle", relativePath: "1961/Mantle alternate.jpg", path: "mantle-alternate.jpg" }
   ]);
-  return { dateCodes: imageDateCodes({ stem: "Roberts 9182026 1" }), first, wrong, second, crossYear, correctYear, firstAttach, duplicateAttach, exact100, ambiguous };
+  const shortDateCodes = imageDateCodes({ stem: "Roberts 091326" });
+  const shortDateMatch = scoreImage({ id: "short-date", year: "1961", set: "Topps", number: "20", name: "Robin Roberts", purchaseDate: "09/13/2026" }, { stem: "Roberts 091326", relativePath: "1961/Roberts 091326.jpg", path: "short-date.jpg" });
+  const shortDateAutomatic = proposedImageMatch(activeSale().cards[2], [
+    { stem: "Aaron 091326", relativePath: "1961/Aaron 091326.jpg", path: "1961-aaron-091326.jpg" }
+  ]);
+  return { dateCodes: imageDateCodes({ stem: "Roberts 9182026 1" }), shortDateCodes, shortDateMatch, shortDateAutomatic, first, wrong, second, crossYear, correctYear, firstAttach, duplicateAttach, exact100, ambiguous };
 })()`, context);
 
 if (results.dateCodes[0] !== "09182026") throw new Error(`Seven-digit date failed: ${JSON.stringify(results.dateCodes)}`);
+if (results.shortDateCodes[0] !== "09132026" || !results.shortDateMatch.reasons.includes("purchase date code")) throw new Error(`Six-digit date failed: ${JSON.stringify(results.shortDateCodes)}`);
+if (!results.shortDateAutomatic.automatic || results.shortDateAutomatic.automaticReason !== "unique purchase date code") throw new Error("A unique MMDDYY purchase-date match was not auto-confirmed.");
 if (results.first.score <= results.wrong.score) throw new Error("First duplicate did not prefer sequence 1.");
 if (!results.first.reasons.includes("purchase date code") || !results.first.reasons.includes("duplicate order 1")) throw new Error("First duplicate reasons were incomplete.");
 if (!results.second.reasons.includes("duplicate order 2")) throw new Error("Second duplicate did not prefer sequence 2.");

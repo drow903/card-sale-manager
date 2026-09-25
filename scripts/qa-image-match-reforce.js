@@ -31,10 +31,11 @@ context.image = image;
 let result = vm.runInContext("proposedImageMatch(card, [image], state.sales[0])", context);
 if (!result.automatic || result.automaticReason !== "unique purchase date code") throw new Error("A unique purchase-date filename was not auto-confirmed.");
 
-state.sales.push({ id: "sale-b", name: "Past", cards: [{ ...card, id: "card-b", ref: "2" }], images: [] });
+state.sales[0].cards.push({ ...card, id: "card-duplicate", ref: "2" });
 result = vm.runInContext("proposedImageMatch(card, [image], state.sales[0])", context);
-if (result.automatic) throw new Error("Duplicate same-card purchase dates were auto-confirmed.");
+if (result.automatic) throw new Error("Duplicate same-card purchase dates in the current sale were auto-confirmed.");
 
+state.sales.push({ id: "sale-b", name: "Past", cards: [{ ...card, id: "card-b", ref: "3" }], images: [] });
 state.sales[0].cards[0].imagePath = image.path;
 context.other = state.sales[1].cards[0];
 const attachedTwice = vm.runInContext("attachImage(other, image.path, true, state.sales[1])", context);
