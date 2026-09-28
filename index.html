@@ -16,20 +16,21 @@
           <div><strong>Card Sale</strong><span>Manager</span><small>Post. Sell. Track.</small></div>
         </div>
         <nav aria-label="Main navigation">
-          <button class="nav-item active" data-view="command"><span>01</span> Command center</button>
-          <button class="nav-item" data-view="sale"><span>02</span> Sale workspace</button>
-          <button class="nav-item" data-view="claims"><span>03</span> Claims desk</button>
-          <button class="nav-item" data-view="offers"><span>04</span> Offers</button>
-          <button class="nav-item" data-view="orders"><span>05</span> Buyer orders</button>
-          <button class="nav-item" data-view="packing"><span>06</span> Packing</button>
-          <button class="nav-item" data-view="pulling"><span>07</span> Pull cards</button>
-          <button class="nav-item" data-view="batches"><span>08</span> Shipping batches</button>
-          <button class="nav-item" data-view="notifications"><span>09</span> Notifications <b id="notificationNavCount" class="nav-count hidden">0</b></button>
-          <button class="nav-item" data-view="dashboard"><span>10</span> Profit dashboard</button>
-          <button class="nav-item" data-view="live"><span>11</span> Live Sale Mode</button>
-          <button class="nav-item" data-view="buyers"><span>12</span> Buyer profiles</button>
-          <button class="nav-item" data-view="health"><span>13</span> Health check</button>
-          <button class="nav-item" data-view="help"><span>14</span> Help &amp; guide</button>
+          <button class="nav-item active" data-view="command"><span>01</span> Command Center</button>
+          <button class="nav-item" data-view="notifications"><span>02</span> Notifications <b id="notificationNavCount" class="nav-count hidden">0</b></button>
+          <button class="nav-item" data-view="sale"><span>03</span> Sale Workspace</button>
+          <button class="nav-item" data-view="catalog"><span>04</span> Catalog</button>
+          <button class="nav-item" data-view="live"><span>05</span> Live Sale Mode</button>
+          <button class="nav-item" data-view="claims"><span>06</span> Claims Desk</button>
+          <button class="nav-item" data-view="offers"><span>07</span> Offers</button>
+          <button class="nav-item" data-view="pulling"><span>08</span> Pull Cards</button>
+          <button class="nav-item" data-view="orders"><span>09</span> Buyer Orders</button>
+          <button class="nav-item" data-view="batches"><span>10</span> Shipping Batches</button>
+          <button class="nav-item" data-view="packing"><span>11</span> Packing</button>
+          <button class="nav-item" data-view="dashboard"><span>12</span> Profit Dashboard</button>
+          <button class="nav-item" data-view="buyers"><span>13</span> Buyer Profiles</button>
+          <button class="nav-item" data-view="health"><span>14</span> Health Check</button>
+          <button class="nav-item" data-view="help"><span>15</span> Help &amp; Guide</button>
         </nav>
         <div class="sale-switcher">
           <label for="saleSelect">Active sale</label>
@@ -88,7 +89,7 @@
               <div class="toolbar">
                 <label class="search"><span>⌕</span><input id="cardSearch" type="search" placeholder="Search cards, numbers, conditions…" /></label>
                 <label class="inline-control">Order<select id="listingSort"><option value="spreadsheet">Spreadsheet</option><option value="year">Year</option><option value="player">Player</option><option value="price-asc">Price low–high</option><option value="price-desc">Price high–low</option><option value="custom">Custom</option></select></label>
-                <div class="bulk-actions"><label class="select-all"><input id="selectAllListings" type="checkbox" /> Select visible</label><span id="listingSelectionCount">0 selected</span><button id="bundleOfferBtn" class="secondary" disabled>Bundle offer</button><button id="bulkEditBtn" class="secondary" disabled>Bulk edit</button><button id="customFieldsBtn" class="secondary">Custom fields</button><button id="renumberCardsBtn" class="secondary">References</button><button id="carryoverBtn" class="secondary">Carry over unsold</button><button id="closeSaleBtn" class="secondary">Close sale</button><button id="deleteSelectedCardsBtn" class="secondary danger-button" disabled>Delete selected</button></div>
+                <div class="bulk-actions"><label class="select-all"><input id="selectAllListings" type="checkbox" /> Select visible</label><span id="listingSelectionCount">0 selected</span><button id="bundleOfferBtn" class="secondary" disabled>Bundle offer</button><button id="bulkEditBtn" class="secondary" disabled>Bulk edit</button><button id="teamReviewBtn" class="secondary">Teams</button><button id="catalogBuilderBtn" class="secondary">Build catalog</button><button id="customFieldsBtn" class="secondary">Custom fields</button><button id="renumberCardsBtn" class="secondary">References</button><button id="carryoverBtn" class="secondary">Carry over unsold</button><button id="closeSaleBtn" class="secondary">Close sale</button><button id="deleteSelectedCardsBtn" class="secondary danger-button" disabled>Delete selected</button></div>
               </div>
               <div class="table-wrap">
                 <table>
@@ -119,6 +120,42 @@
               </div>
             </aside>
           </div>
+        </section>
+
+        <section id="catalogView" class="view">
+          <div id="catalogPageStats" class="stats"></div>
+          <div class="catalog-layout">
+            <section class="panel catalog-settings-panel">
+              <div class="panel-header"><div><h2>Catalog settings</h2><p>Control exactly what customers see in the sale preview.</p></div><button id="catalogTeamsBtn" class="secondary">Find / review teams</button></div>
+              <div class="catalog-form">
+                <label>Catalog title<input id="catalogPageTitle" /></label>
+                <label>Introduction<textarea id="catalogPageIntro" rows="4" placeholder="Preview the cards coming to the next sale."></textarea></label>
+                <div class="two-columns"><label>Cards to include<select id="catalogPageStatus"><option value="available">Available cards only</option><option value="open">Available and pending offers</option><option value="all">Every card</option></select></label><label>Card-number order<select id="catalogPageNumberDirection"><option value="asc">Lowest to highest</option><option value="desc">Highest to lowest</option></select></label></div>
+                <div class="option-grid"><label><input id="catalogPageShowPrice" type="checkbox" checked /> Show claim price</label><label><input id="catalogPageShowFlaws" type="checkbox" checked /> Show flaws</label></div>
+                <p class="setup-note">The customer catalog is preview-only. Purchase details, buyer data, notes, and listing-copy controls are never published.</p>
+                <div class="catalog-actions"><button id="catalogExportFolderBtn" class="secondary">Export folder</button><button id="catalogPublishBtn" class="primary">Publish to Cloudflare</button><button id="catalogOpenLiveBtn" class="secondary">Open live catalog</button></div>
+                <div id="catalogPublishProgress" class="task-progress hidden"><div class="progress-track"><div id="catalogPublishProgressBar" class="progress-bar"></div></div><small id="catalogPublishProgressText">Preparing catalog…</small></div>
+                <p id="catalogLastPublished" class="folder-label"></p>
+              </div>
+            </section>
+            <section class="panel cloudflare-panel">
+              <div class="panel-header"><div><h2>Cloudflare connection</h2><p>Saved securely on this computer, never inside a sale file.</p></div><span id="catalogCloudflareStatus" class="status pending">Not connected</span></div>
+              <div class="catalog-form">
+                <label>Account ID<input id="catalogCloudflareAccount" autocomplete="off" /></label>
+                <label>Pages project<input id="catalogCloudflareProject" value="csm-card-catalog" autocomplete="off" /></label>
+                <label>Public catalog address<input id="catalogPublicUrl" value="https://catalog.rowdysportscards.com" type="url" /></label>
+                <label>API token<input id="catalogCloudflareToken" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved token" /></label>
+                <p class="setup-note">The token needs <strong>Cloudflare Pages: Edit</strong> access for this account.</p>
+                <div class="catalog-actions"><button id="catalogSaveConnectionBtn" class="primary">Save &amp; test</button><button id="catalogForgetConnectionBtn" class="secondary danger-button">Forget token</button><button id="catalogTokenHelpBtn" class="secondary">Create token</button></div>
+                <p id="catalogConnectionMessage" class="folder-label"></p>
+              </div>
+            </section>
+          </div>
+          <section class="panel catalog-card-panel">
+            <div class="panel-header"><div><h2>Catalog cards</h2><p>Edit public card details, team assignments, and images before publishing.</p></div><span id="catalogPageCount" class="count-pill">0 cards</span></div>
+            <div class="toolbar"><label class="search"><span>⌕</span><input id="catalogCardSearch" type="search" placeholder="Search player, year, team, or card number…" /></label><label class="inline-control">Show<select id="catalogCardFilter"><option value="all">All included cards</option><option value="missing-image">Missing images</option><option value="missing-team">Missing teams</option></select></label></div>
+            <div class="table-wrap catalog-table-wrap"><table><thead><tr><th>Image</th><th>Card</th><th>Team(s)</th><th>Customer view</th><th></th></tr></thead><tbody id="catalogCardRows"></tbody></table><div id="catalogCardsEmpty" class="empty-state hidden"><div class="empty-icon">▧</div><h3>No catalog cards match</h3><p>Change the filters or add cards in Sale Workspace.</p></div></div>
+          </section>
         </section>
 
         <section id="claimsView" class="view">
@@ -196,12 +233,12 @@
         <section id="helpView" class="view">
           <section class="help-hero"><div><img class="help-brand-logo" src="assets/brand-logo-dark.svg" alt="Card Sale Manager — Post. Sell. Track." /><p class="eyebrow">GETTING STARTED</p><h2>From first claim to final shipment.</h2><p>Follow the workflow below, reopen the guided walkthrough at any time, or create an anonymous support report if something goes wrong.</p><div class="help-actions"><button id="startWalkthroughBtn" class="primary">Start guided walkthrough</button><button id="openSetupWizardBtn" class="secondary">Open setup wizard</button><button id="saveDiagnosticBtn" class="secondary">Save diagnostic report</button></div></div><img src="assets/help-example-cards.png" alt="Three fictional example sports cards" /></section>
           <div class="help-grid"><article class="panel help-card"><img src="assets/help/workspace.png" alt="Sale workspace screenshot" /><div><span>1</span><h3>Import and prepare</h3><p>Import a spreadsheet, retain extra columns as custom fields, match images, and safely renumber listings.</p><button class="row-action" data-help-view="sale">Open Sale Workspace</button></div></article><article class="panel help-card"><img src="assets/help/offers.png" alt="Offers screen screenshot" /><div><span>2</span><h3>Record claims and offers</h3><p>Assign buyers in Claims Desk, or select multiple available listings to create a bundle offer. Review, counter, accept, or reject offers before they enter an order.</p><button class="row-action" data-help-view="claims">Open Claims Desk</button></div></article><article class="panel help-card"><img src="assets/help/orders.png" alt="Buyer Orders screenshot" /><div><span>3</span><h3>Confirm totals and payment</h3><p>Choose shipping, verify addresses, copy buyer summaries, and mark payments without exposing purchase costs.</p><button class="row-action" data-help-view="orders">Open Buyer Orders</button></div></article><article class="panel help-card"><img src="assets/help/packing.png" alt="Card pulling screenshot" /><div><span>4</span><h3>Pull cards your way</h3><p>Sort and group sold cards by storage location, buyer, or any information imported from your sheet.</p><button class="row-action" data-help-view="pulling">Open Card Pulling</button></div></article><article class="panel help-card"><img src="assets/help/packing.png" alt="Packing screen screenshot" /><div><span>5</span><h3>Batch, pack, and ship</h3><p>Create shipping batches for combined slips, labels, tracking numbers, messages, and shipment completion.</p><button class="row-action" data-help-view="batches">Open Shipping Batches</button></div></article><article class="panel help-card"><img src="assets/help/orders.png" alt="Notification center example" /><div><span>6</span><h3>Stay caught up</h3><p>The Notification Center links directly to offers, payment, images, addresses, tracking, and other unfinished work.</p><button class="row-action" data-help-view="notifications">Open Notifications</button></div></article></div>
-          <section class="panel help-reference"><div class="panel-header"><div><h2>Quick reference</h2><p>Important rules and where your information lives.</p></div></div><div class="help-reference-grid"><div><strong>Local or portable</strong><p>CSM always keeps a local recovery copy. Use Portable CSM file to save a <code>.csm</code> workspace in OneDrive and reopen it elsewhere.</p></div><div><strong>Backups are automatic</strong><p>Daily copies rotate, but update archives never do. Before installing an update, CSM permanently preserves the local workspace and any open portable file.</p></div><div><strong>Buyer profiles stay</strong><p>Updates and startup cleanup never remove buyer profiles. A profile is deleted only when you deliberately use Delete profile.</p></div><div><strong>Image rechecks</strong><p>Re-run one card and its shared suggestions from the card row, or recheck every current and past sale from the Post queue. One file can never belong to two listings.</p></div><div><strong>OneDrive images</strong><p>Moved image folders are relinked automatically when possible. If paths differ, choose the image folder once from the CSM file screen.</p></div><div><strong>Avoid conflicts</strong><p>Do not edit one CSM file on two computers at once. CSM opens locked files read-only and warns before replacing a newer cloud copy.</p></div><div><strong>Shipping rule</strong><p>Orders over 3 cards or $50 default to PMWT. You can manually override either shipping choice.</p></div><div><strong>Need support?</strong><p>The diagnostic report contains app health and counts only—never buyer names, addresses, card names, or image paths.</p></div></div></section>
+          <section class="panel help-reference"><div class="panel-header"><div><h2>Quick reference</h2><p>Important rules and where your information lives.</p></div></div><div class="help-reference-grid"><div><strong>Local or portable</strong><p>CSM always keeps a local recovery copy. Use Portable CSM file to save a <code>.csm</code> workspace in OneDrive and reopen it elsewhere.</p></div><div><strong>Backups are automatic</strong><p>Daily copies rotate, but update archives never do. Before installing an update, CSM permanently preserves the local workspace and any open portable file.</p></div><div><strong>Buyer profiles stay</strong><p>Updates and startup cleanup never remove buyer profiles. A profile is deleted only when you deliberately use Delete profile.</p></div><div><strong>Image rechecks</strong><p>Re-run one card and its shared suggestions from the card row, or recheck every current and past sale from the Post queue. One file can never belong to two listings.</p></div><div><strong>OneDrive images</strong><p>Moved image folders are relinked automatically when possible. If paths differ, choose the image folder once from the CSM file screen.</p></div><div><strong>Avoid conflicts</strong><p>Do not edit one CSM file on two computers at once. CSM opens locked files read-only and warns before replacing a newer cloud copy.</p></div><div><strong>Publish a catalog</strong><p>Use Catalog to review public details and images. Save a Cloudflare Pages API token once, then choose Publish. The encrypted token stays on this computer and never enters a sale file.</p></div><div><strong>Customer privacy</strong><p>Published catalogs never include purchase data, buyers, addresses, private notes, or a listing-copy button. They are browsing previews only.</p></div><div><strong>Shipping rule</strong><p>Orders over 3 cards or $50 default to PMWT. You can manually override either shipping choice.</p></div><div><strong>Need support?</strong><p>The diagnostic report contains app health and counts only—never buyer names, addresses, card names, or image paths.</p></div></div></section>
         </section>
       </main>
     </div>
 
-    <aside id="quickEditDrawer" class="quick-drawer" aria-hidden="true"><div class="drawer-header"><div><p class="eyebrow">QUICK EDIT</p><h2 id="quickEditTitle">Edit card</h2></div><button id="closeQuickEditBtn" class="icon-btn" aria-label="Close">×</button></div><div class="drawer-body"><input id="quickEditCardId" type="hidden" /><div class="two-columns"><label>Year<input id="quickYear" /></label><label>Brand<input id="quickBrand" /></label></div><label>Player<input id="quickPlayer" /></label><div class="two-columns"><label>Number<input id="quickNumber" /></label><label>Grade<input id="quickGrade" /></label></div><label>Flaw(s)<textarea id="quickFlaws" rows="3"></textarea></label><div class="two-columns"><label>Claim price<input id="quickPrice" type="number" min="0" step="0.01" /></label><label>Purchase price<input id="quickPurchasePrice" type="number" min="0" step="0.01" /></label></div><label>Purchase date<input id="quickPurchaseDate" placeholder="MMDDYYYY" /></label><div id="quickCustomFields" class="quick-custom-fields"></div><div id="quickEditPreview" class="format-preview"></div></div><div class="drawer-actions"><button id="saveQuickEditBtn" class="primary">Save changes</button></div></aside>
+    <aside id="quickEditDrawer" class="quick-drawer" aria-hidden="true"><div class="drawer-header"><div><p class="eyebrow">QUICK EDIT</p><h2 id="quickEditTitle">Edit card</h2></div><button id="closeQuickEditBtn" class="icon-btn" aria-label="Close">×</button></div><div class="drawer-body"><input id="quickEditCardId" type="hidden" /><div class="two-columns"><label>Year<input id="quickYear" /></label><label>Brand<input id="quickBrand" /></label></div><label>Player<input id="quickPlayer" /></label><div class="two-columns"><label>Number<input id="quickNumber" /></label><label>Grade<input id="quickGrade" /></label></div><div class="two-columns"><label>Sport<select id="quickSport"><option value="">Not set</option><option>Baseball</option><option>Basketball</option><option>Football</option><option>Hockey</option><option>Other</option></select></label><label>Team(s)<input id="quickTeams" placeholder="Yankees; Mets" /></label></div><label>Flaw(s)<textarea id="quickFlaws" rows="3"></textarea></label><div class="two-columns"><label>Claim price<input id="quickPrice" type="number" min="0" step="0.01" /></label><label>Purchase price<input id="quickPurchasePrice" type="number" min="0" step="0.01" /></label></div><label>Purchase date<input id="quickPurchaseDate" placeholder="MMDDYYYY" /></label><div id="quickCustomFields" class="quick-custom-fields"></div><div id="quickEditPreview" class="format-preview"></div></div><div class="drawer-actions"><button id="saveQuickEditBtn" class="primary">Save changes</button></div></aside>
 
     <dialog id="importDialog">
       <form method="dialog" class="dialog-card large">
@@ -229,7 +266,7 @@
     <dialog id="addCardDialog">
       <form method="dialog" class="dialog-card large">
         <div class="dialog-header"><div><p class="eyebrow">MANUAL ENTRY</p><h2>Add a single card</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
-        <div class="mapping-grid"><label>Year<input id="addCardYear" /></label><label>Brand<input id="addCardBrand" /></label><label>Player<input id="addCardPlayer" required /></label><label>Number<input id="addCardNumber" /></label><label>Grade<input id="addCardGrade" /></label><label>Flaw(s)<input id="addCardFlaws" /></label><label>Claim price<input id="addCardPrice" type="number" min="0" step="0.01" /></label><label>Purchase price<input id="addCardPurchasePrice" type="number" min="0" step="0.01" /></label><label>Purchase date<input id="addCardPurchaseDate" placeholder="MMDDYYYY" /></label></div>
+        <div class="mapping-grid"><label>Year<input id="addCardYear" /></label><label>Brand<input id="addCardBrand" /></label><label>Player<input id="addCardPlayer" required /></label><label>Number<input id="addCardNumber" /></label><label>Sport<select id="addCardSport"><option value="">Not set</option><option>Baseball</option><option>Basketball</option><option>Football</option><option>Hockey</option><option>Other</option></select></label><label>Team(s)<input id="addCardTeams" placeholder="Yankees; Mets" /></label><label>Grade<input id="addCardGrade" /></label><label>Flaw(s)<input id="addCardFlaws" /></label><label>Claim price<input id="addCardPrice" type="number" min="0" step="0.01" /></label><label>Purchase price<input id="addCardPurchasePrice" type="number" min="0" step="0.01" /></label><label>Purchase date<input id="addCardPurchaseDate" placeholder="MMDDYYYY" /></label></div>
         <div id="addCardPreview" class="format-preview"></div>
         <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirmAddCardBtn" type="button" class="primary">Add card</button></div>
       </form>
@@ -239,11 +276,14 @@
       <form method="dialog" class="dialog-card large">
         <div class="dialog-header"><div><p class="eyebrow">BULK EDIT</p><h2>Edit selected cards</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
         <p id="bulkEditCount" class="dialog-copy"></p>
-        <div class="mapping-grid"><label>Year<input id="bulkYear" placeholder="Leave blank to keep" /></label><label>Brand<input id="bulkBrand" placeholder="Leave blank to keep" /></label><label>Grade<input id="bulkGrade" placeholder="Leave blank to keep" /></label><label>Flaw(s)<input id="bulkFlaws" placeholder="Leave blank to keep" /></label></div>
+        <div class="mapping-grid"><label>Year<input id="bulkYear" placeholder="Leave blank to keep" /></label><label>Brand<input id="bulkBrand" placeholder="Leave blank to keep" /></label><label>Sport<select id="bulkSport"><option value="">Leave unchanged</option><option>Baseball</option><option>Basketball</option><option>Football</option><option>Hockey</option><option>Other</option></select></label><label>Team(s)<input id="bulkTeams" placeholder="Leave blank to keep" /></label><label>Grade<input id="bulkGrade" placeholder="Leave blank to keep" /></label><label>Flaw(s)<input id="bulkFlaws" placeholder="Leave blank to keep" /></label></div>
         <div class="two-columns"><label>Set exact claim price<input id="bulkPrice" type="number" min="0" step="0.01" placeholder="Leave blank to keep" /></label><label>Adjust price by percent<input id="bulkPricePercent" type="number" step="0.1" placeholder="Example: -10 or 5" /></label></div>
         <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="applyBulkEditBtn" type="button" class="primary">Apply changes</button></div>
       </form>
     </dialog>
+
+    <dialog id="teamReviewDialog"><form method="dialog" class="dialog-card large"><div class="dialog-header"><div><p class="eyebrow">TEAM DATA</p><h2>Find and review player teams</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><p class="dialog-copy">CSM uses public roster-history data to suggest teams for the player and card year. A single year-specific match is saved automatically. Traded players, multi-player cards, and ambiguous names stay here for your approval. Team data is editable and can contain more than one team.</p><div class="team-tools"><label>Cards<select id="teamLookupScope"><option value="missing">Only cards missing teams</option><option value="all">Recheck every card</option></select></label><label>Default sport<select id="teamDefaultSport"><option value="">Use each card's sport</option><option>Baseball</option><option>Basketball</option><option>Football</option><option>Hockey</option></select></label><button id="startTeamLookupBtn" type="button" class="primary">Find teams</button></div><div id="teamLookupProgress" class="task-progress hidden"><div class="progress-track"><div id="teamLookupProgressBar" class="progress-bar"></div></div><small id="teamLookupProgressText">Preparing lookup…</small></div><div class="team-review-summary" id="teamReviewSummary"></div><div id="teamReviewList" class="team-review-list"></div><div class="dialog-actions"><button value="cancel" class="primary">Done</button></div></form></dialog>
+
 
     <dialog id="bundleOfferDialog">
       <form method="dialog" class="dialog-card large">

@@ -1,6 +1,6 @@
 {
   "name": "card-sale-manager",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Local-first card sale workflow manager",
   "main": "main.js",
   "type": "commonjs",
@@ -10,6 +10,7 @@
     "dist": "electron-builder --win"
   },
   "dependencies": {
+    "blake3-wasm": "2.1.5",
     "qrcode": "1.5.4",
     "xlsx": "^0.18.5"
   },
@@ -26,12 +27,15 @@
     "files": [
       "main.js",
       "csm-files.js",
+      "catalog-export.js",
+      "cloudflare-pages.js",
       "preload.js",
       "renderer.js",
       "index.html",
       "styles.css",
       "assets/**/*",
       "node_modules/qrcode/**/*",
+      "node_modules/blake3-wasm/**/*",
       "node_modules/dijkstrajs/**/*",
       "node_modules/pngjs/**/*",
       "node_modules/xlsx/**/*",

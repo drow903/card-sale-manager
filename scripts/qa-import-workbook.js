@@ -16,7 +16,9 @@ const aliases = {
   condition: ["grade", "condition", "cond"],
   price: ["claim price", "price", "amount", "asking price", "sale price"],
   purchasePrice: ["purchase price", "purchase cost", "cost", "paid", "buy price"],
-  purchaseDate: ["purchase date", "date purchased", "bought date", "buy date", "purchased"]
+  purchaseDate: ["purchase date", "date purchased", "bought date", "buy date", "purchased"],
+  sport: ["sport", "category"],
+  teams: ["team", "teams", "club", "clubs", "team(s)"]
 };
 
 function normalizePurchaseDate(value) {
@@ -52,6 +54,8 @@ const cards = rows.map((row, index) => {
     set: value("set"),
     number: value("number"),
     name: value("name"),
+    sport: value("sport"),
+    teams: String(value("teams") || "").split(/\s*(?:;|\||,|\n)\s*/).filter(Boolean),
     condition: value("condition"),
     price: Number(String(value("price")).replace(/[$,]/g, "")) || 0,
     purchasePrice: value("purchasePrice") === "" ? "" : Number(String(value("purchasePrice")).replace(/[$,]/g, "")) || 0,

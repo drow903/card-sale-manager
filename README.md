@@ -5,6 +5,11 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 ## Features
 
 - Imports Excel, CSV, and TSV card lists or adds individual cards manually.
+- Imports or edits Sport and Team(s), including multiple teams on traded-player and multi-player cards.
+- Suggests year-specific teams from public roster-history data across baseball, basketball, football, and hockey, automatically accepting only a single unambiguous match and leaving everything else for review.
+- Paces team-reference requests, honors service retry delays, retries temporary 429/503 responses, reuses team labels, saves each completed result immediately, and resumes missing-team lookups from a 30-day local cache.
+- Adds a dedicated Catalog workspace for editing public details, teams, and images, exporting an offline folder, or publishing directly to a connected Cloudflare Pages project.
+- Creates a preview-only customer catalog with mobile-friendly paging, search, Player/Year/Team filters, year-first sorting, and low-to-high or high-to-low secondary card-number sorting; purchase data, buyers, and listing-copy controls are excluded.
 - Saves reusable import-column presets for spreadsheets whose headings differ from the standard template.
 - Opens with a Sale Command Center that prioritizes pending offers, address problems, unpaid orders, missing images, and ready-to-ship work.
 - Uses a complete Card Sale Manager identity across the Windows icon, sidebar, light and dark themes, onboarding, walkthrough, Help guide, and default packing-slip design.
@@ -59,7 +64,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 
 ## Import columns
 
-`Year`, `Brand`, `Player`, `Number`, `Flaw(s)`, `Grade`, `Claim Price`, `Purchase Price`, and `Purchase Date`.
+`Year`, `Brand`, `Player`, `Number`, `Sport`, `Team(s)`, `Flaw(s)`, `Grade`, `Claim Price`, `Purchase Price`, and `Purchase Date`.
 
 Use `MMDDYYYY` for Purchase Date when possible. The purchase fields stay out of copied customer listings.
 

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, safeStorage, shell } = require("electron");
 app.disableHardwareAcceleration();
 // Some Windows systems cannot start Chromium's separate GPU subprocess (0xC0000135).
 // The app uses local trusted content and software rendering, so keeping that work in-process
@@ -11,8 +11,20 @@ const https = require("https");
 const { spawn } = require("child_process");
 const QRCode = require("qrcode");
 const { automaticImageResolution, createEnvelope, imagePaths, parseEnvelope, portableData, relinkManifest, replacePaths } = require("./csm-files");
+const { writeCatalog } = require("./catalog-export");
+const { publishDirectory, testConnection } = require("./cloudflare-pages");
 
 const UPDATE_REPOSITORY = "drow903/card-sale-manager";
+
+function catalogCredentialPath() { return path.join(app.getPath("userData"), "catalog-cloudflare-credential.json"); }
+function readCatalogToken() {
+  try { const saved = JSON.parse(fs.readFileSync(catalogCredentialPath(), "utf8")); return safeStorage.isEncryptionAvailable() && saved.encryptedToken ? safeStorage.decryptString(Buffer.from(saved.encryptedToken, "base64")) : ""; } catch { return ""; }
+}
+async function writeCatalogToken(token) {
+  if (!safeStorage.isEncryptionAvailable()) throw new Error("Windows credential encryption is not available on this computer.");
+  const target = catalogCredentialPath(); await fs.promises.mkdir(path.dirname(target), { recursive: true });
+  await fs.promises.writeFile(target, JSON.stringify({ encryptedToken: safeStorage.encryptString(token).toString("base64"), updatedAt: new Date().toISOString() }), "utf8");
+}
 
 let mainWindow;
 let allowWindowClose = false;
@@ -448,6 +460,122 @@ function getJson(url) {
   });
 }
 
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+let publicRequestQueue = Promise.resolve();
+let lastPublicRequestAt = 0;
+let teamLookupProgressSender = null;
+
+function publicJsonAttempt(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { headers: { Accept: "application/json", "User-Agent": `Card-Sale-Manager/${app.getVersion()} (team lookup)` }, timeout: 20000 }, (response) => {
+      if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location && redirects < 4) {
+        response.resume(); resolve(publicJsonAttempt(new URL(response.headers.location, url).toString(), redirects + 1)); return;
+      }
+      if (response.statusCode !== 200) {
+        const error = new Error(`The team reference returned status ${response.statusCode}.`);
+        error.statusCode = response.statusCode;
+        const retryValue = response.headers["retry-after"];
+        const retrySeconds = Number(retryValue);
+        const retryDate = Date.parse(String(retryValue || ""));
+        error.retryAfterMs = Number.isFinite(retrySeconds) ? retrySeconds * 1000 : (Number.isFinite(retryDate) ? Math.max(0, retryDate - Date.now()) : 0);
+        response.resume(); reject(error); return;
+      }
+      let body = ""; response.setEncoding("utf8");
+      response.on("data", (chunk) => { body += chunk; if (body.length > 5 * 1024 * 1024) request.destroy(new Error("The team reference response was too large.")); });
+      response.on("end", () => { try { resolve(JSON.parse(body)); } catch { reject(new Error("The team reference returned unreadable information.")); } });
+    });
+    request.on("timeout", () => request.destroy(new Error("The team lookup timed out.")));
+    request.on("error", reject);
+  });
+}
+
+function getPublicJson(url) {
+  const task = publicRequestQueue.then(async () => {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const gap = Math.max(0, 350 - (Date.now() - lastPublicRequestAt));
+      if (gap) await wait(gap);
+      try {
+        lastPublicRequestAt = Date.now();
+        return await publicJsonAttempt(url);
+      } catch (error) {
+        const retryable = error.statusCode === 429 || error.statusCode === 503 || ["ETIMEDOUT", "ECONNRESET", "EAI_AGAIN"].includes(error.code);
+        if (!retryable || attempt === 5) throw error;
+        const retryMs = Math.min(30000, Math.max(error.retryAfterMs || 0, 1500 * (2 ** attempt))) + Math.floor(Math.random() * 500);
+        if (teamLookupProgressSender && !teamLookupProgressSender.isDestroyed()) teamLookupProgressSender.send("teams:lookup-progress", { phase: "rate-limited", retryInSeconds: Math.ceil(retryMs / 1000), attempt: attempt + 1 });
+        await wait(retryMs);
+      }
+    }
+    throw new Error("The team lookup could not be completed.");
+  });
+  publicRequestQueue = task.catch(() => undefined);
+  return task;
+}
+
+const teamLookupCache = new Map();
+const wikidataLabelCache = new Map();
+const normalizedPerson = (value) => String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+function wikidataYear(snak) {
+  const time = snak?.datavalue?.value?.time;
+  const match = String(time || "").match(/[+-](\d{4})-/);
+  return match ? Number(match[1]) : null;
+}
+async function lookupPlayerTeams(player, year, sport) {
+  const key = `${normalizedPerson(player)}|${year}|${String(sport || "").toLowerCase()}`;
+  if (teamLookupCache.has(key)) return teamLookupCache.get(key);
+  const promise = (async () => {
+    const query = new URLSearchParams({ action: "wbsearchentities", search: player, language: "en", format: "json", limit: "7", type: "item", origin: "*" });
+    const search = await getPublicJson(`https://www.wikidata.org/w/api.php?${query}`);
+    const exact = (search.search || []).filter((item) => normalizedPerson(item.label) === normalizedPerson(player));
+    const sportTerm = String(sport || "").toLowerCase();
+    const sportWords = sportTerm === "football" ? ["football", "nfl"] : sportTerm === "hockey" ? ["hockey", "nhl"] : sportTerm ? [sportTerm] : [];
+    const candidates = exact.length ? exact : (search.search || []).slice(0, 3);
+    const candidate = candidates.find((item) => sportWords.some((word) => String(item.description || "").toLowerCase().includes(word))) || candidates[0];
+    if (!candidate) return { player, teams: [], confidence: "none", reason: "No matching player was found." };
+    const entityData = await getPublicJson(`https://www.wikidata.org/wiki/Special:EntityData/${encodeURIComponent(candidate.id)}.json`);
+    const entity = entityData.entities?.[candidate.id];
+    const memberships = (entity?.claims?.P54 || []).map((claim) => {
+      const teamId = claim.mainsnak?.datavalue?.value?.id;
+      const starts = (claim.qualifiers?.P580 || []).map(wikidataYear).filter(Boolean);
+      const ends = (claim.qualifiers?.P582 || []).map(wikidataYear).filter(Boolean);
+      return { teamId, start: starts.length ? Math.min(...starts) : null, end: ends.length ? Math.max(...ends) : null, dated: starts.length > 0 || ends.length > 0 };
+    }).filter((item) => item.teamId);
+    const targetYear = Number(year);
+    const inYear = memberships.filter((item) => Number.isFinite(targetYear) && (!item.start || item.start <= targetYear) && (!item.end || item.end >= targetYear) && item.dated);
+    const chosen = inYear.length ? inYear : (memberships.length === 1 ? memberships : []);
+    const ids = [...new Set(chosen.map((item) => item.teamId))];
+    if (!ids.length) return { player, teams: [], confidence: "none", reason: "No team history matched that year.", sourceUrl: candidate.concepturi };
+    const missingIds = ids.filter((id) => !wikidataLabelCache.has(id));
+    if (missingIds.length) {
+      const labelsQuery = new URLSearchParams({ action: "wbgetentities", ids: missingIds.join("|"), props: "labels", languages: "en", format: "json", origin: "*" });
+      const labels = await getPublicJson(`https://www.wikidata.org/w/api.php?${labelsQuery}`);
+      missingIds.forEach((id) => wikidataLabelCache.set(id, labels.entities?.[id]?.labels?.en?.value || ""));
+    }
+    const teams = ids.map((id) => wikidataLabelCache.get(id)).filter(Boolean);
+    const exactName = normalizedPerson(candidate.label) === normalizedPerson(player);
+    const sportMatched = sportWords.length > 0 && sportWords.some((word) => String(candidate.description || "").toLowerCase().includes(word));
+    const confidence = exactName && sportMatched && inYear.length === 1 && teams.length === 1 ? "high" : "review";
+    return { player, teams, confidence, reason: confidence === "high" ? "One year-specific roster match." : "Multiple or less-specific roster matches need review.", sourceUrl: candidate.concepturi };
+  })().catch((error) => ({ player, teams: [], confidence: "error", reason: error.message || "Lookup failed." }));
+  teamLookupCache.set(key, promise);
+  const result = await promise;
+  if (result.confidence === "error") teamLookupCache.delete(key);
+  else teamLookupCache.set(key, Promise.resolve(result));
+  return result;
+}
+
+function splitCardPlayers(value) {
+  return String(value || "").split(/\s*(?:;|\/|\s+&\s+|\s+and\s+)\s*/i).map((name) => name.trim()).filter(Boolean);
+}
+
+async function lookupCardTeams(card) {
+  const players = splitCardPlayers(card.player || card.name);
+  const results = [];
+  for (const player of players) results.push(await lookupPlayerTeams(player, card.year, card.sport));
+  const teams = [...new Set(results.flatMap((item) => item.teams))];
+  const confidence = players.length === 1 && results[0]?.confidence === "high" && teams.length === 1 ? "high" : (teams.length ? "review" : results.some((item) => item.confidence === "error") ? "error" : "none");
+  return { cardId: card.cardId || card.id, players: results, teams, confidence, reason: confidence === "high" ? results[0].reason : teams.length ? "Review the suggested team or teams." : results[0]?.reason || "No player was supplied." };
+}
+
 function getText(url, redirects = 0) {
   return new Promise((resolve, reject) => {
     const request = https.get(url, { headers: { "User-Agent": `Mozilla/5.0 Card-Sale-Manager/${app.getVersion()}` }, timeout: 15000 }, (response) => {
@@ -564,7 +692,7 @@ function createWindow() {
     mainWindow.webContents.once("did-finish-load", async () => {
       await new Promise((resolve) => setTimeout(resolve, 1200));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
-      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "parser", "quick-edit", "closing", "copied", "folders", "csm-file"].find((view) => captureName.includes(view)) || "");
+      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "parser", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder"].find((view) => captureName.includes(view)) || "");
       if (captureView === "match-review") {
         await mainWindow.webContents.executeJavaScript("autoMatchImages()");
         await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -608,6 +736,10 @@ function createWindow() {
         await new Promise((resolve) => setTimeout(resolve, 100));
         await mainWindow.webContents.executeJavaScript("document.querySelector('#csmFileBtn').click()");
         await new Promise((resolve) => setTimeout(resolve, 350));
+      } else if (captureView === "team-review") {
+        await mainWindow.webContents.executeJavaScript("showView('sale'); openTeamReview()");
+      } else if (captureView === "catalog-builder") {
+        await mainWindow.webContents.executeJavaScript("showView('sale'); openCatalogBuilder()");
       } else if (["command", "sale", "dashboard", "orders", "packing", "live", "offers", "buyers", "health", "help"].includes(captureView)) {
         await mainWindow.webContents.executeJavaScript(`showView(${JSON.stringify(captureView)})`);
       }
@@ -894,6 +1026,51 @@ app.whenReady().then(() => {
       properties: ["openDirectory", "multiSelections"]
     });
     return result.canceled ? [] : result.filePaths;
+  });
+
+  ipcMain.handle("catalog:export", async (_event, payload) => {
+    const result = await dialog.showOpenDialog(mainWindow, { title: "Choose where to create the interactive catalog", properties: ["openDirectory", "createDirectory"] });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true };
+    return writeCatalog(payload || {}, result.filePaths[0], nativeImage);
+  });
+
+  ipcMain.handle("catalog:cloudflare-status", async () => ({ connected: Boolean(readCatalogToken()), available: safeStorage.isEncryptionAvailable() }));
+  ipcMain.handle("catalog:cloudflare-save", async (_event, config = {}) => {
+    try {
+      const token = String(config.token || "").trim() || readCatalogToken();
+      if (!token) return { ok: false, message: "Paste a Cloudflare API token first." };
+      const result = await testConnection(config, token);
+      if (String(config.token || "").trim()) await writeCatalogToken(token);
+      return { ...result, connected: true };
+    } catch (error) { return { ok: false, message: error.message || "Could not connect to Cloudflare." }; }
+  });
+  ipcMain.handle("catalog:cloudflare-forget", async () => { try { await fs.promises.unlink(catalogCredentialPath()); } catch (error) { if (error.code !== "ENOENT") throw error; } return { ok: true }; });
+  ipcMain.handle("catalog:publish", async (event, payload, config = {}) => {
+    const token = readCatalogToken(); let tempRoot = "";
+    try {
+      if (!token) return { ok: false, message: "Save and test a Cloudflare API token first." };
+      tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "csm-catalog-publish-"));
+      if (!event.sender.isDestroyed()) event.sender.send("catalog:publish-progress", { stage: "building", percent: 2, message: "Building the customer catalog…" });
+      const built = await writeCatalog(payload || {}, tempRoot, nativeImage);
+      const result = await publishDirectory(built.folderPath, config, token, (details) => { if (!event.sender.isDestroyed()) event.sender.send("catalog:publish-progress", details); });
+      return { ...result, cardCount: built.cardCount, imageCount: built.imageCount };
+    } catch (error) { return { ok: false, message: error.message || "The catalog could not be published." }; }
+    finally { if (tempRoot) { try { await fs.promises.rm(tempRoot, { recursive: true, force: true }); } catch {} } }
+  });
+  ipcMain.handle("catalog:open-url", async (_event, target) => { try { const url = new URL(String(target || "")); if (url.protocol !== "https:") return false; await shell.openExternal(url.toString()); return true; } catch { return false; } });
+
+  ipcMain.handle("teams:lookup-batch", async (event, cards) => {
+    const input = Array.isArray(cards) ? cards.slice(0, 1000) : [];
+    const output = [];
+    teamLookupProgressSender = event.sender;
+    try {
+      for (let index = 0; index < input.length; index += 1) {
+        const result = await lookupCardTeams(input[index] || {});
+        output.push(result);
+        if (!event.sender.isDestroyed()) event.sender.send("teams:lookup-progress", { completed: index + 1, total: input.length, current: input[index]?.player || input[index]?.name || "Card", result });
+      }
+      return output;
+    } finally { if (teamLookupProgressSender === event.sender) teamLookupProgressSender = null; }
   });
 
   ipcMain.handle("app:check-update", checkForUpdate);

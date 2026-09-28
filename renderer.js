@@ -42,9 +42,9 @@ const starterSale = {
   pmwtShipping: 5,
   template: DEFAULT_TEMPLATE,
   cards: [
-    { id: uid(), ref: "1", year: "1961", set: "Heritage Stars", number: "12", name: "Jack Mercer", condition: "VG-EX", price: 12, purchasePrice: 6, purchaseDate: "", notes: "Light corner wear", status: "available", imagePath: "" },
-    { id: uid(), ref: "2", year: "1974", set: "Court Kings", number: "8", name: "Eli Turner", condition: "EX", price: 18, purchasePrice: 9, purchaseDate: "", notes: "None", status: "offered", buyer: "Jamie Example", offerPrice: 15, offerStatus: "pending", claimType: "offer", claimedAt: new Date().toISOString(), imagePath: "" },
-    { id: uid(), ref: "3", year: "1968", set: "Ice Legends", number: "30", name: "Noah Reed", condition: "VG", price: 15, purchasePrice: 7, purchaseDate: "", notes: "Soft lower-left corner", status: "claimed", buyer: "Alex Sample", claimPrice: 14, claimType: "claim", claimedAt: new Date().toISOString(), imagePath: "" }
+    { id: uid(), ref: "1", year: "1961", set: "Heritage Stars", number: "12", name: "Jack Mercer", sport: "Baseball", teams: ["New York Stars"], teamStatus: "confirmed", condition: "VG-EX", price: 12, purchasePrice: 6, purchaseDate: "", notes: "Light corner wear", status: "available", imagePath: "" },
+    { id: uid(), ref: "2", year: "1974", set: "Court Kings", number: "8", name: "Eli Turner", sport: "Basketball", teams: ["Chicago Kings"], teamStatus: "confirmed", condition: "EX", price: 18, purchasePrice: 9, purchaseDate: "", notes: "None", status: "offered", buyer: "Jamie Example", offerPrice: 15, offerStatus: "pending", claimType: "offer", claimedAt: new Date().toISOString(), imagePath: "" },
+    { id: uid(), ref: "3", year: "1968", set: "Ice Legends", number: "30", name: "Noah Reed", sport: "Hockey", teams: ["Detroit Blades"], teamStatus: "confirmed", condition: "VG", price: 15, purchasePrice: 7, purchaseDate: "", notes: "Soft lower-left corner", status: "claimed", buyer: "Alex Sample", claimPrice: 14, claimType: "claim", claimedAt: new Date().toISOString(), imagePath: "" }
   ],
   images: [],
   orders: { "Alex Sample": { status: "awaiting", shippingMethod: "PWE", discount: 0 } },
@@ -74,6 +74,7 @@ let portableDocument = { active: false, path: "", name: "Local workspace", readO
 let recentCsmFiles = [];
 let csmBackups = [];
 let pendingCsmConflict = null;
+let catalogCloudflareConnection = { connected: false, available: true };
 const runtimeErrors = [];
 const scrubDiagnosticText = (value) => String(value ?? "").replace(/file:\/{2,3}[^\s)]+/gi, "[local path]").replace(/[A-Za-z]:[\\/][^\n\r]*/g, "[local path]").slice(0, 2000);
 window.addEventListener("error", (event) => { runtimeErrors.push({ at: new Date().toISOString(), type: "error", message: scrubDiagnosticText(event.message || "Unknown renderer error").slice(0, 500) }); if (runtimeErrors.length > 25) runtimeErrors.shift(); });
@@ -87,8 +88,22 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 
 const BUILT_IN_CARD_FIELDS = [
   ["ref", "Reference"], ["buyer", "Buyer"], ["year", "Year"], ["set", "Brand"], ["name", "Player"], ["number", "Card number"],
-  ["condition", "Grade"], ["price", "Claim price"], ["purchasePrice", "Purchase price"], ["purchaseDate", "Purchase date"]
+  ["sport", "Sport"], ["teams", "Team(s)"], ["condition", "Grade"], ["price", "Claim price"], ["purchasePrice", "Purchase price"], ["purchaseDate", "Purchase date"]
 ];
+
+function normalizeSport(value) {
+  const text = String(value || "").trim();
+  const found = ["Baseball", "Basketball", "Football", "Hockey", "Other"].find((item) => item.toLowerCase() === text.toLowerCase());
+  return found || text;
+}
+
+function parseTeams(value) {
+  const input = Array.isArray(value) ? value : String(value || "").split(/\s*(?:;|\||,|\n)\s*/);
+  return [...new Set(input.map((item) => String(item || "").trim()).filter(Boolean))];
+}
+
+function teamMemoryKey(card) { return [normalizeSport(card.sport), card.year, normalizedPersonName(card.name)].join("|").toLowerCase(); }
+function normalizedPersonName(value) { return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim(); }
 
 function customFieldKey(label, sale = activeSale()) {
   const base = String(label || "field").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "field";
@@ -577,6 +592,7 @@ function render() {
   renderStats();
   renderListings();
   renderImages();
+  renderCatalog();
   renderClaims();
   renderOffers();
   renderOrders();
@@ -1262,11 +1278,11 @@ function renderLiveSale() {
 }
 
 function showView(view) {
-  const refresh = { command: renderCommandCenter, sale: () => { renderListings(); renderImages(); }, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, pulling: renderPulling, batches: renderShippingBatches, notifications: renderNotifications, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck, help: () => {} };
+  const refresh = { command: renderCommandCenter, sale: () => { renderListings(); renderImages(); }, catalog: renderCatalog, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, pulling: renderPulling, batches: renderShippingBatches, notifications: renderNotifications, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck, help: () => {} };
   refresh[view]?.();
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `${view}View`));
-  const labels = { command: "COMMAND CENTER", sale: "SALE WORKSPACE", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", pulling: "CARD PULLING", batches: "SHIPPING BATCHES", notifications: "NOTIFICATIONS", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK", help: "HELP & GUIDE" };
+  const labels = { command: "COMMAND CENTER", sale: "SALE WORKSPACE", catalog: "CATALOG", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", pulling: "CARD PULLING", batches: "SHIPPING BATCHES", notifications: "NOTIFICATIONS", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK", help: "HELP & GUIDE" };
   $("#viewEyebrow").textContent = labels[view];
 }
 
@@ -1274,7 +1290,7 @@ function openQuickEdit(cardId) {
   const card = activeSale().cards.find((item) => item.id === cardId);
   if (!card) return;
   $("#quickEditCardId").value = card.id; $("#quickEditTitle").textContent = card.name || "Edit card";
-  $("#quickYear").value = card.year || ""; $("#quickBrand").value = card.set || ""; $("#quickPlayer").value = card.name || ""; $("#quickNumber").value = card.number || ""; $("#quickGrade").value = card.condition || ""; $("#quickFlaws").value = /^none$/i.test(card.notes || "") ? "" : card.notes || ""; $("#quickPrice").value = card.price ?? ""; $("#quickPurchasePrice").value = card.purchasePrice ?? ""; $("#quickPurchaseDate").value = card.purchaseDate || "";
+  $("#quickYear").value = card.year || ""; $("#quickBrand").value = card.set || ""; $("#quickPlayer").value = card.name || ""; $("#quickNumber").value = card.number || ""; $("#quickSport").value = normalizeSport(card.sport); $("#quickTeams").value = parseTeams(card.teams).join("; "); $("#quickGrade").value = card.condition || ""; $("#quickFlaws").value = /^none$/i.test(card.notes || "") ? "" : card.notes || ""; $("#quickPrice").value = card.price ?? ""; $("#quickPurchasePrice").value = card.purchasePrice ?? ""; $("#quickPurchaseDate").value = card.purchaseDate || "";
   $("#quickCustomFields").innerHTML = customFields().length ? `<strong>Custom fields</strong>${customFields().map((field) => {
     const value = customFieldValue(card, field.key);
     if (field.type === "checkbox") return `<label class="check-label"><input data-quick-custom="${escapeHtml(field.key)}" type="checkbox" ${value === true || value === "true" || value === 1 ? "checked" : ""} /> ${escapeHtml(field.label)}</label>`;
@@ -1296,7 +1312,8 @@ function closeQuickEdit() { $("#quickEditDrawer").classList.remove("open"); $("#
 function saveQuickEdit() {
   const card = activeSale().cards.find((item) => item.id === $("#quickEditCardId").value); if (!card) return;
   snapshotSale(`Before editing ${card.ref} · ${card.name}`);
-  Object.assign(card, { year: $("#quickYear").value.trim(), set: $("#quickBrand").value.trim(), name: $("#quickPlayer").value.trim(), number: $("#quickNumber").value.trim(), condition: $("#quickGrade").value.trim(), notes: $("#quickFlaws").value.trim(), price: Number($("#quickPrice").value || 0), purchasePrice: $("#quickPurchasePrice").value === "" ? "" : Number($("#quickPurchasePrice").value), purchaseDate: normalizePurchaseDate($("#quickPurchaseDate").value) });
+  Object.assign(card, { year: $("#quickYear").value.trim(), set: $("#quickBrand").value.trim(), name: $("#quickPlayer").value.trim(), number: $("#quickNumber").value.trim(), sport: normalizeSport($("#quickSport").value), teams: parseTeams($("#quickTeams").value), condition: $("#quickGrade").value.trim(), notes: $("#quickFlaws").value.trim(), price: Number($("#quickPrice").value || 0), purchasePrice: $("#quickPurchasePrice").value === "" ? "" : Number($("#quickPurchasePrice").value), purchaseDate: normalizePurchaseDate($("#quickPurchaseDate").value) });
+  if (card.teams.length) { card.teamStatus = "confirmed"; card.teamSource = "manual"; state.teamMatchMemory ||= {}; state.teamMatchMemory[teamMemoryKey(card)] = card.teams; }
   card.customFields ||= {};
   $$('[data-quick-custom]').forEach((input) => { card.customFields[input.dataset.quickCustom] = input.type === "checkbox" ? input.checked : input.value.trim(); });
   recordAudit("edit", `Updated ${card.ref} · ${card.name}`, { cardId: card.id }); closeQuickEdit(); saveSoon(); render(); toast("Card updated.");
@@ -1305,7 +1322,7 @@ function saveQuickEdit() {
 function manualCardDraft() {
   return {
     year: $("#addCardYear").value.trim(), set: $("#addCardBrand").value.trim(), name: $("#addCardPlayer").value.trim(),
-    number: $("#addCardNumber").value.trim(), condition: $("#addCardGrade").value.trim(), notes: $("#addCardFlaws").value.trim(),
+    number: $("#addCardNumber").value.trim(), sport: normalizeSport($("#addCardSport").value), teams: parseTeams($("#addCardTeams").value), condition: $("#addCardGrade").value.trim(), notes: $("#addCardFlaws").value.trim(),
     price: Number($("#addCardPrice").value || 0), purchasePrice: $("#addCardPurchasePrice").value === "" ? "" : Number($("#addCardPurchasePrice").value),
     purchaseDate: normalizePurchaseDate($("#addCardPurchaseDate").value)
   };
@@ -1316,7 +1333,7 @@ function updateAddCardPreview() {
 }
 
 function openAddCard() {
-  ["#addCardYear", "#addCardBrand", "#addCardPlayer", "#addCardNumber", "#addCardGrade", "#addCardFlaws", "#addCardPrice", "#addCardPurchasePrice", "#addCardPurchaseDate"].forEach((selector) => $(selector).value = "");
+  ["#addCardYear", "#addCardBrand", "#addCardPlayer", "#addCardNumber", "#addCardSport", "#addCardTeams", "#addCardGrade", "#addCardFlaws", "#addCardPrice", "#addCardPurchasePrice", "#addCardPurchaseDate"].forEach((selector) => $(selector).value = "");
   updateAddCardPreview();
   $("#addCardDialog").showModal();
   $("#addCardYear").focus();
@@ -1328,7 +1345,7 @@ function addSingleCard() {
   if (!draft.name) return toast("Enter the player name.");
   const nextRef = Math.max(0, ...sale.cards.map((card) => Number(card.ref) || 0)) + 1;
   const nextOrder = Math.max(0, ...sale.cards.map((card) => Number(card.sourceOrder) || 0)) + 1;
-  const card = { id: uid(), ref: String(nextRef), sourceOrder: nextOrder, customOrder: sale.cards.length + 1, ...draft, customFields: {}, imagePath: "", status: "available" };
+  const card = { id: uid(), ref: String(nextRef), sourceOrder: nextOrder, customOrder: sale.cards.length + 1, ...draft, teamStatus: draft.teams.length ? "confirmed" : "", teamSource: draft.teams.length ? "manual" : "", customFields: {}, imagePath: "", status: "available" };
   sale.cards.push(card);
   renumberCardReferences(sale, { audit: false });
   recordAudit("manual-add", `Added ${card.ref} · ${card.name}`, { cardId: card.id });
@@ -1393,7 +1410,8 @@ function autoMap(headers) {
     number: ["number", "card number", "card #", "no", "#"], notes: ["flaw(s)", "flaws", "flaw", "notes", "note", "comments"],
     condition: ["grade", "condition", "cond"], price: ["claim price", "price", "amount", "asking price", "sale price"],
     purchasePrice: ["purchase price", "purchase cost", "cost", "paid", "buy price"],
-    purchaseDate: ["purchase date", "date purchased", "bought date", "buy date", "purchased"]
+    purchaseDate: ["purchase date", "date purchased", "bought date", "buy date", "purchased"],
+    sport: ["sport", "category"], teams: ["team", "teams", "club", "clubs", "team(s)"]
   };
   return Object.fromEntries(Object.entries(aliases).map(([field, candidates]) => [field, headers.find((header) => candidates.includes(header.toLowerCase().trim())) || ""]));
 }
@@ -1413,7 +1431,7 @@ async function importSpreadsheet() {
   if (!parsed.rows.length) return toast("That sheet has no card rows.");
   const headers = Object.keys(parsed.rows[0]);
   pendingSheet = { ...parsed, path, headers, mapping: autoMap(headers) };
-  const fields = [["year", "Year"], ["set", "Brand"], ["name", "Player"], ["number", "Number"], ["notes", "Flaw(s)"], ["condition", "Grade"], ["price", "Claim Price"], ["purchasePrice", "Purchase Price"], ["purchaseDate", "Purchase Date"]];
+  const fields = [["year", "Year"], ["set", "Brand"], ["name", "Player"], ["number", "Number"], ["sport", "Sport"], ["teams", "Team(s)"], ["notes", "Flaw(s)"], ["condition", "Grade"], ["price", "Claim Price"], ["purchasePrice", "Purchase Price"], ["purchaseDate", "Purchase Date"]];
   $("#mappingGrid").innerHTML = fields.map(([field, label]) => `<label>${label}<select data-map="${field}"><option value="">Not included</option>${headers.map((header) => `<option value="${escapeHtml(header)}" ${pendingSheet.mapping[field] === header ? "selected" : ""}>${escapeHtml(header)}</option>`).join("")}</select></label>`).join("");
   renderCustomImportColumns();
   renderImportPresetOptions();
@@ -1465,7 +1483,10 @@ function confirmImport(event) {
   const imported = pendingSheet.rows.map((row, index) => {
     const value = (field) => mapping[field] ? row[mapping[field]] : "";
     const customValues = Object.fromEntries(importedCustomFields.map((field, fieldIndex) => [field.key, row[customHeaders[fieldIndex]] ?? ""]));
-    const card = { id: uid(), ref: String(start + index + 1), sourceOrder: start + index + 1, customOrder: start + index + 1, year: value("year"), set: value("set"), number: value("number"), name: value("name"), condition: value("condition"), price: Number(String(value("price")).replace(/[$,]/g, "")) || 0, purchasePrice: value("purchasePrice") === "" ? "" : Number(String(value("purchasePrice")).replace(/[$,]/g, "")) || 0, purchaseDate: normalizePurchaseDate(value("purchaseDate")), notes: value("notes"), customFields: customValues, imagePath: "", status: "available" };
+    const teams = parseTeams(value("teams"));
+    const card = { id: uid(), ref: String(start + index + 1), sourceOrder: start + index + 1, customOrder: start + index + 1, year: value("year"), set: value("set"), number: value("number"), name: value("name"), sport: normalizeSport(value("sport")), teams, teamStatus: teams.length ? "confirmed" : "", teamSource: teams.length ? "import" : "", condition: value("condition"), price: Number(String(value("price")).replace(/[$,]/g, "")) || 0, purchasePrice: value("purchasePrice") === "" ? "" : Number(String(value("purchasePrice")).replace(/[$,]/g, "")) || 0, purchaseDate: normalizePurchaseDate(value("purchaseDate")), notes: value("notes"), customFields: customValues, imagePath: "", status: "available" };
+    const rememberedTeams = state.teamMatchMemory?.[teamMemoryKey(card)];
+    if (!teams.length && rememberedTeams?.length) { card.teams = [...rememberedTeams]; card.teamStatus = "confirmed"; card.teamSource = "remembered"; }
     const remembered = state.manualMatchMemory?.[normalizedCardKey(card)];
     if (remembered) card.rememberedImagePath = remembered;
     return card;
@@ -2688,6 +2709,7 @@ async function outputPweLabels(names, action = "print") {
 const WALKTHROUGH_STEPS = [
   { title: "Welcome to Card Sale Manager", body: "Post. Sell. Track. The Command Center is your daily checklist from first claim to final shipment.", tips: ["Green actions move work forward", "Amber and red are reserved for items needing attention"], image: "assets/brand-logo-dark.svg", view: "command" },
   { title: "Import and prepare listings", body: "Import your spreadsheet, choose a saved column preset, review warnings, and match each card to its image.", tips: ["Purchase data stays private", "Copying text and dragging an image are separate actions"], image: "assets/help/workspace.png", view: "sale" },
+  { title: "Preview and publish your catalog", body: "Open Catalog to edit the public title, introduction, teams, card details, and images. Export an offline folder or connect Cloudflare once and publish the latest preview directly.", tips: ["Catalogs filter by player, year, and every attached team", "Year is always the primary sort and card number is the secondary sort", "Purchase data, buyer data, and listing-copy controls are never published"], image: "assets/help/workspace.png", view: "catalog" },
   { title: "Record claims and offers", body: "Claims Desk contains every sale card. Assign a buyer, record an offer, paste comments into the parser, or select several available listings to build one bundle offer.", tips: ["Accepted bundles split the final price proportionally across every card", "Accepted offers become orders", "Audit timestamps preserve what happened"], image: "assets/help/offers.png", view: "claims" },
   { title: "Confirm buyer orders", body: "Choose shipping, validate the mailing address, record payment, and copy the buyer summary.", tips: ["PWE or PMWT can be overridden", "Costs never appear in customer messages"], image: "assets/help/orders.png", view: "orders" },
   { title: "Pack and print", body: "Check cards as they are packed, preview packing slips, print PWE thermal labels, and add tracking.", tips: ["Packed buyers are marked in the menu", "Print previews use the final PDF layout"], image: "assets/help/packing.png", view: "packing" },
@@ -2752,10 +2774,139 @@ async function checkForUpdates(manual = false) {
     : (result.message || (result.status === "unavailable" ? "No installable GitHub update is available yet." : "The update check could not be completed."));
 }
 
+function catalogCardsForStatus(status) {
+  if (status === "all") return [...activeSale().cards];
+  if (status === "open") return activeSale().cards.filter((card) => card.status === "available" || (card.status === "offered" && card.offerStatus === "pending"));
+  return activeSale().cards.filter((card) => card.status === "available");
+}
+
+function catalogSettings(sale = activeSale()) {
+  sale.catalogSettings ||= { title: `${sale.name} Card Catalog`, intro: "Preview the cards coming to the next sale. Filter by player, year, or team.", status: "available", numberDirection: "asc", showPrice: true, showFlaws: true, lastPublishedAt: "", lastDeploymentUrl: "" };
+  return sale.catalogSettings;
+}
+
+function cloudflareCatalogSettings() {
+  state.preferences ||= {};
+  state.preferences.catalogCloudflare ||= { accountId: "fbe5eb483ee9161ce8c51e5e924541c7", projectName: "csm-card-catalog", publicUrl: "https://catalog.rowdysportscards.com" };
+  return state.preferences.catalogCloudflare;
+}
+
+function updateCatalogSettingInputs() {
+  const settings = catalogSettings(); const cloudflare = cloudflareCatalogSettings(); const active = document.activeElement;
+  [["#catalogPageTitle", settings.title], ["#catalogPageIntro", settings.intro], ["#catalogCloudflareAccount", cloudflare.accountId], ["#catalogCloudflareProject", cloudflare.projectName], ["#catalogPublicUrl", cloudflare.publicUrl]].forEach(([selector, value]) => { const element = $(selector); if (element && element !== active) element.value = value || ""; });
+  $("#catalogPageStatus").value = settings.status; $("#catalogPageNumberDirection").value = settings.numberDirection; $("#catalogPageShowPrice").checked = settings.showPrice !== false; $("#catalogPageShowFlaws").checked = settings.showFlaws !== false;
+}
+
+function saveCatalogSettingsFromForm() {
+  const settings = catalogSettings(); const cloudflare = cloudflareCatalogSettings();
+  settings.title = $("#catalogPageTitle").value.trim() || `${activeSale().name} Card Catalog`; settings.intro = $("#catalogPageIntro").value.trim(); settings.status = $("#catalogPageStatus").value; settings.numberDirection = $("#catalogPageNumberDirection").value; settings.showPrice = $("#catalogPageShowPrice").checked; settings.showFlaws = $("#catalogPageShowFlaws").checked;
+  cloudflare.accountId = $("#catalogCloudflareAccount").value.trim(); cloudflare.projectName = $("#catalogCloudflareProject").value.trim(); cloudflare.publicUrl = $("#catalogPublicUrl").value.trim();
+}
+
+function catalogPayload() {
+  saveCatalogSettingsFromForm(); const settings = catalogSettings(); const cards = catalogCardsForStatus(settings.status);
+  return { title: settings.title, intro: settings.intro, settings: { numberDirection: settings.numberDirection, showPrice: settings.showPrice, showFlaws: settings.showFlaws }, cards: cards.map((card) => ({ id: card.id, ref: card.ref, year: String(card.year || ""), brand: card.set || "", player: card.name || "", number: String(card.number || ""), sport: normalizeSport(card.sport), teams: parseTeams(card.teams), grade: card.condition || "", flaws: /^none$/i.test(card.notes || "") ? "" : card.notes || "", price: Number(card.price || 0), status: card.status, imagePath: card.imagePath || "" })) };
+}
+
+function renderCatalog() {
+  updateCatalogSettingInputs(); const settings = catalogSettings(); const cards = catalogCardsForStatus(settings.status); const missingImages = cards.filter((card) => !card.imagePath).length; const missingTeams = cards.filter((card) => !parseTeams(card.teams).length).length;
+  $("#catalogPageStats").innerHTML = [["Included cards", cards.length, settings.status === "all" ? "Every card" : settings.status === "open" ? "Available + offers" : "Available only"], ["Images", cards.length - missingImages, missingImages ? `${missingImages} missing` : "Complete"], ["Teams", cards.length - missingTeams, missingTeams ? `${missingTeams} missing` : "Complete"], ["Published", settings.lastPublishedAt ? new Date(settings.lastPublishedAt).toLocaleDateString() : "Not yet", settings.lastPublishedAt ? new Date(settings.lastPublishedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Cloudflare"]].map(([label, value, sub]) => `<article class="stat"><span class="label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><span class="sub">${escapeHtml(sub)}</span></article>`).join("");
+  const query = $("#catalogCardSearch").value.trim().toLowerCase(); const filter = $("#catalogCardFilter").value;
+  const shown = cards.filter((card) => (!query || [card.year, card.set, card.name, card.number, card.condition, ...parseTeams(card.teams)].join(" ").toLowerCase().includes(query)) && (filter !== "missing-image" || !card.imagePath) && (filter !== "missing-team" || !parseTeams(card.teams).length));
+  $("#catalogPageCount").textContent = `${shown.length} card${shown.length === 1 ? "" : "s"}`; $("#catalogCardsEmpty").classList.toggle("hidden", Boolean(shown.length));
+  $("#catalogCardRows").innerHTML = shown.map((card) => `<tr><td>${card.imagePath ? `<img class="catalog-thumb" src="${fileUrl(card.imagePath)}" alt="" />` : `<div class="catalog-thumb-empty">No image</div>`}</td><td><div class="card-title">${escapeHtml([card.year, card.set, card.name, numberLabel(card)].filter(Boolean).join(" "))}</div><div class="card-line">${escapeHtml([card.condition, /^none$/i.test(card.notes || "") ? "" : card.notes].filter(Boolean).join(" · "))}</div></td><td>${parseTeams(card.teams).length ? escapeHtml(parseTeams(card.teams).join(" · ")) : `<span class="status pending">Needs team</span>`}</td><td><div class="money">${settings.showPrice ? money(card.price) : "Price hidden"}</div><div class="catalog-public-line">${settings.showFlaws && card.notes && !/^none$/i.test(card.notes) ? escapeHtml(card.notes) : ""}</div>${card.purchasePrice !== "" || card.purchaseDate ? `<span class="catalog-private-hint">Purchase details stay private</span>` : ""}</td><td><div class="row-actions"><button class="row-action" data-catalog-edit="${card.id}">Edit details</button><button class="row-action" data-catalog-image="${card.id}">${card.imagePath ? "Change image" : "Add image"}</button></div></td></tr>`).join("");
+  const badge = $("#catalogCloudflareStatus"); badge.textContent = catalogCloudflareConnection.connected ? "Connected" : "Not connected"; badge.className = `status ${catalogCloudflareConnection.connected ? "available" : "pending"}`;
+  $("#catalogConnectionMessage").textContent = catalogCloudflareConnection.message || (catalogCloudflareConnection.connected ? `Token saved${catalogCloudflareConnection.projectName ? ` · ${catalogCloudflareConnection.projectName}` : ""}.` : "Save an API token to publish directly.");
+  $("#catalogLastPublished").textContent = settings.lastPublishedAt ? `Last published ${new Date(settings.lastPublishedAt).toLocaleString()}${settings.lastDeploymentUrl ? ` · ${settings.lastDeploymentUrl}` : ""}` : "This sale has not been published yet.";
+}
+
+function openCatalogBuilder() { showView("catalog"); }
+
+async function exportCatalog() {
+  const button = $("#catalogExportFolderBtn"); const payload = catalogPayload(); if (!payload.cards.length) return toast("There are no cards in that catalog group.");
+  button.disabled = true; button.textContent = "Building…";
+  try { const result = await window.cardSale.exportCatalog(payload); if (result?.canceled) return; if (!result?.success) throw new Error(result?.message || "The catalog could not be created."); saveSoon(); await window.cardSale.openFolder(result.folderPath); toast(`Catalog created with ${result.cardCount} cards and ${result.imageCount} images.`); }
+  catch (error) { toast(error.message || "The catalog could not be created."); } finally { button.disabled = false; button.textContent = "Export folder"; }
+}
+
+async function saveCatalogConnection() {
+  const button = $("#catalogSaveConnectionBtn"); saveCatalogSettingsFromForm(); button.disabled = true; button.textContent = "Testing…";
+  try { const result = await window.cardSale.saveCatalogConnection({ ...cloudflareCatalogSettings(), token: $("#catalogCloudflareToken").value.trim() }); if (!result.ok) throw new Error(result.message); $("#catalogCloudflareToken").value = ""; catalogCloudflareConnection = { connected: true, ...result, message: `Connected to ${result.projectName}.` }; saveSoon(); renderCatalog(); toast("Cloudflare connection saved."); }
+  catch (error) { catalogCloudflareConnection = { connected: false, message: error.message || "Could not connect to Cloudflare." }; renderCatalog(); toast(catalogCloudflareConnection.message); } finally { button.disabled = false; button.textContent = "Save & test"; }
+}
+
+async function publishCatalog() {
+  const payload = catalogPayload(); if (!payload.cards.length) return toast("There are no cards in that catalog group."); if (!catalogCloudflareConnection.connected) return toast("Save and test the Cloudflare connection first.");
+  if (!window.confirm(`Publish ${payload.cards.length} cards to ${cloudflareCatalogSettings().publicUrl || "your Cloudflare catalog"}? This will replace the current customer preview.`)) return;
+  const button = $("#catalogPublishBtn"); button.disabled = true; button.textContent = "Publishing…"; $("#catalogPublishProgress").classList.remove("hidden"); $("#catalogPublishProgressBar").style.width = "2%"; $("#catalogPublishProgressText").textContent = "Preparing catalog…";
+  try { await saveNow(); const result = await window.cardSale.publishCatalog(payload, cloudflareCatalogSettings()); if (!result.ok) throw new Error(result.message); const settings = catalogSettings(); settings.lastPublishedAt = new Date().toISOString(); settings.lastDeploymentUrl = result.url || ""; await saveNow(); renderCatalog(); toast(`Catalog published with ${payload.cards.length} cards.`); }
+  catch (error) { toast(error.message || "The catalog could not be published."); } finally { button.disabled = false; button.textContent = "Publish to Cloudflare"; }
+}
+
+function teamReviewCards() {
+  return activeSale().cards.filter((card) => !parseTeams(card.teams).length || card.teamStatus === "review" || card.teamSuggestions?.length);
+}
+
+function renderTeamReview() {
+  const cards = teamReviewCards(); const missing = activeSale().cards.filter((card) => !parseTeams(card.teams).length).length; const review = activeSale().cards.filter((card) => card.teamStatus === "review").length;
+  $("#teamReviewSummary").textContent = `${missing} missing team data · ${review} need review · ${activeSale().cards.length - missing - review} confirmed`;
+  $("#teamReviewList").innerHTML = cards.length ? cards.map((card) => `<article class="team-review-row" data-team-card="${card.id}"><div><h3>${escapeHtml([card.year, card.set, card.name, numberLabel(card)].filter(Boolean).join(" "))}</h3><p>${escapeHtml(card.teamLookupReason || "Team data has not been checked yet.")}</p></div><label>Sport<select data-team-sport><option value="">Not set</option>${["Baseball","Basketball","Football","Hockey","Other"].map((sport) => `<option ${normalizeSport(card.sport) === sport ? "selected" : ""}>${sport}</option>`).join("")}</select></label><label>Team(s)<input data-team-names value="${escapeHtml(parseTeams(card.teams).length ? parseTeams(card.teams).join("; ") : parseTeams(card.teamSuggestions).join("; "))}" placeholder="Separate multiple teams with semicolons" /></label><div><span class="team-state ${card.teamStatus === "confirmed" ? "confirmed" : "review"}">${card.teamStatus === "confirmed" ? "Confirmed" : card.teamSuggestions?.length ? "Review" : "Missing"}</span><button type="button" class="secondary" data-confirm-team="${card.id}">Save</button></div></article>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>Every card has confirmed team data</h3><p>Choose “Recheck every card” if you want fresh suggestions.</p></div>`;
+}
+
+function openTeamReview() { renderTeamReview(); $("#teamReviewDialog").showModal(); }
+
+function confirmTeamCard(cardId, row) {
+  const card = activeSale().cards.find((item) => item.id === cardId); if (!card) return;
+  const teams = parseTeams($("[data-team-names]", row).value); if (!teams.length) return toast("Enter at least one team.");
+  card.sport = normalizeSport($("[data-team-sport]", row).value); card.teams = teams; card.teamStatus = "confirmed"; card.teamSource = "manual"; card.teamSuggestions = [];
+  state.teamMatchMemory ||= {}; state.teamMatchMemory[teamMemoryKey(card)] = [...teams];
+  recordAudit("team", `Confirmed team data for ${card.ref} · ${card.name}`, { cardId: card.id }); saveSoon(); renderTeamReview(); renderCatalog(); toast("Team data saved.");
+}
+
+function teamLookupResultKey(card) { return [normalizeSport(card.sport), card.year, normalizedPersonName(card.name)].join("|").toLowerCase(); }
+
+function applyTeamLookupResult(result, { cache = true } = {}) {
+  const card = activeSale().cards.find((item) => item.id === result?.cardId); if (!card) return false;
+  card.teamLookupReason = result.reason; card.teamSuggestions = parseTeams(result.teams);
+  const canReplace = !parseTeams(card.teams).length || ["online-reference", "remembered"].includes(card.teamSource);
+  if (result.confidence === "high" && result.teams.length === 1 && canReplace) {
+    card.teams = parseTeams(result.teams); card.teamStatus = "confirmed"; card.teamSource = "online-reference"; card.teamSuggestions = [];
+    state.teamMatchMemory ||= {}; state.teamMatchMemory[teamMemoryKey(card)] = [...card.teams];
+  } else if (result.teams.length && canReplace) card.teamStatus = "review";
+  if (cache && result.confidence !== "error") {
+    state.teamLookupCache ||= {};
+    state.teamLookupCache[teamLookupResultKey(card)] = { checkedAt: new Date().toISOString(), result: { ...result, cardId: "" } };
+  }
+  return true;
+}
+
+async function startTeamLookup() {
+  const scope = $("#teamLookupScope").value; const fallbackSport = normalizeSport($("#teamDefaultSport").value);
+  const cards = activeSale().cards.filter((card) => scope === "all" || !parseTeams(card.teams).length);
+  if (!cards.length) return toast("Every card already has team data.");
+  if (fallbackSport) cards.forEach((card) => { if (!card.sport) card.sport = fallbackSport; });
+  state.teamLookupCache ||= {};
+  const maxCacheAge = 30 * 24 * 60 * 60 * 1000; const remoteCards = []; let cachedCount = 0;
+  cards.forEach((card) => {
+    const cached = scope === "all" ? null : state.teamLookupCache[teamLookupResultKey(card)];
+    const fresh = cached?.checkedAt && Date.now() - new Date(cached.checkedAt).getTime() < maxCacheAge;
+    if (fresh && cached.result) { applyTeamLookupResult({ ...cached.result, cardId: card.id }, { cache: false }); cachedCount += 1; }
+    else { if (cached && !fresh) delete state.teamLookupCache[teamLookupResultKey(card)]; remoteCards.push(card); }
+  });
+  const button = $("#startTeamLookupBtn"); button.disabled = true; $("#teamLookupProgress").classList.remove("hidden"); $("#teamLookupProgressBar").style.width = "0%";
+  $("#teamLookupProgressText").textContent = cachedCount ? `${cachedCount} saved result${cachedCount === 1 ? "" : "s"} restored · ${remoteCards.length} need an online lookup` : `Preparing ${remoteCards.length} online lookup${remoteCards.length === 1 ? "" : "s"}…`;
+  try {
+    const results = remoteCards.length ? await window.cardSale.lookupTeams(remoteCards.map((card) => ({ cardId: card.id, player: card.name, year: card.year, sport: card.sport }))) : [];
+    results.forEach((result) => applyTeamLookupResult(result));
+    recordAudit("team-lookup", `Checked team data for ${cards.length} cards`); saveSoon(); renderTeamReview(); renderCatalog(); toast("Team lookup finished.");
+  } catch (error) { toast(error.message || "Team lookup could not finish."); }
+  finally { button.disabled = false; $("#teamLookupProgress").classList.add("hidden"); }
+}
+
 function openBulkEdit() {
   if (!selectedListingIds.size) return;
   $("#bulkEditCount").textContent = `${selectedListingIds.size} selected card${selectedListingIds.size === 1 ? "" : "s"}. Blank fields will remain unchanged.`;
-  ["#bulkYear", "#bulkBrand", "#bulkGrade", "#bulkFlaws", "#bulkPrice", "#bulkPricePercent"].forEach((selector) => $(selector).value = "");
+  ["#bulkYear", "#bulkBrand", "#bulkSport", "#bulkTeams", "#bulkGrade", "#bulkFlaws", "#bulkPrice", "#bulkPricePercent"].forEach((selector) => $(selector).value = "");
   $("#bulkEditDialog").showModal();
 }
 
@@ -2765,6 +2916,8 @@ function applyBulkEdit() {
   snapshotSale(`Before bulk editing ${cards.length} cards`);
   const fields = [["year", "#bulkYear"], ["set", "#bulkBrand"], ["condition", "#bulkGrade"], ["notes", "#bulkFlaws"]];
   fields.forEach(([field, selector]) => { const value = $(selector).value.trim(); if (value !== "") cards.forEach((card) => card[field] = value); });
+  const sport = normalizeSport($("#bulkSport").value); if (sport) cards.forEach((card) => card.sport = sport);
+  const teams = parseTeams($("#bulkTeams").value); if (teams.length) cards.forEach((card) => { card.teams = [...teams]; card.teamStatus = "confirmed"; card.teamSource = "manual"; state.teamMatchMemory ||= {}; state.teamMatchMemory[teamMemoryKey(card)] = [...teams]; });
   const exact = $("#bulkPrice").value;
   const percent = $("#bulkPricePercent").value;
   if (exact !== "") cards.forEach((card) => card.price = Math.max(0, Number(exact) || 0));
@@ -2959,6 +3112,20 @@ function bindEvents() {
   $("#addSingleCardBtn").addEventListener("click", openAddCard);
   $$('[data-action="add-card"]').forEach((button) => button.addEventListener("click", openAddCard));
   $("#confirmAddCardBtn").addEventListener("click", addSingleCard);
+  $("#teamReviewBtn").addEventListener("click", openTeamReview);
+  $("#startTeamLookupBtn").addEventListener("click", startTeamLookup);
+  $("#teamReviewList").addEventListener("click", (event) => { const id = event.target.dataset.confirmTeam; if (id) confirmTeamCard(id, event.target.closest("[data-team-card]")); });
+  $("#catalogBuilderBtn").addEventListener("click", openCatalogBuilder);
+  $("#catalogTeamsBtn").addEventListener("click", openTeamReview);
+  $("#catalogExportFolderBtn").addEventListener("click", exportCatalog);
+  $("#catalogPublishBtn").addEventListener("click", publishCatalog);
+  $("#catalogSaveConnectionBtn").addEventListener("click", saveCatalogConnection);
+  $("#catalogForgetConnectionBtn").addEventListener("click", async () => { if (!window.confirm("Forget the saved Cloudflare API token on this computer?")) return; await window.cardSale.forgetCatalogConnection(); catalogCloudflareConnection = { connected: false, message: "Saved token removed." }; renderCatalog(); });
+  $("#catalogTokenHelpBtn").addEventListener("click", () => window.cardSale.openCatalogUrl("https://dash.cloudflare.com/profile/api-tokens"));
+  $("#catalogOpenLiveBtn").addEventListener("click", () => { saveCatalogSettingsFromForm(); const url = cloudflareCatalogSettings().publicUrl; if (!url) return toast("Enter the public catalog address first."); window.cardSale.openCatalogUrl(url); saveSoon(); });
+  ["#catalogPageTitle", "#catalogPageIntro", "#catalogPageStatus", "#catalogPageNumberDirection", "#catalogPageShowPrice", "#catalogPageShowFlaws", "#catalogCloudflareAccount", "#catalogCloudflareProject", "#catalogPublicUrl"].forEach((selector) => $(selector).addEventListener("change", () => { saveCatalogSettingsFromForm(); saveSoon(); renderCatalog(); }));
+  $("#catalogCardSearch").addEventListener("input", renderCatalog); $("#catalogCardFilter").addEventListener("change", renderCatalog);
+  $("#catalogCardRows").addEventListener("click", (event) => { const editId = event.target.dataset.catalogEdit; const imageId = event.target.dataset.catalogImage; if (editId) openQuickEdit(editId); if (imageId) chooseManualImage(imageId); });
   $("#importPresetSelect").addEventListener("change", (event) => { $("#deleteImportPresetBtn").disabled = !event.target.value; if (event.target.value) applyImportPreset(event.target.value); });
   $("#saveImportPresetBtn").addEventListener("click", () => { if (!pendingSheet) return; const name = window.prompt("Name this column preset:", pendingSheet.name || "My spreadsheet"); if (!name?.trim()) return; const preset = { id: uid(), name: name.trim(), mapping: currentImportMapping(), template: $("#listingTemplate").value }; state.importPresets.push(preset); renderImportPresetOptions(preset.id); saveSoon(); toast("Import-column preset saved."); });
   $("#deleteImportPresetBtn").addEventListener("click", () => { const id = $("#importPresetSelect").value; if (!id || !window.confirm("Delete this import-column preset?")) return; state.importPresets = importPresets().filter((preset) => preset.id !== id); renderImportPresetOptions(); saveSoon(); toast("Import preset deleted."); });
@@ -3336,6 +3503,15 @@ function bindEvents() {
 }
 
 async function init() {
+  window.cardSale.onTeamLookupProgress((details) => {
+    if (details.phase === "rate-limited") {
+      $("#teamLookupProgressText").textContent = `The team service is busy. Retrying automatically in ${details.retryInSeconds} seconds…`;
+      return;
+    }
+    const total = Math.max(1, Number(details.total || 0)); const completed = Number(details.completed || 0); const percent = Math.round((completed / total) * 100);
+    $("#teamLookupProgressBar").style.width = `${percent}%`; $("#teamLookupProgressText").textContent = `${completed} of ${total} checked${details.current ? ` · ${details.current}` : ""}`;
+    if (details.result && applyTeamLookupResult(details.result)) saveSoon();
+  });
   const saved = await window.cardSale.load();
   if (saved?.__csmDocument) portableDocument = saved.__csmDocument;
   const openedMissingImages = Number(saved?.__csmMissingImages || 0);
@@ -3365,6 +3541,8 @@ async function init() {
     lookupSettings();
     state.buyerProfiles ||= {};
     state.manualMatchMemory ||= {};
+    state.teamMatchMemory ||= {};
+    state.teamLookupCache ||= {};
     state.preferences ||= { fontScale: 1, compact: false, theme: "system", reducedMotion: false };
     state.preferences.theme ||= "system";
     state.preferences.reducedMotion ??= false;
@@ -3390,9 +3568,15 @@ async function init() {
       sale.audit ||= [];
       sale.unrecognizedComments ||= [];
       sale.sortMode ||= "spreadsheet";
+      catalogSettings(sale);
       const usedImages = new Set();
       sale.cards.forEach((card, index) => {
         card.customFields ||= {};
+        card.sport = normalizeSport(card.sport);
+        card.teams = parseTeams(card.teams || card.team || "");
+        if (card.teams.length) card.teamStatus ||= "confirmed";
+        const rememberedTeams = state.teamMatchMemory[teamMemoryKey(card)];
+        if (!card.teams.length && rememberedTeams?.length) { card.teams = [...rememberedTeams]; card.teamStatus = "confirmed"; card.teamSource = "remembered"; }
         card.sourceOrder ??= index + 1;
         card.customOrder ??= card.sourceOrder;
         card.purchaseDate = normalizePurchaseDate(card.purchaseDate);
@@ -3425,6 +3609,9 @@ async function init() {
     ]).sort((a, b) => a.at.localeCompare(b.at));
   }
   state.preferences ||= { fontScale: 1, compact: false, theme: "system", reducedMotion: false };
+  cloudflareCatalogSettings();
+  state.teamMatchMemory ||= {};
+  state.teamLookupCache ||= {};
   if (firstLaunch) state.preferences.setupCompleted ??= false;
   state.importPresets ||= [];
   if (![...$("#packingPageSize").options].some((option) => option.value === "two-up")) $("#packingPageSize").add(new Option("Two half-slips per letter page", "two-up"));
@@ -3444,6 +3631,11 @@ async function init() {
     $("#updateProgressBar").style.width = `${percent}%`;
     $("#updateProgressText").textContent = details.installing ? "Installing update…" : (details.percent == null ? "Downloading update…" : `Downloading update… ${details.percent}%`);
   });
+  window.cardSale.onCatalogPublishProgress((details) => {
+    $("#catalogPublishProgress").classList.remove("hidden"); $("#catalogPublishProgressBar").style.width = `${Math.max(0, Math.min(100, Number(details.percent || 0)))}%`; $("#catalogPublishProgressText").textContent = details.message || "Publishing catalog…";
+  });
+  catalogCloudflareConnection = await window.cardSale.catalogConnectionStatus();
+  renderCatalog();
   installedVersion = await window.cardSale.version();
   $("#appVersion").textContent = `Version ${installedVersion}`;
   if (recoveryNotice) toast(recoveryNotice);
