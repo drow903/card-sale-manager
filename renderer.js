@@ -51,7 +51,7 @@ const starterSale = {
   bundles: []
 };
 
-let state = { sales: [starterSale], activeSaleId: starterSale.id, selectedBuyer: "Mike R", filter: "all", query: "", claimQuery: "", lookupSettings: { primaryFolder: "", additionalFolders: [], excludedFolders: [] } };
+let state = { sales: [starterSale], archivedSales: [], activeSaleId: starterSale.id, selectedBuyer: "Mike R", filter: "all", query: "", claimQuery: "", lookupSettings: { primaryFolder: "", additionalFolders: [], excludedFolders: [] } };
 let pendingSheet = null;
 let pendingMatches = null;
 let saveTimer = null;
@@ -177,8 +177,12 @@ function recordAudit(type, message, details = {}, sale = activeSale()) {
   if (sale.audit.length > 250) sale.audit.length = 250;
 }
 
+function historicalSales() {
+  return [...(state.sales || []), ...(state.archivedSales || [])];
+}
+
 function allBuyerNames() {
-  return [...new Set([...Object.keys(state.buyerProfiles || {}), ...state.sales.flatMap((sale) => sale.cards.filter(cardInOrder).map((card) => card.buyer).filter(Boolean))])].sort((a, b) => a.localeCompare(b));
+  return [...new Set([...Object.keys(state.buyerProfiles || {}), ...historicalSales().flatMap((sale) => sale.cards.filter(cardInOrder).map((card) => card.buyer).filter(Boolean))])].sort((a, b) => a.localeCompare(b));
 }
 
 function blankBuyerProfile() { return { notes: "", address: "", tags: [], aliases: [], previousAddresses: [], manuallySaved: false }; }
@@ -448,10 +452,11 @@ function renderCsmFileManager(refreshRecent = false) {
   const missing = portableDocument.missingImageFiles || [];
   $("#csmMissingSection").classList.toggle("hidden", !missing.length);
   $("#csmMissingImages").innerHTML = missing.map((item) => {
-    const links = state.sales.flatMap((sale) => sale.cards.filter((card) => String(card.imagePath || "").toLowerCase() === String(item.originalPath || "").toLowerCase()).map((card) => ({ sale, card })));
+    const links = historicalSales().flatMap((sale) => sale.cards.filter((card) => String(card.imagePath || "").toLowerCase() === String(item.originalPath || "").toLowerCase()).map((card) => ({ sale, card })));
     const label = links.length ? links.map(({ sale, card }) => `${sale.name}: ${card.year} ${card.set} ${card.name} ${numberLabel(card)}`.replace(/\s+/g, " ").trim()).join(" · ") : item.fileName;
     const first = links[0];
-    return `<article class="csm-manager-item"><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(item.fileName || item.originalPath)}</small></div><div class="row-actions">${first ? `<button type="button" class="secondary" data-csm-manual-image="${escapeHtml(first.card.id)}" data-csm-sale="${escapeHtml(first.sale.id)}">Choose image</button>` : ""}<button type="button" class="secondary" data-csm-clear-image="${escapeHtml(item.originalPath)}">Leave unmatched</button></div></article>`;
+    const activeLink = links.find(({ sale }) => state.sales.some((item) => item.id === sale.id));
+    return `<article class="csm-manager-item"><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(item.fileName || item.originalPath)}</small></div><div class="row-actions">${activeLink ? `<button type="button" class="secondary" data-csm-manual-image="${escapeHtml(activeLink.card.id)}" data-csm-sale="${escapeHtml(activeLink.sale.id)}">Choose image</button>` : ""}<button type="button" class="secondary" data-csm-clear-image="${escapeHtml(item.originalPath)}">Leave unmatched</button></div></article>`;
   }).join("");
   $("#csmBackupSection").classList.toggle("hidden", !portableDocument.active || !csmBackups.length);
   $("#csmBackupList").innerHTML = csmBackups.map((item) => `<article class="csm-manager-item"><div><strong>${escapeHtml(new Date(item.savedAt).toLocaleString())}</strong><small>Revision ${Number(item.revision || 0)} · ${Math.max(1, Math.round(Number(item.size || 0) / 1024))} KB</small></div><button type="button" class="secondary" data-restore-csm-backup="${escapeHtml(item.path)}">Restore</button></article>`).join("");
@@ -513,7 +518,7 @@ async function savePortableCsm() {
 
 function clearMissingImagePath(originalPath) {
   const key = String(originalPath || "").toLowerCase();
-  state.sales.forEach((sale) => {
+  historicalSales().forEach((sale) => {
     sale.cards.forEach((card) => { if (String(card.imagePath || "").toLowerCase() === key) card.imagePath = ""; });
     sale.images = sale.images.filter((image) => String(image.path || "").toLowerCase() !== key);
   });
@@ -522,7 +527,7 @@ function clearMissingImagePath(originalPath) {
 function applyImageReplacements(replacements) {
   const map = new Map(Object.entries(replacements || {}).map(([from, to]) => [String(from).toLowerCase(), to]));
   const replace = (value) => map.get(String(value || "").toLowerCase()) || value;
-  state.sales.forEach((sale) => {
+  historicalSales().forEach((sale) => {
     sale.cards.forEach((card) => { card.imagePath = replace(card.imagePath); });
     sale.images.forEach((image) => { image.path = replace(image.path); image.name = image.path.split(/[\\/]/).pop(); });
   });
@@ -603,6 +608,7 @@ function render() {
   renderDashboard();
   renderLiveSale();
   renderBuyerProfiles();
+  renderArchivedSales();
   renderHealthCheck();
   applyDisplayPreferences();
   renderCsmFileManager(false);
@@ -931,7 +937,7 @@ function orderFlags(buyer) {
 }
 
 function buyerHistory(buyer) {
-  const cards = state.sales.flatMap((sale) => sale.cards).filter((card) => card.buyer === buyer && cardInOrder(card));
+  const cards = historicalSales().flatMap((sale) => sale.cards).filter((card) => card.buyer === buyer && cardInOrder(card));
   const countBy = (field) => cards.reduce((result, card) => { const value = String(card[field] || "").trim(); if (value) result[value] = (result[value] || 0) + 1; return result; }, {});
   const top = (record) => Object.entries(record).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
   return { cards, spent: cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0), player: top(countBy("name")), brand: top(countBy("set")), year: top(countBy("year")) };
@@ -1198,7 +1204,7 @@ function renderDashboard() {
   };
   $("#profitBreakdown").innerHTML = rows.length ? `<table><thead><tr>${profitHeading("card", "Card")}${profitHeading("buyer", "Buyer")}${profitHeading("revenue", "Revenue")}${profitHeading("cost", "Cost")}${profitHeading("profit", "Profit")}</tr></thead><tbody>${rows.map((card) => `<tr><td>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</td><td>${escapeHtml(card.buyer)}</td><td>${money(card.claimPrice ?? card.price)}</td><td>${money(card.purchasePrice)}</td><td class="${Number(card.claimPrice ?? card.price) < Number(card.purchasePrice) ? "cost-warning" : ""}">${money(Number(card.claimPrice ?? card.price) - Number(card.purchasePrice || 0))}</td></tr>`).join("")}</tbody></table>` : `<div class="empty-state"><h3>No completed claims yet</h3><p>Profit details will appear as cards are claimed.</p></div>`;
   const history = {};
-  state.sales.forEach((pastSale) => pastSale.cards.filter(cardInOrder).forEach((card) => {
+  historicalSales().forEach((pastSale) => pastSale.cards.filter(cardInOrder).forEach((card) => {
     const item = history[card.buyer] ||= { cards: 0, players: {}, brands: {}, years: {} };
     item.cards += 1;
     item.players[card.name] = (item.players[card.name] || 0) + 1;
@@ -1226,7 +1232,7 @@ function renderBuyerProfiles() {
 
 function deleteBuyerProfile(name) {
   const references = [];
-  state.sales.forEach((sale) => {
+  historicalSales().forEach((sale) => {
     const cards = sale.cards.filter((card) => card.buyer === name);
     if (cards.length) references.push(`${cards.length} card${cards.length === 1 ? "" : "s"} in ${sale.name}`);
     if (sale.orders?.[name]) references.push(`an order in ${sale.name}`);
@@ -1610,16 +1616,17 @@ function proposedImageMatch(card, images, sale = activeSale()) {
   };
 }
 
-function imageOwner(imagePath, exceptCardId = "") {
+function imageOwner(imagePath, exceptCardId = "", sale = activeSale()) {
   const key = String(imagePath || "").toLowerCase();
-  return allCardRecords().find((record) => record.card.id !== exceptCardId && String(record.card.imagePath || "").toLowerCase() === key);
+  const card = sale.cards.find((item) => item.id !== exceptCardId && String(item.imagePath || "").toLowerCase() === key);
+  return card ? { sale, card } : null;
 }
 
 function attachImage(card, imagePath, quiet = false, sale = activeSale()) {
   if (!imagePath) return true;
-  const owner = imageOwner(imagePath, card.id);
+  const owner = imageOwner(imagePath, card.id, sale);
   if (owner) {
-    if (!quiet) toast(`That image is already linked to ${owner.sale.name}: ${owner.card.ref} · ${owner.card.name}.`);
+    if (!quiet) toast(`That image is already linked to another listing in ${owner.sale.name}: ${owner.card.ref} · ${owner.card.name}.`);
     return false;
   }
   card.imagePath = imagePath;
@@ -1656,7 +1663,8 @@ async function autoMatchImages(options = {}) {
       : sale.cards.filter((card) => !card.imagePath).map((card) => ({ sale, card }));
   if (!records.length) return toast(options.force ? "No cards were selected for image lookup." : "Every card already has a confirmed image.");
   const oldPendingMatches = pendingMatches;
-  const confirmedPaths = new Set(allRecords.filter((record) => !records.some((target) => target.card.id === record.card.id) && record.card.imagePath).map((record) => record.card.imagePath.toLowerCase()));
+  const targetSaleIds = new Set(records.map((record) => record.sale.id));
+  const confirmedPaths = new Set(allRecords.filter((record) => targetSaleIds.has(record.sale.id) && !records.some((target) => target.card.id === record.card.id) && record.card.imagePath).map((record) => record.card.imagePath.toLowerCase()));
   const button = $("#autoMatchBtn");
   const forceAllButton = $("#forceAllImageLookupBtn");
   const progress = $("#lookupProgress");
@@ -1691,7 +1699,7 @@ async function autoMatchImages(options = {}) {
   proposed.forEach((match) => { match.card.lastSuggestedImagePath = match.candidates[0]?.image.path || ""; });
   if (options.includeRelated) {
     const suggestedPaths = new Set(proposed.map((match) => match.candidates[0]?.image.path?.toLowerCase()).filter(Boolean));
-    const relatedRecords = allRecords.filter((record) => [record.card.imagePath, record.card.lastSuggestedImagePath].filter(Boolean).some((imagePath) => suggestedPaths.has(imagePath.toLowerCase())));
+    const relatedRecords = allRecords.filter((record) => targetSaleIds.has(record.sale.id) && [record.card.imagePath, record.card.lastSuggestedImagePath].filter(Boolean).some((imagePath) => suggestedPaths.has(imagePath.toLowerCase())));
     (oldPendingMatches?.review || []).forEach((match) => {
       const topPath = match.candidates[0]?.image.path?.toLowerCase();
       if (topPath && suggestedPaths.has(topPath) && !relatedRecords.some((record) => record.card.id === match.card.id)) relatedRecords.push({ sale: match.sale || activeSale(), card: match.card });
@@ -1711,11 +1719,13 @@ async function autoMatchImages(options = {}) {
   const topPathCounts = new Map();
   proposed.forEach((match) => {
     const key = match.candidates[0]?.image.path?.toLowerCase();
-    if (key) topPathCounts.set(key, (topPathCounts.get(key) || 0) + 1);
+    const saleKey = key ? `${match.sale.id}::${key}` : "";
+    if (saleKey) topPathCounts.set(saleKey, (topPathCounts.get(saleKey) || 0) + 1);
   });
   proposed.forEach((match) => {
     const key = match.candidates[0]?.image.path?.toLowerCase();
-    if (key && topPathCounts.get(key) > 1) {
+    const saleKey = key ? `${match.sale.id}::${key}` : "";
+    if (saleKey && topPathCounts.get(saleKey) > 1) {
       match.automatic = false;
       match.conflict = true;
       match.conflictReason = "This same image was suggested for more than one listing. Choose the correct file manually.";
@@ -1724,17 +1734,18 @@ async function autoMatchImages(options = {}) {
   });
 
   const targetIds = new Set(records.map((record) => record.card.id));
-  const used = new Set(allCardRecords().filter((record) => !targetIds.has(record.card.id) && record.card.imagePath).map((record) => record.card.imagePath.toLowerCase()));
+  const used = new Set(allCardRecords().filter((record) => !targetIds.has(record.card.id) && record.card.imagePath).map((record) => `${record.sale.id}::${record.card.imagePath.toLowerCase()}`));
   const automatic = [];
   const review = [];
   proposed.sort((a, b) => (b.candidates[0]?.score || 0) - (a.candidates[0]?.score || 0)).forEach((match) => {
     const topPath = match.candidates[0]?.image.path;
-    if (match.automatic && topPath && !used.has(topPath.toLowerCase())) {
+    const topKey = topPath ? `${match.sale.id}::${topPath.toLowerCase()}` : "";
+    if (match.automatic && topPath && !used.has(topKey)) {
       if (attachImage(match.card, topPath, true, match.sale)) {
         automatic.push({ card: match.card, candidate: match.candidates[0] });
         state.manualMatchMemory ||= {};
         state.manualMatchMemory[normalizedCardKey(match.card)] = topPath;
-        used.add(topPath.toLowerCase());
+        used.add(topKey);
       } else {
         match.automatic = false;
         match.conflict = true;
@@ -1742,7 +1753,7 @@ async function autoMatchImages(options = {}) {
         review.push(match);
       }
     } else {
-      match.candidates = match.candidates.filter((candidate) => !used.has(candidate.image.path.toLowerCase()));
+      match.candidates = match.candidates.filter((candidate) => !used.has(`${match.sale.id}::${candidate.image.path.toLowerCase()}`));
       if (match.conflict) match.selected = "";
       review.push(match);
     }
@@ -2006,9 +2017,14 @@ function createBundleOffer() {
 function deleteActiveSale() {
   const sale = activeSale();
   if (!sale) return;
-  if (!window.confirm(`Delete the sale “${sale.name}” and all ${sale.cards.length} card${sale.cards.length === 1 ? "" : "s"} in it?`)) return;
+  const historyNote = sale.closedAt ? "Its buyer, order, and card history will remain in your records." : "A protected historical copy will be kept for buyer and sales records.";
+  if (!window.confirm(`Remove the sale “${sale.name}” and all ${sale.cards.length} card${sale.cards.length === 1 ? "" : "s"} from the active sale list? ${historyNote}`)) return;
   const deletedIndex = state.sales.findIndex((item) => item.id === sale.id);
-  undoStack.push({ deletedSale: clone(sale), deletedIndex });
+  state.archivedSales ||= [];
+  const archivedSale = { ...clone(sale), archivedAt: new Date().toISOString(), archivedFromIndex: deletedIndex, archiveReason: "deleted" };
+  state.archivedSales = state.archivedSales.filter((item) => item.id !== sale.id);
+  state.archivedSales.unshift(archivedSale);
+  undoStack.push({ deletedSale: clone(sale), deletedIndex, archivedSaleId: sale.id });
   state.sales = state.sales.filter((item) => item.id !== sale.id);
   if (!state.sales.length) {
     const replacement = { id: uid(), name: "New sale", pweShipping: 1, pmwtShipping: 5, template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], shippingBatches: [], customFieldDefinitions: [] };
@@ -2017,7 +2033,38 @@ function deleteActiveSale() {
   state.activeSaleId = state.sales[0].id;
   state.selectedBuyer = "";
   resetListingView();
-  saveSoon(); render(); toast("Sale deleted.");
+  saveSoon(); render(); toast("Sale removed from the active list. Its records were preserved.");
+}
+
+function renderArchivedSales() {
+  const archived = state.archivedSales || [];
+  const button = $("#archivedSalesBtn");
+  if (button) button.textContent = `Archived sale records${archived.length ? ` (${archived.length})` : ""}`;
+  const list = $("#archivedSalesList");
+  if (!list) return;
+  list.innerHTML = archived.length ? archived.map((sale) => {
+    const sold = sale.cards.filter(cardInOrder);
+    const revenue = sold.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
+    const buyers = new Set(sold.map((card) => card.buyer).filter(Boolean)).size;
+    const date = sale.closedAt || sale.archivedAt;
+    return `<article class="csm-manager-item"><div><strong>${escapeHtml(sale.name)}</strong><small>${sale.cards.length} cards · ${sold.length} sold · ${buyers} buyer${buyers === 1 ? "" : "s"} · ${money(revenue)}${date ? ` · ${escapeHtml(new Date(date).toLocaleDateString())}` : ""}</small></div><button type="button" class="secondary" data-restore-archived-sale="${escapeHtml(sale.id)}">Restore to active sales</button></article>`;
+  }).join("") : `<div class="empty-state"><h3>No archived sales</h3><p>Removing a sale will preserve its records here.</p></div>`;
+}
+
+function restoreArchivedSale(saleId) {
+  const index = (state.archivedSales || []).findIndex((sale) => sale.id === saleId);
+  if (index < 0) return;
+  const sale = state.archivedSales.splice(index, 1)[0];
+  const destination = Math.max(0, Math.min(state.sales.length, Number(sale.archivedFromIndex ?? state.sales.length)));
+  delete sale.archivedAt;
+  delete sale.archivedFromIndex;
+  delete sale.archiveReason;
+  state.sales.splice(destination, 0, sale);
+  state.activeSaleId = sale.id;
+  state.selectedBuyer = "";
+  resetListingView();
+  saveSoon(); render();
+  toast(`${sale.name} restored to the active sale list.`);
 }
 
 function assignBuyer(cardId, buyerName, offeredPrice, claimType = "claim", claimNote = "") {
@@ -2290,6 +2337,7 @@ function undoLastCompletion() {
   while (undoStack.length) {
     const action = undoStack.pop();
     if (action.deletedSale) {
+      state.archivedSales = (state.archivedSales || []).filter((sale) => sale.id !== action.archivedSaleId);
       state.sales.splice(Math.max(0, action.deletedIndex || 0), 0, action.deletedSale);
       state.activeSaleId = action.deletedSale.id;
       saveSoon(); render(); toast("Deleted sale restored."); return;
@@ -3146,6 +3194,8 @@ function bindEvents() {
   $("#finishCloseSaleBtn").addEventListener("click", finishCloseSale);
   $("#newSaleBtn").addEventListener("click", () => $("#newSaleDialog").showModal());
   $("#deleteSaleBtn").addEventListener("click", deleteActiveSale);
+  $("#archivedSalesBtn").addEventListener("click", () => { renderArchivedSales(); $("#archivedSalesDialog").showModal(); });
+  $("#archivedSalesList").addEventListener("click", (event) => { const button = event.target.closest("[data-restore-archived-sale]"); if (button) { restoreArchivedSale(button.dataset.restoreArchivedSale); $("#archivedSalesDialog").close(); } });
   $("#createSaleBtn").addEventListener("click", (event) => {
     event.preventDefault(); const name = $("#newSaleName").value.trim(); if (!name) return;
     const sale = { id: uid(), name, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], shippingBatches: [], customFieldDefinitions: [], additionalLookupFolders: [], excludedLookupFolders: [] };
@@ -3540,6 +3590,7 @@ async function init() {
     }
     lookupSettings();
     state.buyerProfiles ||= {};
+    state.archivedSales ||= [];
     state.manualMatchMemory ||= {};
     state.teamMatchMemory ||= {};
     state.teamLookupCache ||= {};
@@ -3550,7 +3601,7 @@ async function init() {
     state.salePresets ||= [];
     state.importPresets ||= [];
     state.preferences.setupCompleted ??= true;
-    state.sales.forEach((sale) => {
+    historicalSales().forEach((sale) => {
       if (!sale.template || legacyTemplates.has(sale.template)) sale.template = DEFAULT_TEMPLATE;
       sale.pweShipping ??= 1;
       sale.pmwtShipping ??= sale.shipping ?? 5;

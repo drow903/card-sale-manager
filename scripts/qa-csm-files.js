@@ -19,7 +19,8 @@ const { automaticImageResolution, createEnvelope, parseEnvelope, relinkManifest 
       portableDocumentId: "qa-document",
       activeSaleId: "sale-1",
       lookupSettings: { primaryFolder: path.join(originalCloud, "Cards"), additionalFolders: [], excludedFolders: [] },
-      sales: [{ id: "sale-1", name: "QA sale", cards: [{ id: "card-1", imagePath: originalImage }], images: [{ id: "image-1", path: originalImage }] }]
+      sales: [{ id: "sale-1", name: "QA sale", cards: [{ id: "card-1", imagePath: originalImage }], images: [{ id: "image-1", path: originalImage }] }],
+      archivedSales: [{ id: "sale-0", name: "Archived QA sale", cards: [{ id: "card-0", imagePath: originalImage }], images: [{ id: "image-0", path: originalImage }] }]
     };
     const envelope = await createEnvelope(data, csmPath, "1.1.0", 3);
     assert.equal(parseEnvelope(JSON.stringify(envelope)).revision, 3);
@@ -31,6 +32,7 @@ const { automaticImageResolution, createEnvelope, parseEnvelope, relinkManifest 
     const resolved = await automaticImageResolution(envelope, movedCsm);
     assert.equal(resolved.missing.length, 0);
     assert.equal(resolved.data.sales[0].cards[0].imagePath, path.join(movedCloud, "Cards", "1961", "Roberts 20.jpg"));
+    assert.equal(resolved.data.archivedSales[0].cards[0].imagePath, path.join(movedCloud, "Cards", "1961", "Roberts 20.jpg"));
 
     const remapRoot = path.join(root, "RemappedCards");
     await fs.promises.mkdir(path.join(remapRoot, "1961"), { recursive: true });
@@ -47,7 +49,7 @@ const { automaticImageResolution, createEnvelope, parseEnvelope, relinkManifest 
     assert.equal(Object.keys(ambiguous.replacements).length, 0);
     assert.equal(ambiguous.unresolved[0].candidates, 2);
     assert.throws(() => parseEnvelope('{"format":"something-else"}'));
-    console.log(JSON.stringify({ envelopeValid: true, relativeRelink: true, folderRemap: true, ambiguousNamesProtected: true }));
+    console.log(JSON.stringify({ envelopeValid: true, relativeRelink: true, archivedSaleRelink: true, folderRemap: true, ambiguousNamesProtected: true }));
   } finally {
     await fs.promises.rm(root, { recursive: true, force: true });
   }

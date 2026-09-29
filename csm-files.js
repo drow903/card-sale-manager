@@ -21,7 +21,7 @@ function portableData(value) {
 
 function imagePaths(data) {
   const found = new Set();
-  (data.sales || []).forEach((sale) => {
+  [...(data.sales || []), ...(data.archivedSales || [])].forEach((sale) => {
     (sale.cards || []).forEach((card) => { if (card.imagePath) found.add(card.imagePath); });
     (sale.images || []).forEach((image) => { if (image.path) found.add(image.path); });
   });
@@ -83,7 +83,7 @@ function replacePaths(data, replacements) {
   const next = clone(data);
   const map = new Map(Object.entries(replacements || {}).map(([from, to]) => [String(from).toLowerCase(), to]));
   const replace = (value) => map.get(String(value || "").toLowerCase()) || value;
-  (next.sales || []).forEach((sale) => {
+  [...(next.sales || []), ...(next.archivedSales || [])].forEach((sale) => {
     (sale.cards || []).forEach((card) => { card.imagePath = replace(card.imagePath); });
     (sale.images || []).forEach((image) => { image.path = replace(image.path); image.name = path.basename(image.path || image.name || ""); });
   });

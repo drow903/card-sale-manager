@@ -39,6 +39,10 @@ state.sales.push({ id: "sale-b", name: "Past", cards: [{ ...card, id: "card-b", 
 state.sales[0].cards[0].imagePath = image.path;
 context.other = state.sales[1].cards[0];
 const attachedTwice = vm.runInContext("attachImage(other, image.path, true, state.sales[1])", context);
-if (attachedTwice) throw new Error("The same file was attached to two listings across sales.");
+if (!attachedTwice) throw new Error("An image used in a prior sale could not be reused in a new sale.");
+state.sales[1].cards.push({ ...card, id: "card-c", ref: "4", imagePath: "" });
+context.sameSaleCard = state.sales[1].cards[1];
+const attachedWithinSale = vm.runInContext("attachImage(sameSaleCard, image.path, true, state.sales[1])", context);
+if (attachedWithinSale) throw new Error("The same file was attached to two listings within one sale.");
 
-console.log(JSON.stringify({ uniquePurchaseDateAutoConfirmed: true, duplicateDateRequiresReview: true, globalFileReuseBlocked: true }));
+console.log(JSON.stringify({ uniquePurchaseDateAutoConfirmed: true, duplicateDateRequiresReview: true, crossSaleReuseAllowed: true, sameSaleReuseBlocked: true }));
