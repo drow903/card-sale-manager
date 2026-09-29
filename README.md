@@ -17,7 +17,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Matches local images using year folders, player names, card numbers, five- to eight-digit purchase-date codes (including `MMDDYY` such as `091326`), and duplicate sequence numbers.
 - Auto-confirms a purchase-date filename match when that date identifies only one copy of the card; duplicate same-date copies still require review.
 - Re-runs lookup for one card together with every card that shared its suggested image, or deliberately rechecks confirmed images across every current and past sale.
-- Enforces one image file per listing across the entire saved workspace, not only the active sale.
+- Prevents one image file from being attached to multiple listings within the same sale while allowing that image to be reused in a later sale.
 - Supports manual image attachment and native drag-out to Facebook.
 - Adds a dedicated Offers desk after Claims Desk, with list price, private purchase price, offer status, and buyer details in one place.
 - Keeps offers out of buyer orders and sales totals until accepted; rejected offers return cards to the open pool.
@@ -27,7 +27,6 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Includes Card Pulling Mode with buyer filtering, pull progress, printable pull sheets, and multi-level sorting/grouping by location or any standard or imported custom field.
 - Keeps listing references sequential after deletion, sorting, or reordering while permanent internal IDs preserve claims, offers, images, and history; references can also be frozen after posting starts.
 - Adds a notification center for offers, payment, addresses, image problems, pulling, packing, tracking, shipping, profit warnings, and portable-file issues, with direct links, snoozing, and dismissal.
-- Adds a Shipping Batch Manager for filtering and grouping orders, combined packing-slip printing, PWE labels, bulk tracking assignment, buyer-message copying, and batch shipment completion.
 - Supports bulk card deletion, bulk image confirmation, and duplicate-card labels.
 - Keeps image lookup and exclusion folders shared across sales.
 - Checks GitHub releases when the app opens and, after confirmation, downloads and installs signed release installers automatically.
@@ -47,6 +46,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Pins, reveals, removes, and clearly marks unavailable entries in the recent CSM file list.
 - Includes Live Sale Mode, a Facebook claim-comment parser, and an unrecognized-comment review queue.
 - Provides sale closing, carryover, health-check, version restore, and undo workflows.
+- Preserves removed sales in an archived-records area so card, buyer, order, and audit history remain available and the sale can be restored later.
 - Tracks private profit and inventory aging information with sortable profit columns.
 - Stores buyer profiles, tags, notes, purchase patterns, and repeat-buyer alerts.
 - Keeps buyer profiles until the user explicitly deletes them; updates and startup cleanup never remove profiles automatically.

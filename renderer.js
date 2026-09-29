@@ -64,7 +64,6 @@ let liveIndex = 0;
 let profileQuery = "";
 let packingDesignerDraft = null;
 let packingBulkSelection = new Set();
-let shippingBatchSelection = new Set();
 let notificationCategory = "all";
 let showSnoozedNotifications = false;
 let setupStep = 0;
@@ -603,7 +602,6 @@ function render() {
   renderOrders();
   renderPacking();
   renderPulling();
-  renderShippingBatches();
   renderNotifications();
   renderDashboard();
   renderLiveSale();
@@ -667,7 +665,7 @@ function saleNotifications() {
     if (!["paid", "packed", "shipped"].includes(order.status)) add(`unpaid:${encoded}`, "payment", "Order is not marked paid", buyer, "orders", { buyer });
     if (cards.length && cards.every((card) => card.pulled) && cards.some((card) => !card.packed)) add(`pulled:${encoded}`, "packing", "Pulled order is ready to pack", `${buyer} · ${cards.length} cards`, "packing", { buyer });
     if (cards.length && cards.every((card) => card.packed) && order.status !== "shipped" && order.shippingMethod === "PMWT" && !order.trackingNumber) add(`tracking:${encoded}`, "shipping", "Packed PMWT order needs tracking", buyer, "packing", { buyer, urgent: true });
-    if (cards.length && cards.every((card) => card.packed) && order.status !== "shipped") add(`ship:${encoded}`, "shipping", "Order is ready to ship", `${buyer} · ${order.shippingMethod || "shipping needed"}`, "batches", { buyer });
+    if (cards.length && cards.every((card) => card.packed) && order.status !== "shipped") add(`ship:${encoded}`, "shipping", "Order is ready to ship", `${buyer} · ${order.shippingMethod || "shipping needed"}`, "packing", { buyer });
   });
   if (portableDocument.conflict) add("csm:conflict", "data", "Portable CSM file changed elsewhere", "Open the CSM file manager before saving over another computer’s work.", "help", { urgent: true });
   if (portableDocument.missingImages) add("csm:images", "data", "Portable file has unresolved images", `${portableDocument.missingImages} image paths need review.`, "sale", { urgent: true });
@@ -1060,85 +1058,6 @@ async function previewPullSheet() {
   if (!result?.success) toast("The pull-sheet preview could not be opened.");
 }
 
-function shippingBatches(sale = activeSale()) { sale.shippingBatches ||= []; return sale.shippingBatches; }
-
-function batchCandidateBuyers() {
-  const status = $("#batchOrderStatus")?.value || "ready";
-  const shipping = $("#batchShippingFilter")?.value || "all";
-  return buyers().filter((buyer) => {
-    const order = orderFor(buyer); const cards = cardsForBuyer(buyer); const packed = cards.length && cards.every((card) => card.packed);
-    if (status === "ready" && !(packed || ["packed", "shipped"].includes(order.status))) return false;
-    if (status === "paid" && !["paid", "packed", "shipped"].includes(order.status)) return false;
-    return shipping === "all" || order.shippingMethod === shipping;
-  });
-}
-
-function renderShippingBatches() {
-  if (!$("#shippingBatchList")) return;
-  const candidates = batchCandidateBuyers();
-  shippingBatchSelection = new Set([...shippingBatchSelection].filter((buyer) => candidates.includes(buyer)));
-  $("#batchSelectAll").checked = candidates.length > 0 && candidates.every((buyer) => shippingBatchSelection.has(buyer));
-  $("#batchSelectionCount").textContent = `${shippingBatchSelection.size} selected · ${candidates.length} shown`;
-  $("#createShippingBatchBtn").disabled = shippingBatchSelection.size === 0;
-  $("#batchOrderCandidates").innerHTML = candidates.length ? candidates.map((buyer) => { const order = orderFor(buyer); const cards = cardsForBuyer(buyer); return `<label class="batch-candidate"><input type="checkbox" data-batch-buyer="${escapeHtml(buyer)}" ${shippingBatchSelection.has(buyer) ? "checked" : ""} /><span><strong>${escapeHtml(buyer)}</strong><small>${cards.length} cards · ${cards.filter((card) => card.packed).length}/${cards.length} packed</small></span><span>${escapeHtml(order.shippingMethod || "Shipping needed")}</span><span>${escapeHtml(order.status || "awaiting")}</span></label>`; }).join("") : `<div class="empty-state"><p>No orders match these batch filters.</p></div>`;
-  $("#shippingBatchList").innerHTML = shippingBatches().length ? shippingBatches().slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map((batch) => {
-    const validBuyers = batch.buyers.filter((buyer) => buyers().includes(buyer)); const tracked = validBuyers.filter((buyer) => orderFor(buyer).trackingNumber).length;
-    const batchDate = batch.shippingDate ? new Date(`${batch.shippingDate}T12:00:00`) : new Date(batch.createdAt);
-    return `<article class="shipping-batch"><div><strong>${escapeHtml(batch.name)}</strong><small>${batchDate.toLocaleDateString()} · ${validBuyers.length} orders · ${tracked} tracking numbers</small><small>${batch.shippedAt ? `Shipped ${new Date(batch.shippedAt).toLocaleString()}` : validBuyers.join(" · ")}</small></div><div class="shipping-batch-actions"><button class="secondary" data-edit-batch="${batch.id}">Tracking</button><button class="secondary" data-preview-batch="${batch.id}">Preview slips</button><button class="secondary" data-print-batch="${batch.id}">Print slips</button><button class="secondary" data-label-batch="${batch.id}">PWE labels</button><button class="secondary" data-copy-batch="${batch.id}">Copy messages</button><button class="primary" data-ship-batch="${batch.id}" ${batch.shippedAt ? "disabled" : ""}>${batch.shippedAt ? "Shipped" : "Mark shipped"}</button><button class="row-action danger-link" data-delete-batch="${batch.id}">Delete</button></div></article>`;
-  }).join("") : `<div class="empty-state"><h3>No shipping batches yet</h3><p>Select orders above to create the first batch.</p></div>`;
-}
-
-function openShippingBatch(batchId = "") {
-  const batch = shippingBatches().find((item) => item.id === batchId);
-  const names = batch ? batch.buyers.filter((buyer) => buyers().includes(buyer)) : [...shippingBatchSelection];
-  if (!names.length) return toast("Select at least one order for the batch.");
-  $("#shippingBatchId").value = batch?.id || "";
-  $("#shippingBatchDialogTitle").textContent = batch ? `Edit ${batch.name}` : "Create shipping batch";
-  $("#shippingBatchName").value = batch?.name || `Shipping batch ${shippingBatches().length + 1}`;
-  $("#shippingBatchDate").value = batch?.shippingDate || new Date().toISOString().slice(0, 10);
-  $("#shippingBatchSummary").textContent = `${names.length} orders: ${names.join(", ")}`;
-  $("#shippingBatchTracking").value = names.map((buyer) => `${buyer}: ${orderFor(buyer).trackingNumber || ""}`).join("\n");
-  $("#shippingBatchDialog").dataset.buyers = JSON.stringify(names);
-  $("#shippingBatchDialog").showModal();
-}
-
-function parseBatchTracking(names, textValue) {
-  const lines = String(textValue || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const assigned = {};
-  lines.forEach((line, index) => {
-    const colon = line.indexOf(":");
-    if (colon > 0) {
-      const typedBuyer = line.slice(0, colon).trim(); const buyer = names.find((name) => name.toLowerCase() === typedBuyer.toLowerCase());
-      if (buyer) assigned[buyer] = line.slice(colon + 1).trim();
-    } else if (names[index]) assigned[names[index]] = line;
-  });
-  return assigned;
-}
-
-function saveShippingBatch() {
-  const sale = activeSale(); const id = $("#shippingBatchId").value; const names = JSON.parse($("#shippingBatchDialog").dataset.buyers || "[]");
-  const name = $("#shippingBatchName").value.trim(); if (!name) return toast("Enter a batch name.");
-  let batch = shippingBatches(sale).find((item) => item.id === id);
-  if (!batch) { batch = { id: uid(), createdAt: new Date().toISOString(), buyers: names }; sale.shippingBatches.push(batch); }
-  Object.assign(batch, { name, shippingDate: $("#shippingBatchDate").value, buyers: names });
-  const tracking = parseBatchTracking(names, $("#shippingBatchTracking").value);
-  Object.entries(tracking).forEach(([buyer, number]) => { orderFor(buyer).trackingNumber = number; });
-  recordAudit("shipping-batch", `${id ? "Updated" : "Created"} shipping batch ${name} with ${names.length} orders`);
-  $("#shippingBatchDialog").close(); shippingBatchSelection.clear(); saveSoon(); render(); toast("Shipping batch saved.");
-}
-
-async function copyBatchMessages(batch) {
-  const messages = batch.buyers.filter((buyer) => buyers().includes(buyer)).map((buyer) => `${buyer}\n${trackingMessage(buyer)}`).join("\n\n————————\n\n");
-  if (!messages) return toast("This batch has no active orders.");
-  await copyText(messages, "Batch shipping messages copied.");
-}
-
-function markBatchShipped(batch) {
-  if (!window.confirm(`Mark all ${batch.buyers.length} orders in “${batch.name}” shipped?`)) return;
-  batch.buyers.forEach((buyer) => { if (buyers().includes(buyer)) orderFor(buyer).status = "shipped"; });
-  batch.shippedAt = new Date().toISOString(); recordAudit("shipping-batch", `Marked ${batch.name} shipped`); saveSoon(); render(); toast("Shipping batch marked shipped.");
-}
-
 function renderPacking() {
   const names = buyers();
   const select = $("#packingBuyer");
@@ -1284,11 +1203,11 @@ function renderLiveSale() {
 }
 
 function showView(view) {
-  const refresh = { command: renderCommandCenter, sale: () => { renderListings(); renderImages(); }, catalog: renderCatalog, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, pulling: renderPulling, batches: renderShippingBatches, notifications: renderNotifications, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck, help: () => {} };
+  const refresh = { command: renderCommandCenter, sale: () => { renderListings(); renderImages(); }, catalog: renderCatalog, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, pulling: renderPulling, notifications: renderNotifications, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck, help: () => {} };
   refresh[view]?.();
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `${view}View`));
-  const labels = { command: "COMMAND CENTER", sale: "SALE WORKSPACE", catalog: "CATALOG", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", pulling: "CARD PULLING", batches: "SHIPPING BATCHES", notifications: "NOTIFICATIONS", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK", help: "HELP & GUIDE" };
+  const labels = { command: "COMMAND CENTER", sale: "SALE WORKSPACE", catalog: "CATALOG", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", pulling: "CARD PULLING", notifications: "NOTIFICATIONS", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK", help: "HELP & GUIDE" };
   $("#viewEyebrow").textContent = labels[view];
 }
 
@@ -1392,7 +1311,7 @@ function finishCloseSale() {
   if ($("#closeSaleUnsoldAction").value === "new") {
     const name = $("#closeSaleName").value.trim(); if (!name) return toast("Enter a name for the carryover sale.");
     const percent = Number($("#closeSalePercent").value || 0); const cards = sale.cards.filter((card) => card.status === "available").map((card, index) => ({ ...clone(card), id: uid(), ref: String(index + 1), sourceOrder: index + 1, customOrder: index + 1, price: Math.max(0, Number(card.price) * (1 + percent / 100)), hiddenAfterCopy: false }));
-    const next = { id: uid(), name, pweShipping: sale.pweShipping, pmwtShipping: sale.pmwtShipping, template: sale.template, cards, images: clone(sale.images.filter((image) => cards.some((card) => card.imagePath === image.path))), orders: {}, bundles: [], shippingBatches: [], customFieldDefinitions: clone(customFields(sale)), versions: [], audit: [], sortMode: "spreadsheet" }; state.sales.push(next); recordAudit("close", `Created ${name} with ${cards.length} unsold cards`, {}, sale);
+    const next = { id: uid(), name, pweShipping: sale.pweShipping, pmwtShipping: sale.pmwtShipping, template: sale.template, cards, images: clone(sale.images.filter((image) => cards.some((card) => card.imagePath === image.path))), orders: {}, bundles: [], customFieldDefinitions: clone(customFields(sale)), versions: [], audit: [], sortMode: "spreadsheet" }; state.sales.push(next); recordAudit("close", `Created ${name} with ${cards.length} unsold cards`, {}, sale);
   }
   sale.closedAt = new Date().toISOString(); recordAudit("close", "Sale closed with the closing assistant"); $("#closeSaleDialog").close(); saveSoon(); render(); toast("Sale closing steps completed.");
 }
@@ -2027,7 +1946,7 @@ function deleteActiveSale() {
   undoStack.push({ deletedSale: clone(sale), deletedIndex, archivedSaleId: sale.id });
   state.sales = state.sales.filter((item) => item.id !== sale.id);
   if (!state.sales.length) {
-    const replacement = { id: uid(), name: "New sale", pweShipping: 1, pmwtShipping: 5, template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], shippingBatches: [], customFieldDefinitions: [] };
+    const replacement = { id: uid(), name: "New sale", pweShipping: 1, pmwtShipping: 5, template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [] };
     state.sales.push(replacement);
   }
   state.activeSaleId = state.sales[0].id;
@@ -2039,7 +1958,7 @@ function deleteActiveSale() {
 function renderArchivedSales() {
   const archived = state.archivedSales || [];
   const button = $("#archivedSalesBtn");
-  if (button) button.textContent = `Archived sale records${archived.length ? ` (${archived.length})` : ""}`;
+  if (button) button.innerHTML = `<span>14</span> Archived Sale Records${archived.length ? ` <b class="nav-count">${archived.length}</b>` : ""}`;
   const list = $("#archivedSalesList");
   if (!list) return;
   list.innerHTML = archived.length ? archived.map((sale) => {
@@ -2761,7 +2680,7 @@ const WALKTHROUGH_STEPS = [
   { title: "Record claims and offers", body: "Claims Desk contains every sale card. Assign a buyer, record an offer, paste comments into the parser, or select several available listings to build one bundle offer.", tips: ["Accepted bundles split the final price proportionally across every card", "Accepted offers become orders", "Audit timestamps preserve what happened"], image: "assets/help/offers.png", view: "claims" },
   { title: "Confirm buyer orders", body: "Choose shipping, validate the mailing address, record payment, and copy the buyer summary.", tips: ["PWE or PMWT can be overridden", "Costs never appear in customer messages"], image: "assets/help/orders.png", view: "orders" },
   { title: "Pack and print", body: "Check cards as they are packed, preview packing slips, print PWE thermal labels, and add tracking.", tips: ["Packed buyers are marked in the menu", "Print previews use the final PDF layout"], image: "assets/help/packing.png", view: "packing" },
-  { title: "Pull and ship in batches", body: "Card Pulling Mode sorts sold cards by location or any imported field. Shipping Batches then groups completed orders for labels, slips, tracking, messages, and shipment.", tips: ["Use two sort levels and an optional group", "The Notification Center links directly to unfinished work"], image: "assets/help/packing.png", view: "pulling" },
+  { title: "Pull, pack, and ship", body: "Card Pulling Mode sorts sold cards by location or any imported field. Packing handles verification, slips, labels, tracking, messages, and shipment.", tips: ["Use two sort levels and an optional group", "The Notification Center links directly to unfinished work"], image: "assets/help/packing.png", view: "pulling" },
   { title: "Your work is protected", body: "The green indicator confirms a local save. Daily copies rotate, while permanent update archives preserve the local workspace, portable file, sales, and buyer profiles.", tips: ["Open the data folder from the sidebar", "Updates never prune buyer profiles", "Anonymous diagnostics contain no buyer or card details"], image: "assets/brand-logo-dark.svg", view: "help" }
 ];
 
@@ -2991,7 +2910,7 @@ function applyCarryover() {
   let destination = state.sales.find((sale) => sale.id === $("#carryoverDestination").value);
   const newName = $("#carryoverNewSale").value.trim();
   if (newName) {
-    destination = { id: uid(), name: newName, pweShipping: source.pweShipping, pmwtShipping: source.pmwtShipping, template: source.template, cards: [], images: [], orders: {}, bundles: [], shippingBatches: [], customFieldDefinitions: clone(customFields(source)), versions: [], audit: [] };
+    destination = { id: uid(), name: newName, pweShipping: source.pweShipping, pmwtShipping: source.pmwtShipping, template: source.template, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: clone(customFields(source)), versions: [], audit: [] };
     state.sales.push(destination);
   }
   if (!destination) return toast("Choose a destination or enter a new sale name.");
@@ -3083,23 +3002,6 @@ function bindEvents() {
   $("#pullingCards").addEventListener("click", (event) => { const label = event.target.dataset.pullGroup; if (!label) return; const cards = pullingCards().filter((card) => pullGroupLabel(card, pullingSettings().group) === label); const value = cards.some((card) => !card.pulled); cards.forEach((card) => { card.pulled = value; card.pulledAt = value ? new Date().toISOString() : ""; }); saveSoon(); renderPulling(); renderNotifications(); });
   $("#pullingCheckAllBtn").addEventListener("click", () => { const cards = pullingCards(); const value = cards.some((card) => !card.pulled); cards.forEach((card) => { card.pulled = value; card.pulledAt = value ? new Date().toISOString() : ""; }); saveSoon(); renderPulling(); renderNotifications(); toast(value ? "Shown cards marked pulled." : "Shown cards marked unpulled."); });
   $("#pullingPrintBtn").addEventListener("click", previewPullSheet);
-  [["#batchOrderStatus"], ["#batchShippingFilter"]].forEach(([selector]) => $(selector).addEventListener("change", renderShippingBatches));
-  $("#batchSelectAll").addEventListener("change", (event) => { batchCandidateBuyers().forEach((buyer) => event.target.checked ? shippingBatchSelection.add(buyer) : shippingBatchSelection.delete(buyer)); renderShippingBatches(); });
-  $("#batchOrderCandidates").addEventListener("change", (event) => { const buyer = event.target.dataset.batchBuyer; if (!buyer) return; event.target.checked ? shippingBatchSelection.add(buyer) : shippingBatchSelection.delete(buyer); renderShippingBatches(); });
-  $("#createShippingBatchBtn").addEventListener("click", () => openShippingBatch());
-  $("#saveShippingBatchBtn").addEventListener("click", saveShippingBatch);
-  $("#shippingBatchList").addEventListener("click", async (event) => {
-    const id = event.target.dataset.editBatch || event.target.dataset.previewBatch || event.target.dataset.printBatch || event.target.dataset.labelBatch || event.target.dataset.copyBatch || event.target.dataset.shipBatch || event.target.dataset.deleteBatch;
-    const batch = shippingBatches().find((item) => item.id === id); if (!batch) return;
-    const names = batch.buyers.filter((buyer) => buyers().includes(buyer));
-    if (event.target.dataset.editBatch) openShippingBatch(id);
-    if (event.target.dataset.previewBatch) await outputPackingSlips(names, "preview");
-    if (event.target.dataset.printBatch) await outputPackingSlips(names);
-    if (event.target.dataset.labelBatch) await outputPweLabels(names.filter((buyer) => orderFor(buyer).shippingMethod === "PWE"));
-    if (event.target.dataset.copyBatch) await copyBatchMessages(batch);
-    if (event.target.dataset.shipBatch) markBatchShipped(batch);
-    if (event.target.dataset.deleteBatch && window.confirm(`Delete shipping batch “${batch.name}”? Orders and tracking numbers will be kept.`)) { activeSale().shippingBatches = shippingBatches().filter((item) => item.id !== id); saveSoon(); renderShippingBatches(); }
-  });
   $("#notificationFilters").addEventListener("click", (event) => { if (event.target.dataset.notificationCategory) { notificationCategory = event.target.dataset.notificationCategory; renderNotifications(); } });
   $("#notificationList").addEventListener("click", (event) => { const openId = event.target.dataset.openNotification; const snoozeId = event.target.dataset.snoozeNotification; const dismissId = event.target.dataset.dismissNotification; if (openId) openNotification(openId); if (snoozeId) { notificationState().snoozed[snoozeId] = Date.now() + 86400000; saveSoon(); renderNotifications(); } if (dismissId) { notificationState().dismissed[dismissId] = new Date().toISOString(); saveSoon(); renderNotifications(); } });
   $("#showSnoozedNotificationsBtn").addEventListener("click", () => { showSnoozedNotifications = !showSnoozedNotifications; renderNotifications(); });
@@ -3198,7 +3100,7 @@ function bindEvents() {
   $("#archivedSalesList").addEventListener("click", (event) => { const button = event.target.closest("[data-restore-archived-sale]"); if (button) { restoreArchivedSale(button.dataset.restoreArchivedSale); $("#archivedSalesDialog").close(); } });
   $("#createSaleBtn").addEventListener("click", (event) => {
     event.preventDefault(); const name = $("#newSaleName").value.trim(); if (!name) return;
-    const sale = { id: uid(), name, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], shippingBatches: [], customFieldDefinitions: [], additionalLookupFolders: [], excludedLookupFolders: [] };
+    const sale = { id: uid(), name, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [], additionalLookupFolders: [], excludedLookupFolders: [] };
     state.sales.push(sale); state.activeSaleId = sale.id; state.selectedBuyer = ""; resetListingView(); $("#newSaleDialog").close(); saveSoon(); render(); toast("New sale created.");
   });
   $("#saleSelect").addEventListener("change", (event) => { state.activeSaleId = event.target.value; state.selectedBuyer = ""; resetListingView(); saveSoon(); render(); });
@@ -3609,7 +3511,6 @@ async function init() {
       sale.excludedLookupFolders ||= [];
       sale.orders ||= {};
       sale.bundles ||= [];
-      sale.shippingBatches ||= [];
       sale.customFieldDefinitions ||= [];
       sale.notificationState ||= { dismissed: {}, snoozed: {} };
       sale.autoReferences ??= true;

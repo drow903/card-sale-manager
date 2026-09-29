@@ -30,21 +30,18 @@ const sale = { id: "sale", sortMode: "spreadsheet", cards: [
   { id: "c", ref: "7", sourceOrder: 3, name: "C", customFields: { box: "A" } }
 ], customFieldDefinitions: [] };
 const context = vm.createContext({ sale, state: { sales: [sale], activeSaleId: "sale" }, String, Number, Set, Map, Math, Date, uid: (() => { let value = 0; return () => `id-${++value}`; })(), recordAudit: () => {} });
-["activeSale", "customFieldKey", "customFields", "ensureCustomField", "customFieldValue", "cardSortValue", "compareCardValues", "sortedSaleCards", "referenceOrderedCards", "renumberCardReferences", "parseBatchTracking"].forEach((name) => vm.runInContext(functionSource(name), context));
+["activeSale", "customFieldKey", "customFields", "ensureCustomField", "customFieldValue", "cardSortValue", "compareCardValues", "sortedSaleCards", "referenceOrderedCards", "renumberCardReferences"].forEach((name) => vm.runInContext(functionSource(name), context));
 
 const result = vm.runInContext(`(() => {
   const field = ensureCustomField("Storage Location", "text", sale);
   const same = ensureCustomField("storage location", "text", sale);
   const changed = renumberCardReferences(sale, { force: true, audit: false });
-  const tracking = parseBatchTracking(["Alex Smith", "Jamie Doe"], "Alex Smith: 9400111899\\n9400222888");
-  return { field, sameId: same.id, changed, refs: sale.cards.map((card) => card.ref), tracking };
+  return { field, sameId: same.id, changed, refs: sale.cards.map((card) => card.ref) };
 })()`, context);
 
 if (result.field.key !== "storage_location" || result.sameId !== result.field.id) throw new Error(`Custom-field identity failed: ${JSON.stringify(result)}`);
 if (!result.changed || JSON.stringify(result.refs) !== JSON.stringify(["1", "2", "3"])) throw new Error(`Reference renumbering failed: ${JSON.stringify(result.refs)}`);
-if (result.tracking["Alex Smith"] !== "9400111899" || result.tracking["Jamie Doe"] !== "9400222888") throw new Error(`Batch tracking assignment failed: ${JSON.stringify(result.tracking)}`);
-
-["pullingView", "batchesView", "notificationsView", "customFieldsDialog", "referenceDialog", "shippingBatchDialog"].forEach((id) => {
+["pullingView", "packingView", "notificationsView", "customFieldsDialog", "referenceDialog", "archivedSalesDialog"].forEach((id) => {
   if (!html.includes(`id="${id}"`)) throw new Error(`Missing workflow UI: ${id}`);
 });
 
@@ -55,4 +52,12 @@ const htmlIds = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
 const duplicateIds = htmlIds.filter((id, index) => htmlIds.indexOf(id) !== index);
 if (duplicateIds.length) throw new Error(`Duplicate UI IDs: ${[...new Set(duplicateIds)].join(", ")}`);
 
-console.log(JSON.stringify({ customField: result.field.key, references: result.refs, tracking: result.tracking, workflowScreens: true, selectorsVerified: literalSelectors.length }));
+if (html.includes("Shipping Batches") || html.includes('id="batchesView"')) throw new Error("Shipping Batches remains visible in the application.");
+const archivedNav = html.indexOf('id="archivedSalesBtn"');
+const helpNav = html.indexOf('data-view="help"');
+if (archivedNav < 0 || helpNav < 0 || archivedNav > helpNav) throw new Error("Archived Sale Records is not directly above Help & Guide in the sidebar.");
+for (const [view, number] of [["packing", "10"], ["dashboard", "11"], ["buyers", "12"], ["health", "13"]]) {
+  if (!html.includes(`data-view="${view}"><span>${number}</span>`)) throw new Error(`${view} was not renumbered to ${number}.`);
+}
+
+console.log(JSON.stringify({ customField: result.field.key, references: result.refs, shippingBatchesRemoved: true, workflowScreens: true, selectorsVerified: literalSelectors.length }));
