@@ -1,5 +1,4 @@
 const { contextBridge, ipcRenderer } = require("electron");
-const XLSX = require("xlsx");
 
 contextBridge.exposeInMainWorld("cardSale", {
   load: () => ipcRenderer.invoke("data:load"),
@@ -19,14 +18,7 @@ contextBridge.exposeInMainWorld("cardSale", {
   nativeDiagnosticEvents: () => ipcRenderer.invoke("diagnostic:native-events"),
   saveDiagnosticReport: (report) => ipcRenderer.invoke("diagnostic:save", report),
   chooseSpreadsheet: () => ipcRenderer.invoke("dialog:spreadsheet"),
-  parseSpreadsheet: (filePath) => {
-    const workbook = XLSX.readFile(filePath, { cellDates: false });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    return {
-      name: workbook.SheetNames[0],
-      rows: XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false })
-    };
-  },
+  parseSpreadsheet: (filePath) => ipcRenderer.invoke("spreadsheet:parse", filePath),
   chooseImages: () => ipcRenderer.invoke("dialog:images"),
   chooseImageFolder: () => ipcRenderer.invoke("dialog:image-folder"),
   chooseLookupFolder: () => ipcRenderer.invoke("dialog:lookup-folder"),

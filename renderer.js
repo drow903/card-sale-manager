@@ -74,7 +74,9 @@ let recentCsmFiles = [];
 let csmBackups = [];
 let pendingCsmConflict = null;
 let catalogCloudflareConnection = { connected: false, available: true };
-let currentLicense = { configured: false, licensed: false, owner: false, catalogVisible: false };
+// The distributed build is licensed. Start closed until the main process reports
+// the saved entitlement so startup timing can never briefly expose imports.
+let currentLicense = { configured: true, licensed: false, owner: false, catalogVisible: false };
 let ownerGestureClicks = [];
 let detailedGuideContent = null;
 const runtimeErrors = [];
@@ -595,12 +597,30 @@ function renumberSidebar() {
 
 function applyLicenseEntitlements(status = {}) {
   currentLicense = { ...currentLicense, ...status };
+  const importsAllowed = !currentLicense.configured || currentLicense.licensed === true;
   const showCatalog = currentLicense.owner === true && currentLicense.catalogVisible === true;
   $$('[data-owner-catalog]').forEach((element) => element.classList.toggle("hidden", !showCatalog));
   $$(".help-reference-grid > div").filter((element) => /Publish a catalog|Customer privacy/.test(element.textContent)).forEach((element) => element.classList.toggle("hidden", !showCatalog));
   if (!showCatalog && $("#catalogView")?.classList.contains("active")) showView("sale");
+  ["#importBtn", "#addImagesBtn", "#addSingleCardBtn", "#confirmImportBtn", "#confirmAddCardBtn", "#addFolderBtn", "#autoMatchBtn", "#forceAllImageLookupBtn", "#choosePrimaryFolderBtn", "#addLookupFolderBtn", "#addExcludedFolderBtn", "#setupChooseFolderBtn"].forEach((selector) => {
+    const button = $(selector);
+    if (!button) return;
+    button.disabled = !importsAllowed;
+    button.title = importsAllowed ? "" : "Activate Card Sale Manager to import cards and images.";
+  });
+  $$('[data-action="import"], [data-action="add-card"]').forEach((button) => {
+    button.disabled = !importsAllowed;
+    button.title = importsAllowed ? "" : "Activate Card Sale Manager to add or import cards.";
+  });
   $("#licenseBtn").textContent = !currentLicense.configured ? "License setup" : currentLicense.owner ? "License: Owner" : currentLicense.licensed ? "License: Active" : "License";
   renumberSidebar();
+}
+
+function requireImportLicense() {
+  if (!currentLicense.configured || currentLicense.licensed) return true;
+  renderLicenseDialog({ ...currentLicense, message: "Activate Card Sale Manager before adding or importing cards and images." });
+  if (!$("#licenseDialog").open) $("#licenseDialog").showModal();
+  return false;
 }
 
 function renderLicenseDialog(status = currentLicense) {
@@ -1344,6 +1364,7 @@ function updateAddCardPreview() {
 }
 
 function openAddCard() {
+  if (!requireImportLicense()) return;
   ["#addCardYear", "#addCardBrand", "#addCardPlayer", "#addCardNumber", "#addCardSport", "#addCardTeams", "#addCardGrade", "#addCardFlaws", "#addCardPrice", "#addCardPurchasePrice", "#addCardPurchaseDate"].forEach((selector) => $(selector).value = "");
   updateAddCardPreview();
   $("#addCardDialog").showModal();
@@ -1351,6 +1372,7 @@ function openAddCard() {
 }
 
 function addSingleCard() {
+  if (!requireImportLicense()) return;
   const sale = activeSale();
   const draft = manualCardDraft();
   if (!draft.name) return toast("Enter the player name.");
@@ -1474,9 +1496,11 @@ function renderCustomImportColumns() {
 }
 
 async function importSpreadsheet() {
+  if (!requireImportLicense()) return;
   const path = await window.cardSale.chooseSpreadsheet();
   if (!path) return;
-  const parsed = window.cardSale.parseSpreadsheet(path);
+  const parsed = await window.cardSale.parseSpreadsheet(path);
+  if (!parsed?.success) return toast(parsed?.message || "That spreadsheet could not be imported.");
   if (!parsed.rows.length) return toast("That sheet has no card rows.");
   const headers = Object.keys(parsed.rows[0]);
   pendingSheet = { ...parsed, path, headers, mapping: autoMap(headers) };
@@ -1519,6 +1543,7 @@ function updateImportReview() {
 
 function confirmImport(event) {
   event.preventDefault();
+  if (!requireImportLicense()) return;
   if (!pendingSheet) return;
   const mapping = {};
   $$("[data-map]").forEach((select) => mapping[select.dataset.map] = select.value);
@@ -1556,6 +1581,7 @@ function confirmImport(event) {
 }
 
 async function addImages(mode = "files") {
+  if (!requireImportLicense()) return;
   const paths = mode === "folder" ? await window.cardSale.chooseImageFolder() : await window.cardSale.chooseImages();
   if (!paths.length) return;
   const sale = activeSale();
@@ -1690,6 +1716,7 @@ function detachImage(record) {
 }
 
 async function autoMatchImages(options = {}) {
+  if (!requireImportLicense()) return;
   const sale = activeSale();
   const settings = lookupSettings();
   let folder = settings.primaryFolder;
@@ -1934,6 +1961,7 @@ function renderFolderSettings() {
 }
 
 async function chooseManualImage(cardId) {
+  if (!requireImportLicense()) return;
   const card = activeSale().cards.find((item) => item.id === cardId);
   if (!card) return;
   const paths = await window.cardSale.chooseImages();
@@ -3712,7 +3740,7 @@ async function init() {
   state.importPresets ||= [];
   if (![...$("#packingPageSize").options].some((option) => option.value === "two-up")) $("#packingPageSize").add(new Option("Two half-slips per letter page", "two-up"));
   claimWords(); presets(); importPresets(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); bindEvents();
-  await refreshLicenseEntitlements(false).catch(() => applyLicenseEntitlements({ configured: false, licensed: false, owner: false, catalogVisible: false }));
+  await refreshLicenseEntitlements(false).catch(() => applyLicenseEntitlements({ configured: true, licensed: false, owner: false, catalogVisible: false }));
   resetListingView(); applyDisplayPreferences(); render();
   const csmInfo = await window.cardSale.csmStatus();
   portableDocument = csmInfo.document;

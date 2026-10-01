@@ -10,6 +10,7 @@ const os = require("os");
 const https = require("https");
 const { spawn } = require("child_process");
 const QRCode = require("qrcode");
+const XLSX = require("xlsx");
 const { automaticImageResolution, createEnvelope, imagePaths, parseEnvelope, portableData, relinkManifest, replacePaths } = require("./csm-files");
 const { writeCatalog } = require("./catalog-export");
 const { publishDirectory, testConnection } = require("./cloudflare-pages");
@@ -760,6 +761,7 @@ app.whenReady().then(() => {
   const requireCatalog = () => Boolean(licenseService?.catalogAllowed());
   const paidAllowed = () => !licenseService?.configured || Boolean(licenseService.publicStatus().licensed);
   const paidDenied = () => ({ success: false, licensed: false, message: "Activate Card Sale Manager to use this output feature." });
+  const importDenied = () => ({ success: false, licensed: false, message: "Activate Card Sale Manager before importing cards or images." });
 
   ipcMain.handle("license:status", async () => licenseService.refresh(false));
   ipcMain.handle("license:activate", async (_event, key) => licenseService.activate(key));
@@ -976,6 +978,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("dialog:spreadsheet", async () => {
+    if (!paidAllowed()) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "Choose a card spreadsheet",
       properties: ["openFile"],
@@ -987,7 +990,24 @@ app.whenReady().then(() => {
     return result.canceled ? null : result.filePaths[0];
   });
 
+  ipcMain.handle("spreadsheet:parse", async (_event, filePath) => {
+    if (!paidAllowed()) return importDenied();
+    if (!filePath || !fs.existsSync(filePath)) return { success: false, message: "That spreadsheet could not be found." };
+    try {
+      const workbook = XLSX.readFile(filePath, { cellDates: false });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      return {
+        success: true,
+        name: workbook.SheetNames[0],
+        rows: XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false })
+      };
+    } catch (error) {
+      return { success: false, message: error.message || "That spreadsheet could not be read." };
+    }
+  });
+
   ipcMain.handle("dialog:images", async () => {
+    if (!paidAllowed()) return [];
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "Choose card images",
       properties: ["openFile", "multiSelections"],
@@ -999,6 +1019,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("dialog:image-folder", async () => {
+    if (!paidAllowed()) return [];
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "Choose an image folder",
       properties: ["openDirectory"]
@@ -1013,6 +1034,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("dialog:lookup-folder", async () => {
+    if (!paidAllowed()) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "Choose the base card-image folder",
       properties: ["openDirectory"]
@@ -1021,6 +1043,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("dialog:lookup-folders", async (_event, title) => {
+    if (!paidAllowed()) return [];
     const result = await dialog.showOpenDialog(mainWindow, {
       title: title || "Choose card-image folders",
       properties: ["openDirectory", "multiSelections"]
@@ -1243,6 +1266,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("images:scan-folder", async (event, input) => {
+    if (!paidAllowed()) return [];
     const folders = (typeof input === "string" ? [input] : input?.folders || []).filter(Boolean);
     const excludedFolders = (typeof input === "string" ? [] : input?.excludedFolders || [])
       .map((folder) => path.resolve(folder).toLowerCase());
