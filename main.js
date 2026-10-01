@@ -13,6 +13,8 @@ const QRCode = require("qrcode");
 const { automaticImageResolution, createEnvelope, imagePaths, parseEnvelope, portableData, relinkManifest, replacePaths } = require("./csm-files");
 const { writeCatalog } = require("./catalog-export");
 const { publishDirectory, testConnection } = require("./cloudflare-pages");
+const { LicenseService } = require("./license-service");
+const licensingConfig = require("./licensing-config");
 
 const UPDATE_REPOSITORY = "drow903/card-sale-manager";
 
@@ -27,6 +29,7 @@ async function writeCatalogToken(token) {
 }
 
 let mainWindow;
+let licenseService;
 let allowWindowClose = false;
 let closeFallbackTimer = null;
 let saveQueue = Promise.resolve();
@@ -576,25 +579,6 @@ async function lookupCardTeams(card) {
   return { cardId: card.cardId || card.id, players: results, teams, confidence, reason: confidence === "high" ? results[0].reason : teams.length ? "Review the suggested team or teams." : results[0]?.reason || "No player was supplied." };
 }
 
-function getText(url, redirects = 0) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, { headers: { "User-Agent": `Mozilla/5.0 Card-Sale-Manager/${app.getVersion()}` }, timeout: 15000 }, (response) => {
-      if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location && redirects < 4) {
-        response.resume();
-        resolve(getText(new URL(response.headers.location, url).toString(), redirects + 1));
-        return;
-      }
-      if (response.statusCode !== 200) { response.resume(); reject(new Error(`Facebook returned status ${response.statusCode}.`)); return; }
-      let body = "";
-      response.setEncoding("utf8");
-      response.on("data", (chunk) => { body += chunk; if (body.length > 5 * 1024 * 1024) request.destroy(new Error("The Facebook page was too large.")); });
-      response.on("end", () => resolve(body));
-    });
-    request.on("timeout", () => request.destroy(new Error("The Facebook request timed out.")));
-    request.on("error", reject);
-  });
-}
-
 async function checkForUpdate() {
   try {
     const release = await getJson(`https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`);
@@ -692,7 +676,7 @@ function createWindow() {
     mainWindow.webContents.once("did-finish-load", async () => {
       await new Promise((resolve) => setTimeout(resolve, 1200));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
-      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "parser", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder"].find((view) => captureName.includes(view)) || "");
+      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder"].find((view) => captureName.includes(view)) || "");
       if (captureView === "match-review") {
         await mainWindow.webContents.executeJavaScript("autoMatchImages()");
         await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -706,8 +690,6 @@ function createWindow() {
         await mainWindow.webContents.executeJavaScript("activeSale().cards[0].hiddenAfterCopy = true; state.filter = 'copied'; document.querySelectorAll('[data-filter]').forEach((button) => button.classList.toggle('active', button.dataset.filter === 'copied')); renderListings()");
       } else if (captureView === "folders") {
         await mainWindow.webContents.executeJavaScript("renderFolderSettings(); document.querySelector('#folderSettingsDialog').showModal()");
-      } else if (captureView === "parser") {
-        await mainWindow.webContents.executeJavaScript("document.querySelector('#parseClaimsBtn').click(); document.querySelector('#claimComments').value='John Smith: mine 1\\nJane Doe: take #2\\nNoise that cannot be parsed'; document.querySelector('#previewClaimsBtn').click()");
       } else if (captureView === "quick-edit") {
         await mainWindow.webContents.executeJavaScript("showView('sale'); openQuickEdit(activeSale().cards[0].id)");
       } else if (captureView === "closing") {
@@ -773,6 +755,24 @@ app.on("child-process-gone", (_event, details) => {
 });
 
 app.whenReady().then(() => {
+  licenseService = new LicenseService({ app, safeStorage, config: licensingConfig });
+  const catalogDenied = () => ({ ok: false, denied: true, message: "Catalog is available only in the private CSM owner edition." });
+  const requireCatalog = () => Boolean(licenseService?.catalogAllowed());
+  const paidAllowed = () => !licenseService?.configured || Boolean(licenseService.publicStatus().licensed);
+  const paidDenied = () => ({ success: false, licensed: false, message: "Activate Card Sale Manager to use this output feature." });
+
+  ipcMain.handle("license:status", async () => licenseService.refresh(false));
+  ipcMain.handle("license:activate", async (_event, key) => licenseService.activate(key));
+  ipcMain.handle("license:refresh", async () => licenseService.refresh(true));
+  ipcMain.handle("license:deactivate", async () => licenseService.deactivate());
+  ipcMain.handle("license:reveal-catalog", async () => licenseService.revealCatalog());
+  ipcMain.handle("license:hide-catalog", async () => licenseService.hideCatalog());
+  ipcMain.handle("license:checkout", async () => {
+    const target = String(licensingConfig.checkoutUrl || "");
+    if (!/^https:\/\//i.test(target)) return false;
+    await shell.openExternal(target);
+    return true;
+  });
   if (!hasSingleInstanceLock) return;
   ipcMain.handle("data:load", async () => {
     if (activeCsmDocument?.envelope) {
@@ -1029,13 +1029,17 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("catalog:export", async (_event, payload) => {
+    if (!requireCatalog()) return catalogDenied();
     const result = await dialog.showOpenDialog(mainWindow, { title: "Choose where to create the interactive catalog", properties: ["openDirectory", "createDirectory"] });
     if (result.canceled || !result.filePaths[0]) return { canceled: true };
     return writeCatalog(payload || {}, result.filePaths[0], nativeImage);
   });
 
-  ipcMain.handle("catalog:cloudflare-status", async () => ({ connected: Boolean(readCatalogToken()), available: safeStorage.isEncryptionAvailable() }));
+  ipcMain.handle("catalog:cloudflare-status", async () => requireCatalog()
+    ? ({ connected: Boolean(readCatalogToken()), available: safeStorage.isEncryptionAvailable() })
+    : catalogDenied());
   ipcMain.handle("catalog:cloudflare-save", async (_event, config = {}) => {
+    if (!requireCatalog()) return catalogDenied();
     try {
       const token = String(config.token || "").trim() || readCatalogToken();
       if (!token) return { ok: false, message: "Paste a Cloudflare API token first." };
@@ -1044,8 +1048,9 @@ app.whenReady().then(() => {
       return { ...result, connected: true };
     } catch (error) { return { ok: false, message: error.message || "Could not connect to Cloudflare." }; }
   });
-  ipcMain.handle("catalog:cloudflare-forget", async () => { try { await fs.promises.unlink(catalogCredentialPath()); } catch (error) { if (error.code !== "ENOENT") throw error; } return { ok: true }; });
+  ipcMain.handle("catalog:cloudflare-forget", async () => { if (!requireCatalog()) return catalogDenied(); try { await fs.promises.unlink(catalogCredentialPath()); } catch (error) { if (error.code !== "ENOENT") throw error; } return { ok: true }; });
   ipcMain.handle("catalog:publish", async (event, payload, config = {}) => {
+    if (!requireCatalog()) return catalogDenied();
     const token = readCatalogToken(); let tempRoot = "";
     try {
       if (!token) return { ok: false, message: "Save and test a Cloudflare API token first." };
@@ -1057,7 +1062,7 @@ app.whenReady().then(() => {
     } catch (error) { return { ok: false, message: error.message || "The catalog could not be published." }; }
     finally { if (tempRoot) { try { await fs.promises.rm(tempRoot, { recursive: true, force: true }); } catch {} } }
   });
-  ipcMain.handle("catalog:open-url", async (_event, target) => { try { const url = new URL(String(target || "")); if (url.protocol !== "https:") return false; await shell.openExternal(url.toString()); return true; } catch { return false; } });
+  ipcMain.handle("catalog:open-url", async (_event, target) => { if (!requireCatalog()) return false; try { const url = new URL(String(target || "")); if (url.protocol !== "https:") return false; await shell.openExternal(url.toString()); return true; } catch { return false; } });
 
   ipcMain.handle("teams:lookup-batch", async (event, cards) => {
     const input = Array.isArray(cards) ? cards.slice(0, 1000) : [];
@@ -1109,11 +1114,43 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle("app:version", () => app.getVersion());
-  ipcMain.handle("clipboard:write", (_event, value) => { clipboard.writeText(String(value || "")); return true; });
+  ipcMain.handle("clipboard:write", (_event, value) => { if (!paidAllowed()) return false; clipboard.writeText(String(value || "")); return true; });
   ipcMain.handle("app:download-template", async () => {
     const result = await dialog.showSaveDialog(mainWindow, { title: "Save the card import template", defaultPath: "Card-Sale-Manager-Import-Template.xlsx", filters: [{ name: "Excel workbook", extensions: ["xlsx"] }] });
     if (result.canceled || !result.filePath) return false;
     await fs.promises.copyFile(path.join(__dirname, "assets", "Card-Sale-Manager-Import-Template.xlsx"), result.filePath);
+    return true;
+  });
+  ipcMain.handle("app:download-card-years", async () => {
+    const result = await dialog.showSaveDialog(mainWindow, { title: "Save the optional card-image folder starter", defaultPath: "Card Years.zip", filters: [{ name: "ZIP archive", extensions: ["zip"] }] });
+    if (result.canceled || !result.filePath) return false;
+    await fs.promises.copyFile(path.join(__dirname, "assets", "Card-Years-Starter-Folders.zip"), result.filePath);
+    return true;
+  });
+  ipcMain.handle("app:open-user-guide", async () => {
+    await shell.openExternal("https://docs.google.com/document/d/1tT7TyHapQBiV01Iwg0Z3cZ3l2aUSD4hCVXj9xj0c3to/edit?usp=sharing");
+    return true;
+  });
+  ipcMain.handle("support:email", async (_event, payload = {}) => {
+    const clean = (value, max = 4000) => String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
+    const category = clean(payload.category, 40) || "Question";
+    const subject = clean(payload.subject, 160) || "Card Sale Manager support request";
+    const lines = [
+      `Name: ${clean(payload.name, 120) || "Not provided"}`,
+      `Reply email: ${clean(payload.email, 200) || "Not provided"}`,
+      `Category: ${category}`,
+      `CSM version: ${app.getVersion()}`,
+      `Windows: ${os.release()}`,
+      "",
+      "What happened",
+      clean(payload.description, 6000) || "No description provided."
+    ];
+    if (payload.diagnostic) lines.push("", "Anonymous diagnostic", clean(JSON.stringify(payload.diagnostic, null, 2), 10000));
+    const target = `mailto:rowdysportscards@gmail.com?subject=${encodeURIComponent(`[CSM ${category}] ${subject}`)}&body=${encodeURIComponent(lines.join("\r\n"))}`;
+    try { await shell.openExternal(target); return true; } catch { return false; }
+  });
+  ipcMain.handle("app:open-card-stitcher", async () => {
+    await shell.openExternal("https://rowdysportscards.lemonsqueezy.com/checkout/buy/ce687056-a2c0-4515-9a00-7ad45e2c9358");
     return true;
   });
   ipcMain.handle("app:open-data-folder", async () => {
@@ -1125,14 +1162,6 @@ app.whenReady().then(() => {
     if (!value || !path.isAbsolute(value) || !fs.existsSync(value)) return "Folder not found.";
     return shell.openPath(value);
   });
-  ipcMain.handle("facebook:open", async (_event, target) => {
-    const value = String(target || "");
-    let parsed;
-    try { parsed = new URL(value); } catch { return false; }
-    if (parsed.protocol !== "https:" || !/(^|\.)facebook\.com$/i.test(parsed.hostname)) return false;
-    await shell.openExternal(value);
-    return true;
-  });
   ipcMain.handle("tracking:open", async (_event, target) => {
     const value = String(target || ""); let parsed;
     try { parsed = new URL(value); } catch { return false; }
@@ -1140,19 +1169,8 @@ app.whenReady().then(() => {
     if (parsed.protocol !== "https:" || !allowed.includes(parsed.hostname.toLowerCase())) return false;
     await shell.openExternal(value); return true;
   });
-  ipcMain.handle("facebook:fetch-public", async (_event, target) => {
-    const value = String(target || "");
-    let parsed;
-    try { parsed = new URL(value); } catch { return { ok: false, message: "Enter a valid Facebook link." }; }
-    if (parsed.protocol !== "https:" || !/(^|\.)facebook\.com$/i.test(parsed.hostname)) return { ok: false, message: "Only facebook.com links are supported." };
-    try {
-      const html = await getText(value);
-      if (/log in|login_form|checkpoint/i.test(html)) return { ok: false, message: "Facebook requires a login for this post. Open it and paste the comments instead." };
-      const text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&quot;/g, '"').replace(/&#039;|&apos;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
-      return { ok: true, text: text.slice(0, 250000) };
-    } catch (error) { return { ok: false, message: error.message || "Could not read that Facebook post." }; }
-  });
   ipcMain.handle("print:packing-slip", async (_event, payload) => {
+    if (!paidAllowed()) return paidDenied();
     const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
     const title = String(payload?.title || "Packing slip").replace(/[<>]/g, "");
     const body = String(payload?.html || "");
@@ -1168,6 +1186,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("packing:preview-pdf", async (_event, payload) => {
+    if (!paidAllowed()) return paidDenied();
     const title = String(payload?.title || "Packing slips").replace(/[<>]/g, "");
     const previewWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
     const styles = String(payload?.styles || "");
@@ -1188,6 +1207,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("packing:export-pdf", async (_event, payload) => {
+    if (!paidAllowed()) return paidDenied();
     const title = String(payload?.title || "Packing slips").replace(/[<>]/g, "");
     const result = await dialog.showSaveDialog(mainWindow, { title: "Save packing slips as PDF", defaultPath: `${title}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
     if (result.canceled || !result.filePath) return { success: false, canceled: true };
@@ -1280,6 +1300,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("file:start-drag", (event, filePath) => {
+    if (!paidAllowed()) return false;
     if (!filePath || !fs.existsSync(filePath)) return;
     let icon = nativeImage.createFromPath(filePath);
     if (icon.isEmpty()) icon = nativeImage.createEmpty();

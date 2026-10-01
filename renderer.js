@@ -40,6 +40,7 @@ const starterSale = {
   name: "Sample vintage sale",
   pweShipping: 1,
   pmwtShipping: 5,
+  shippingRules: { cardCountEnabled: true, maxPweCards: 3, valueEnabled: true, maxPweValue: 50 },
   template: DEFAULT_TEMPLATE,
   cards: [
     { id: uid(), ref: "1", year: "1961", set: "Heritage Stars", number: "12", name: "Jack Mercer", sport: "Baseball", teams: ["New York Stars"], teamStatus: "confirmed", condition: "VG-EX", price: 12, purchasePrice: 6, purchaseDate: "", notes: "Light corner wear", status: "available", imagePath: "" },
@@ -59,7 +60,6 @@ let undoStack = [];
 let selectedListingIds = new Set();
 let selectedMatchIds = new Set();
 let availableUpdate = null;
-let parsedClaimMatches = [];
 let liveIndex = 0;
 let profileQuery = "";
 let packingDesignerDraft = null;
@@ -74,6 +74,9 @@ let recentCsmFiles = [];
 let csmBackups = [];
 let pendingCsmConflict = null;
 let catalogCloudflareConnection = { connected: false, available: true };
+let currentLicense = { configured: false, licensed: false, owner: false, catalogVisible: false };
+let ownerGestureClicks = [];
+let detailedGuideContent = null;
 const runtimeErrors = [];
 const scrubDiagnosticText = (value) => String(value ?? "").replace(/file:\/{2,3}[^\s)]+/gi, "[local path]").replace(/[A-Za-z]:[\\/][^\n\r]*/g, "[local path]").slice(0, 2000);
 window.addEventListener("error", (event) => { runtimeErrors.push({ at: new Date().toISOString(), type: "error", message: scrubDiagnosticText(event.message || "Unknown renderer error").slice(0, 500) }); if (runtimeErrors.length > 25) runtimeErrors.shift(); });
@@ -365,16 +368,32 @@ function displayPurchaseDate(value) {
   return /^\d{8}$/.test(code) ? `${code.slice(0, 2)}/${code.slice(2, 4)}/${code.slice(4)}` : code || "—";
 }
 
+function ensureShippingRules(sale = activeSale()) {
+  sale.shippingRules ||= {};
+  sale.shippingRules.cardCountEnabled ??= true;
+  sale.shippingRules.valueEnabled ??= true;
+  sale.shippingRules.maxPweCards = Math.max(0, Math.floor(Number(sale.shippingRules.maxPweCards ?? 3)));
+  sale.shippingRules.maxPweValue = Math.max(0, Number(sale.shippingRules.maxPweValue ?? 50));
+  return sale.shippingRules;
+}
+
+function pmwtRequired(buyer, sale = activeSale()) {
+  const rules = ensureShippingRules(sale);
+  const cards = sale.cards.filter((card) => card.buyer === buyer && cardInOrder(card));
+  const value = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
+  return (rules.cardCountEnabled && cards.length > rules.maxPweCards) || (rules.valueEnabled && value > rules.maxPweValue);
+}
+
 function orderFor(buyer) {
   const sale = activeSale();
   ensureBuyerProfile(buyer);
   sale.pweShipping ??= 1;
   sale.pmwtShipping ??= sale.shipping ?? 5;
   sale.orders ||= {};
-  sale.orders[buyer] ||= { status: "shopping", shippingMethod: pweEligible(buyer) ? "" : "PMWT", discount: 0 };
+  sale.orders[buyer] ||= { status: "shopping", shippingMethod: pmwtRequired(buyer) ? "PMWT" : "", shippingAutoSelected: pmwtRequired(buyer), discount: 0 };
   const order = sale.orders[buyer];
-  if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : (pweEligible(buyer) ? "" : "PMWT");
-  if (!order.shippingMethod && !pweEligible(buyer)) order.shippingMethod = "PMWT";
+  if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : (pmwtRequired(buyer) ? "PMWT" : "");
+  if (!order.shippingMethod && pmwtRequired(buyer)) { order.shippingMethod = "PMWT"; order.shippingAutoSelected = true; }
   return order;
 }
 
@@ -383,9 +402,7 @@ function cardInOrder(card) {
 }
 
 function pweEligible(buyer) {
-  const cards = activeSale().cards.filter((card) => card.buyer === buyer && cardInOrder(card));
-  const value = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
-  return cards.length <= 3 && value <= 50;
+  return !pmwtRequired(buyer);
 }
 
 function shippingAmount(order, sale = activeSale()) {
@@ -566,6 +583,70 @@ function toast(message) {
   node._timer = setTimeout(() => node.classList.remove("show"), 2200);
 }
 
+function renumberSidebar() {
+  let index = 0;
+  $$(".sidebar nav .nav-item").forEach((button) => {
+    if (button.classList.contains("hidden")) return;
+    index += 1;
+    const number = button.querySelector(":scope > span");
+    if (number) number.textContent = String(index).padStart(2, "0");
+  });
+}
+
+function applyLicenseEntitlements(status = {}) {
+  currentLicense = { ...currentLicense, ...status };
+  const showCatalog = currentLicense.owner === true && currentLicense.catalogVisible === true;
+  $$('[data-owner-catalog]').forEach((element) => element.classList.toggle("hidden", !showCatalog));
+  $$(".help-reference-grid > div").filter((element) => /Publish a catalog|Customer privacy/.test(element.textContent)).forEach((element) => element.classList.toggle("hidden", !showCatalog));
+  if (!showCatalog && $("#catalogView")?.classList.contains("active")) showView("sale");
+  $("#licenseBtn").textContent = !currentLicense.configured ? "License setup" : currentLicense.owner ? "License: Owner" : currentLicense.licensed ? "License: Active" : "License";
+  renumberSidebar();
+}
+
+function renderLicenseDialog(status = currentLicense) {
+  const setupMessage = status.configured ? "" : "CSM is ready for licensing, but its new Lemon Squeezy product and variant IDs have not been added yet.";
+  $("#licenseMessage").textContent = status.message || setupMessage || (status.licensed ? "This computer is licensed." : "Enter the license key from your purchase email.");
+  $("#licenseDetails").innerHTML = status.licensed
+    ? `<strong>${status.owner ? "Private owner edition" : "Customer edition"}</strong><br>${escapeHtml(status.maskedKey || "Licensed")}${status.offlineUntil ? `<br>Offline access through ${escapeHtml(new Date(status.offlineUntil).toLocaleDateString())}` : ""}`
+    : "A license is stored securely for this Windows account and is never included in sale files.";
+  $("#activateLicenseBtn").classList.toggle("hidden", status.licensed);
+  $("#refreshLicenseBtn").classList.toggle("hidden", !status.licensed);
+  $("#deactivateLicenseBtn").classList.toggle("hidden", !status.licensed);
+  $("#buyLicenseBtn").classList.toggle("hidden", !status.checkoutUrl || status.licensed);
+}
+
+async function refreshLicenseEntitlements(online = false) {
+  try {
+    const status = online ? await window.cardSale.refreshLicense() : await window.cardSale.licenseStatus();
+    applyLicenseEntitlements(status);
+    renderLicenseDialog(status);
+    if (online && !status.licensed) throw new Error(status.message || "This license is not valid.");
+    return status;
+  } catch (error) {
+    renderLicenseDialog({ ...currentLicense, message: error.message || "The license could not be checked." });
+    throw error;
+  }
+}
+
+async function handleOwnerGesture(event) {
+  if (!(event.ctrlKey && event.shiftKey)) { ownerGestureClicks = []; return; }
+  const now = Date.now();
+  ownerGestureClicks = [...ownerGestureClicks.filter((time) => now - time < 5000), now];
+  if (ownerGestureClicks.length < 7) return;
+  ownerGestureClicks = [];
+  try {
+    const status = await window.cardSale.revealOwnerCatalog();
+    applyLicenseEntitlements(status);
+    catalogCloudflareConnection = await window.cardSale.catalogConnectionStatus();
+    renderCatalog();
+    toast("Private owner tools unlocked.");
+  } catch (error) {
+    await refreshLicenseEntitlements(false).catch(() => {});
+    renderLicenseDialog({ ...currentLicense, message: error.message || "A verified owner license is required." });
+    $("#licenseDialog").showModal();
+  }
+}
+
 function formatLine(card, template = activeSale().template) {
   const formattedPrice = Number(card.price || 0).toFixed(2);
   const listedFlaws = /^none$/i.test(String(card.notes || "").trim()) ? "" : card.notes || "";
@@ -610,6 +691,7 @@ function render() {
   renderHealthCheck();
   applyDisplayPreferences();
   renderCsmFileManager(false);
+  renumberSidebar();
 }
 
 function renderCommandCenter() {
@@ -967,7 +1049,7 @@ function renderOrderDetail() {
       <aside class="order-sidebar">
         <div class="totals">
           <div class="total-line"><span>Cards (${cards.length})</span><strong>${money(subtotal)}</strong></div>
-          <label>Shipping option<select id="orderShippingMethod"><option value="" ${order.shippingMethod ? "" : "selected"} disabled>Select PWE or PMWT…</option><option value="PMWT" ${order.shippingMethod === "PMWT" ? "selected" : ""}>PMWT — ${money(activeSale().pmwtShipping)}${pweEligible(buyer) ? "" : " (auto-selected by rule)"}</option><option value="PWE" ${order.shippingMethod === "PWE" ? "selected" : ""}>PWE — ${money(activeSale().pweShipping)}${pweEligible(buyer) ? "" : " (manual override)"}</option></select></label>
+          <label>Shipping option<select id="orderShippingMethod"><option value="" ${order.shippingMethod ? "" : "selected"} disabled>Select PWE or PMWT…</option><option value="PMWT" ${order.shippingMethod === "PMWT" ? "selected" : ""}>PMWT — ${money(activeSale().pmwtShipping)}${order.shippingAutoSelected ? " (auto-selected by rule)" : ""}</option><option value="PWE" ${order.shippingMethod === "PWE" ? "selected" : ""}>PWE — ${money(activeSale().pweShipping)}${pweEligible(buyer) ? "" : " (manual override)"}</option></select></label>
           <div class="total-line shipping-total"><span>${escapeHtml(order.shippingMethod || "Shipping not selected")}</span><strong>${order.shippingMethod ? money(shipping) : "—"}</strong></div>
           <label>Discount<input id="orderDiscount" type="number" min="0" step="0.01" value="${Number(order.discount || 0)}" /></label>
           <div class="total-line grand"><span>Total</span><span>${money(total)}</span></div>
@@ -1203,7 +1285,11 @@ function renderLiveSale() {
 }
 
 function showView(view) {
-  const refresh = { command: renderCommandCenter, sale: () => { renderListings(); renderImages(); }, catalog: renderCatalog, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, pulling: renderPulling, notifications: renderNotifications, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck, help: () => {} };
+  if (view === "catalog" && !(currentLicense.owner && currentLicense.catalogVisible)) {
+    toast("Catalog is available only in the private owner edition.");
+    return;
+  }
+  const refresh = { command: renderCommandCenter, sale: () => { renderListings(); renderImages(); }, catalog: renderCatalog, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, pulling: renderPulling, notifications: renderNotifications, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck, help: () => renderDetailedGuide() };
   refresh[view]?.();
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `${view}View`));
@@ -1307,13 +1393,19 @@ function openCloseSale() {
 
 function finishCloseSale() {
   const sale = activeSale(); snapshotSale("Before closing sale");
-  if ($("#closeSaleMarkShipped").checked) buyers().forEach((buyer) => { if (cardsForBuyer(buyer).every((card) => card.packed)) orderFor(buyer).status = "shipped"; });
+  const missingTracking = [];
+  if ($("#closeSaleMarkShipped").checked) buyers().forEach((buyer) => {
+    const order = orderFor(buyer);
+    if (!cardsForBuyer(buyer).every((card) => card.packed)) return;
+    if (order.shippingMethod === "PMWT" && !String(order.trackingNumber || "").trim()) { missingTracking.push(buyer); return; }
+    order.status = "shipped";
+  });
   if ($("#closeSaleUnsoldAction").value === "new") {
     const name = $("#closeSaleName").value.trim(); if (!name) return toast("Enter a name for the carryover sale.");
     const percent = Number($("#closeSalePercent").value || 0); const cards = sale.cards.filter((card) => card.status === "available").map((card, index) => ({ ...clone(card), id: uid(), ref: String(index + 1), sourceOrder: index + 1, customOrder: index + 1, price: Math.max(0, Number(card.price) * (1 + percent / 100)), hiddenAfterCopy: false }));
-    const next = { id: uid(), name, pweShipping: sale.pweShipping, pmwtShipping: sale.pmwtShipping, template: sale.template, cards, images: clone(sale.images.filter((image) => cards.some((card) => card.imagePath === image.path))), orders: {}, bundles: [], customFieldDefinitions: clone(customFields(sale)), versions: [], audit: [], sortMode: "spreadsheet" }; state.sales.push(next); recordAudit("close", `Created ${name} with ${cards.length} unsold cards`, {}, sale);
+    const next = { id: uid(), name, pweShipping: sale.pweShipping, pmwtShipping: sale.pmwtShipping, shippingRules: clone(ensureShippingRules(sale)), template: sale.template, cards, images: clone(sale.images.filter((image) => cards.some((card) => card.imagePath === image.path))), orders: {}, bundles: [], customFieldDefinitions: clone(customFields(sale)), versions: [], audit: [], sortMode: "spreadsheet" }; state.sales.push(next); recordAudit("close", `Created ${name} with ${cards.length} unsold cards`, {}, sale);
   }
-  sale.closedAt = new Date().toISOString(); recordAudit("close", "Sale closed with the closing assistant"); $("#closeSaleDialog").close(); saveSoon(); render(); toast("Sale closing steps completed.");
+  sale.closedAt = new Date().toISOString(); recordAudit("close", "Sale closed with the closing assistant"); $("#closeSaleDialog").close(); saveSoon(); render(); toast(missingTracking.length ? `${missingTracking.length} packed PMWT order${missingTracking.length === 1 ? " still needs" : "s still need"} tracking and was not marked shipped.` : "Sale closing steps completed.");
 }
 
 function presets() { state.salePresets ||= []; return state.salePresets; }
@@ -1321,13 +1413,45 @@ function presets() { state.salePresets ||= []; return state.salePresets; }
 function renderPresetDialog(selectedId = "") {
   const list = presets(); $("#presetSelect").innerHTML = `<option value="">Current sale settings</option>${list.map((preset) => `<option value="${preset.id}" ${preset.id === selectedId ? "selected" : ""}>${escapeHtml(preset.name)}</option>`).join("")}`;
   const preset = list.find((item) => item.id === selectedId); const source = preset || activeSale();
-  $("#presetName").value = preset?.name || ""; $("#presetTemplate").value = source.template || DEFAULT_TEMPLATE; $("#presetPwe").value = source.pweShipping ?? 1; $("#presetPmwt").value = source.pmwtShipping ?? 5; $("#presetClaimWords").value = (preset?.claimWords || claimWords()).join(", "); $("#deletePresetBtn").disabled = !preset;
+  const rules = ensureShippingRules(source);
+  $("#presetName").value = preset?.name || ""; $("#presetTemplate").value = source.template || DEFAULT_TEMPLATE; $("#presetPwe").value = source.pweShipping ?? 1; $("#presetPmwt").value = source.pmwtShipping ?? 5; $("#presetRuleCardsEnabled").checked = rules.cardCountEnabled; $("#presetRuleMaxCards").value = rules.maxPweCards; $("#presetRuleValueEnabled").checked = rules.valueEnabled; $("#presetRuleMaxValue").value = rules.maxPweValue; $("#presetClaimWords").value = (preset?.claimWords || claimWords()).join(", "); $("#deletePresetBtn").disabled = !preset;
 }
 
-function presetFormData() { return { name: $("#presetName").value.trim(), template: $("#presetTemplate").value.trim() || DEFAULT_TEMPLATE, pweShipping: Number($("#presetPwe").value || 0), pmwtShipping: Number($("#presetPmwt").value || 0), claimWords: $("#presetClaimWords").value.split(",").map((word) => word.trim().toLowerCase()).filter(Boolean) }; }
+function presetFormData() { return { name: $("#presetName").value.trim(), template: $("#presetTemplate").value.trim() || DEFAULT_TEMPLATE, pweShipping: Number($("#presetPwe").value || 0), pmwtShipping: Number($("#presetPmwt").value || 0), shippingRules: { cardCountEnabled: $("#presetRuleCardsEnabled").checked, maxPweCards: Math.max(0, Math.floor(Number($("#presetRuleMaxCards").value || 0))), valueEnabled: $("#presetRuleValueEnabled").checked, maxPweValue: Math.max(0, Number($("#presetRuleMaxValue").value || 0)) }, claimWords: $("#presetClaimWords").value.split(",").map((word) => word.trim().toLowerCase()).filter(Boolean) }; }
 
 function savePreset() { const data = presetFormData(); if (!data.name) return toast("Enter a preset name."); const id = $("#presetSelect").value; const existing = presets().find((item) => item.id === id); if (existing) Object.assign(existing, data); else state.salePresets.push({ id: uid(), ...data }); saveSoon(); renderPresetDialog(existing?.id || state.salePresets.at(-1).id); toast("Sale preset saved."); }
-function applyPreset() { const data = presetFormData(); snapshotSale("Before applying sale preset"); Object.assign(activeSale(), { template: data.template, pweShipping: data.pweShipping, pmwtShipping: data.pmwtShipping }); state.preferences.claimWords = data.claimWords.length ? data.claimWords : [...DEFAULT_CLAIM_WORDS]; saveSoon(); render(); toast("Preset applied to this sale."); }
+function applyPreset() { const data = presetFormData(); snapshotSale("Before applying sale preset"); Object.assign(activeSale(), { template: data.template, pweShipping: data.pweShipping, pmwtShipping: data.pmwtShipping, shippingRules: clone(data.shippingRules) }); refreshAutomaticShipping(activeSale()); state.preferences.claimWords = data.claimWords.length ? data.claimWords : [...DEFAULT_CLAIM_WORDS]; saveSoon(); render(); toast("Preset applied to this sale."); }
+
+function openShippingRules() {
+  const rules = ensureShippingRules();
+  $("#shippingRuleCardsEnabled").checked = rules.cardCountEnabled;
+  $("#shippingRuleMaxCards").value = rules.maxPweCards;
+  $("#shippingRuleValueEnabled").checked = rules.valueEnabled;
+  $("#shippingRuleMaxValue").value = rules.maxPweValue;
+  $("#shippingRulesDialog").showModal();
+}
+
+function refreshAutomaticShipping(sale = activeSale()) {
+  Object.entries(sale.orders || {}).forEach(([buyer, order]) => {
+    if (!order.shippingAutoSelected) return;
+    const required = pmwtRequired(buyer, sale);
+    order.shippingMethod = required ? "PMWT" : "";
+    order.shippingAutoSelected = required;
+  });
+}
+
+function saveShippingRules() {
+  snapshotSale("Before changing shipping rules");
+  activeSale().shippingRules = {
+    cardCountEnabled: $("#shippingRuleCardsEnabled").checked,
+    maxPweCards: Math.max(0, Math.floor(Number($("#shippingRuleMaxCards").value || 0))),
+    valueEnabled: $("#shippingRuleValueEnabled").checked,
+    maxPweValue: Math.max(0, Number($("#shippingRuleMaxValue").value || 0))
+  };
+  refreshAutomaticShipping();
+  recordAudit("settings", "Shipping rules updated");
+  $("#shippingRulesDialog").close(); saveSoon(); render(); toast("Shipping rules saved.");
+}
 
 function autoMap(headers) {
   const aliases = {
@@ -1946,7 +2070,7 @@ function deleteActiveSale() {
   undoStack.push({ deletedSale: clone(sale), deletedIndex, archivedSaleId: sale.id });
   state.sales = state.sales.filter((item) => item.id !== sale.id);
   if (!state.sales.length) {
-    const replacement = { id: uid(), name: "New sale", pweShipping: 1, pmwtShipping: 5, template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [] };
+    const replacement = { id: uid(), name: "New sale", pweShipping: 1, pmwtShipping: 5, shippingRules: { cardCountEnabled: true, maxPweCards: 3, valueEnabled: true, maxPweValue: 50 }, template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [] };
     state.sales.push(replacement);
   }
   state.activeSaleId = state.sales[0].id;
@@ -2324,7 +2448,12 @@ function restoreVersion(versionId) {
 
 async function copyText(text, message = "Copied") {
   const copied = await window.cardSale.copyText(text).catch(() => false);
-  toast(copied ? message : "The text could not be copied. Please try again.");
+  if (copied) return toast(message);
+  if (currentLicense.configured && !currentLicense.licensed) {
+    renderLicenseDialog({ ...currentLicense, message: "Activate Card Sale Manager to copy sale listings and buyer messages." });
+    return $("#licenseDialog").showModal();
+  }
+  toast("The text could not be copied. Please try again.");
 }
 
 function messageTemplateValues(buyer) {
@@ -2677,16 +2806,20 @@ const WALKTHROUGH_STEPS = [
   { title: "Welcome to Card Sale Manager", body: "Post. Sell. Track. The Command Center is your daily checklist from first claim to final shipment.", tips: ["Green actions move work forward", "Amber and red are reserved for items needing attention"], image: "assets/brand-logo-dark.svg", view: "command" },
   { title: "Import and prepare listings", body: "Import your spreadsheet, choose a saved column preset, review warnings, and match each card to its image.", tips: ["Purchase data stays private", "Copying text and dragging an image are separate actions"], image: "assets/help/workspace.png", view: "sale" },
   { title: "Preview and publish your catalog", body: "Open Catalog to edit the public title, introduction, teams, card details, and images. Export an offline folder or connect Cloudflare once and publish the latest preview directly.", tips: ["Catalogs filter by player, year, and every attached team", "Year is always the primary sort and card number is the secondary sort", "Purchase data, buyer data, and listing-copy controls are never published"], image: "assets/help/workspace.png", view: "catalog" },
-  { title: "Record claims and offers", body: "Claims Desk contains every sale card. Assign a buyer, record an offer, paste comments into the parser, or select several available listings to build one bundle offer.", tips: ["Accepted bundles split the final price proportionally across every card", "Accepted offers become orders", "Audit timestamps preserve what happened"], image: "assets/help/offers.png", view: "claims" },
+  { title: "Record claims and offers", body: "Claims Desk contains every sale card. Assign buyers, record claims or offers, and select several available listings to build one bundle offer.", tips: ["Accepted bundles split the final price proportionally across every card", "Accepted offers become orders", "Audit timestamps preserve what happened"], image: "assets/help/offers.png", view: "claims" },
   { title: "Confirm buyer orders", body: "Choose shipping, validate the mailing address, record payment, and copy the buyer summary.", tips: ["PWE or PMWT can be overridden", "Costs never appear in customer messages"], image: "assets/help/orders.png", view: "orders" },
   { title: "Pack and print", body: "Check cards as they are packed, preview packing slips, print PWE thermal labels, and add tracking.", tips: ["Packed buyers are marked in the menu", "Print previews use the final PDF layout"], image: "assets/help/packing.png", view: "packing" },
   { title: "Pull, pack, and ship", body: "Card Pulling Mode sorts sold cards by location or any imported field. Packing handles verification, slips, labels, tracking, messages, and shipment.", tips: ["Use two sort levels and an optional group", "The Notification Center links directly to unfinished work"], image: "assets/help/packing.png", view: "pulling" },
   { title: "Your work is protected", body: "The green indicator confirms a local save. Daily copies rotate, while permanent update archives preserve the local workspace, portable file, sales, and buyer profiles.", tips: ["Open the data folder from the sidebar", "Updates never prune buyer profiles", "Anonymous diagnostics contain no buyer or card details"], image: "assets/brand-logo-dark.svg", view: "help" }
 ];
 
+function activeWalkthroughSteps() { return WALKTHROUGH_STEPS.filter((item) => item.view !== "catalog" || (currentLicense.owner && currentLicense.catalogVisible)); }
+
 function renderWalkthrough() {
-  const step = WALKTHROUGH_STEPS[walkthroughStep];
-  $("#walkthroughTitle").textContent = step.title; $("#walkthroughBody").textContent = step.body; $("#walkthroughCounter").textContent = `${walkthroughStep + 1} of ${WALKTHROUGH_STEPS.length}`; $("#walkthroughImage").src = step.image; $("#walkthroughTips").innerHTML = step.tips.map((tip) => `<li>${escapeHtml(tip)}</li>`).join(""); $("#walkthroughBackBtn").disabled = walkthroughStep === 0; $("#walkthroughNextBtn").textContent = walkthroughStep === WALKTHROUGH_STEPS.length - 1 ? "Finish" : "Next";
+  const steps = activeWalkthroughSteps();
+  walkthroughStep = Math.min(walkthroughStep, steps.length - 1);
+  const step = steps[walkthroughStep];
+  $("#walkthroughTitle").textContent = step.title; $("#walkthroughBody").textContent = step.body; $("#walkthroughCounter").textContent = `${walkthroughStep + 1} of ${steps.length}`; $("#walkthroughImage").src = step.image; $("#walkthroughTips").innerHTML = step.tips.map((tip) => `<li>${escapeHtml(tip)}</li>`).join(""); $("#walkthroughBackBtn").disabled = walkthroughStep === 0; $("#walkthroughNextBtn").textContent = walkthroughStep === steps.length - 1 ? "Finish" : "Next";
 }
 
 function openWalkthrough() { walkthroughStep = 0; renderWalkthrough(); $("#walkthroughDialog").showModal(); }
@@ -2698,6 +2831,48 @@ function renderSetupStep() {
 
 function openSetupWizard() {
   setupStep = 0; const sale = activeSale(); $("#setupSellerName").value = state.preferences?.sellerName || ""; $("#setupPwePrice").value = sale.pweShipping ?? 1; $("#setupPmwtPrice").value = sale.pmwtShipping ?? 5; $("#setupImageFolder").value = lookupSettings().primaryFolder || ""; renderSetupStep(); $("#setupWizardDialog").showModal();
+}
+
+async function renderDetailedGuide(query = $("#guideSearch")?.value || "") {
+  const container = $("#detailedGuideSections");
+  if (!container) return;
+  try {
+    detailedGuideContent ||= await fetch("assets/help-guide-content.json").then((response) => {
+      if (!response.ok) throw new Error("Guide file could not be loaded.");
+      return response.json();
+    });
+    const needle = String(query || "").trim().toLowerCase();
+    const sections = detailedGuideContent.sections.filter((section) => !needle || [section.group, section.title, section.summary, ...(section.paragraphs || []), ...(section.steps || []), ...(section.tips || [])].join(" ").toLowerCase().includes(needle));
+    const groups = [...new Set(sections.map((section) => section.group))];
+    container.innerHTML = groups.map((group) => `<section class="guide-group"><h3>${escapeHtml(group)}</h3>${sections.filter((section) => section.group === group).map((section, index) => `<details class="guide-section" ${!needle && group === "Getting started" && index === 0 ? "open" : ""}><summary><span><strong>${escapeHtml(section.title)}</strong><small>${escapeHtml(section.summary)}</small></span><b>+</b></summary><div class="guide-section-body">${section.image ? `<img src="${escapeHtml(section.image)}" alt="${escapeHtml(section.title)} example" />` : ""}${(section.paragraphs || []).map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}${section.steps?.length ? `<h4>How to do it</h4><ol>${section.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}${section.tips?.length ? `<h4>Good to know</h4><ul>${section.tips.map((tip) => `<li>${escapeHtml(tip)}</li>`).join("")}</ul>` : ""}</div></details>`).join("")}</section>`).join("") || `<div class="empty-state"><h3>No guide sections match</h3><p>Try a shorter search such as images, offers, packing, or backups.</p></div>`;
+  } catch (error) {
+    container.innerHTML = `<div class="empty-state"><h3>The guide could not be loaded</h3><p>${escapeHtml(error.message || "Please restart CSM and try again.")}</p></div>`;
+  }
+}
+
+function openSupportDialog() {
+  state.preferences ||= {};
+  $("#supportName").value = state.preferences.supportName || state.preferences.sellerName || "";
+  $("#supportEmail").value = state.preferences.supportEmail || "";
+  $("#supportCategory").value = "Question";
+  $("#supportSubject").value = "";
+  $("#supportDescription").value = "";
+  $("#supportIncludeDiagnostic").checked = true;
+  $("#supportDialog").showModal();
+}
+
+async function sendSupportEmail() {
+  const subject = $("#supportSubject").value.trim();
+  const description = $("#supportDescription").value.trim();
+  if (!subject || !description) return toast("Add a subject and description first.");
+  state.preferences.supportName = $("#supportName").value.trim();
+  state.preferences.supportEmail = $("#supportEmail").value.trim();
+  saveSoon();
+  let diagnostic = null;
+  if ($("#supportIncludeDiagnostic").checked) { diagnostic = await diagnosticReport(); diagnostic.description = scrubDiagnosticText(description); }
+  const opened = await window.cardSale.openSupportEmail({ name: state.preferences.supportName, email: state.preferences.supportEmail, category: $("#supportCategory").value, subject, description, diagnostic });
+  if (!opened) return toast("Your email app could not be opened. Email rowdysportscards@gmail.com directly.");
+  $("#supportDialog").close(); toast("Support email opened.");
 }
 
 async function diagnosticReport() {
@@ -2910,7 +3085,7 @@ function applyCarryover() {
   let destination = state.sales.find((sale) => sale.id === $("#carryoverDestination").value);
   const newName = $("#carryoverNewSale").value.trim();
   if (newName) {
-    destination = { id: uid(), name: newName, pweShipping: source.pweShipping, pmwtShipping: source.pmwtShipping, template: source.template, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: clone(customFields(source)), versions: [], audit: [] };
+    destination = { id: uid(), name: newName, pweShipping: source.pweShipping, pmwtShipping: source.pmwtShipping, shippingRules: clone(ensureShippingRules(source)), template: source.template, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: clone(customFields(source)), versions: [], audit: [] };
     state.sales.push(destination);
   }
   if (!destination) return toast("Choose a destination or enter a new sale name.");
@@ -2938,54 +3113,17 @@ function applyCarryover() {
   $("#carryoverDialog").close(); selectedListingIds.clear(); saveSoon(); render(); toast(`${cards.length} cards carried into ${destination.name}.`);
 }
 
-function parseClaimComments() {
-  const configuredWords = $("#claimWordsInput").value.split(",").map((word) => word.trim().toLowerCase()).filter(Boolean);
-  state.preferences.claimWords = configuredWords.length ? [...new Set(configuredWords)] : [...DEFAULT_CLAIM_WORDS];
-  const escapedWords = [...claimWords(), "offer"].map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const claimPattern = new RegExp(`\\b(?:${escapedWords.join("|")})\\b`, "i");
-  const refPattern = new RegExp(`(?:${escapedWords.join("|")})\\s*(?:card\\s*)?#?\\s*(\\d+)`, "i");
-  const stripPattern = new RegExp(`\\b(?:${escapedWords.join("|")})\\b[\\s:#-]*(?:card\\s*)?#?\\s*\\d+.*$`, "i");
-  const lines = $("#claimComments").value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  parsedClaimMatches = lines.map((line, index) => {
-    const refMatch = line.match(refPattern) || (claimPattern.test(line) ? line.match(/#(\d+)/) : null);
-    const type = /\boffer\b/i.test(line) ? "offer" : "claim";
-    const priceMatch = type === "offer" ? line.match(/\$\s*(\d+(?:\.\d{1,2})?)/) : null;
-    const card = refMatch ? activeSale().cards.find((item) => String(item.ref) === String(Number(refMatch[1]))) : null;
-    let buyer = line.replace(stripPattern, "").replace(/^\s*\d+\s*[-:]\s*/, "").trim().replace(/[:\-]+$/, "").trim();
-    if (!buyer && claimPattern.test(line) && line.includes(":")) buyer = line.split(":")[0].trim();
-    return { id: `parsed-${index}`, line, card, buyer, type, price: priceMatch ? Number(priceMatch[1]) : "", valid: Boolean(card && buyer && (type !== "offer" || priceMatch)) };
-  });
-  $("#claimParseResults").innerHTML = parsedClaimMatches.length ? `<table><thead><tr><th>Comment</th><th>Card</th><th>Buyer</th><th>Result</th></tr></thead><tbody>${parsedClaimMatches.map((match) => `<tr><td>${escapeHtml(match.line)}</td><td>${match.card ? `${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.name)}` : "Not found"}</td><td>${escapeHtml(match.buyer || "Missing")}</td><td class="${match.valid ? "valid-text" : "cost-warning"}">${match.valid ? `${match.type}${match.type === "offer" ? ` ${money(match.price)}` : ""}` : "Needs review"}</td></tr>`).join("")}</tbody></table>` : `<p>No comment lines found.</p>`;
-  $("#applyParsedClaimsBtn").disabled = !parsedClaimMatches.some((match) => match.valid);
-  activeSale().unrecognizedComments = [...new Set([...(activeSale().unrecognizedComments || []), ...parsedClaimMatches.filter((match) => !match.valid).map((match) => match.line)])];
-  renderUnrecognizedComments(); saveSoon();
-}
-
-function renderUnrecognizedComments() {
-  const queue = activeSale().unrecognizedComments || [];
-  $("#unrecognizedComments").innerHTML = queue.length ? `<div class="queue-heading"><div><strong>Unrecognized-comment queue</strong><small>${queue.length} comment${queue.length === 1 ? "" : "s"} need manual review.</small></div><button type="button" class="row-action danger-link" data-clear-unrecognized>Clear queue</button></div>${queue.map((line, index) => `<article><span>${escapeHtml(line)}</span><div><button type="button" class="row-action" data-retry-comment="${index}">Move to editor</button><button type="button" class="row-action danger-link" data-remove-comment="${index}">Dismiss</button></div></article>`).join("")}` : `<div class="queue-empty">No unrecognized comments.</div>`;
-}
-
-function applyParsedClaims() {
-  const valid = parsedClaimMatches.filter((match) => match.valid);
-  if (!valid.length) return;
-  snapshotSale(`Before applying ${valid.length} parsed claims`);
-  valid.forEach((match) => {
-    const card = match.card;
-    card.status = match.type === "offer" ? "offered" : "claimed"; card.buyer = match.buyer; card.claimType = match.type; card.claimedAt ||= new Date().toISOString(); card.claimUpdatedAt = new Date().toISOString();
-    if (match.type === "offer") {
-      card.offerPrice = match.price; card.offerStatus = "pending"; card.offerReceivedAt = new Date().toISOString(); delete card.claimPrice; delete card.counterPrice; delete card.counteredAt;
-    } else {
-      card.claimPrice = Number(card.price); delete card.offerPrice; delete card.offerStatus; delete card.counterPrice; orderFor(match.buyer);
-    }
-    recordAudit(match.type, `${match.type === "offer" ? "Offer" : "Claim"} parsed for ${card.ref} · ${card.name}`, { cardId: card.id, buyer: match.buyer });
-  });
-  const applied = new Set(valid.map((match) => match.line)); activeSale().unrecognizedComments = (activeSale().unrecognizedComments || []).filter((line) => !applied.has(line));
-  $("#claimParserDialog").close(); saveSoon(); render(); toast(`${valid.length} parsed claims applied. Offers are waiting in the Offers tab.`);
-}
-
 function bindEvents() {
-  $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
+  $$(".nav-item[data-view]").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
+  $("#brandLockup").addEventListener("click", handleOwnerGesture);
+  $("#licenseBtn").addEventListener("click", async () => { await refreshLicenseEntitlements(false).catch(() => {}); $("#licenseDialog").showModal(); });
+  $("#activateLicenseBtn").addEventListener("click", async () => {
+    try { const status = await window.cardSale.activateLicense($("#licenseKey").value); $("#licenseKey").value = ""; applyLicenseEntitlements(status); renderLicenseDialog(status); toast("License activated."); }
+    catch (error) { renderLicenseDialog({ ...currentLicense, message: error.message || "The license could not be activated." }); }
+  });
+  $("#refreshLicenseBtn").addEventListener("click", async () => { try { await refreshLicenseEntitlements(true); toast("License verified."); } catch {} });
+  $("#deactivateLicenseBtn").addEventListener("click", async () => { if (!window.confirm("Deactivate CSM on this computer?")) return; try { const status = await window.cardSale.deactivateLicense(); applyLicenseEntitlements(status); renderLicenseDialog(status); toast("License deactivated."); } catch (error) { renderLicenseDialog({ ...currentLicense, message: error.message || "The license could not be deactivated." }); } });
+  $("#buyLicenseBtn").addEventListener("click", () => window.cardSale.openLicenseCheckout());
   $("#customFieldsBtn").addEventListener("click", () => { renderCustomFieldManager(); $("#customFieldsDialog").showModal(); });
   $("#addCustomFieldBtn").addEventListener("click", addCustomField);
   $("#customFieldList").addEventListener("change", (event) => updateCustomFieldDefinition(event.target));
@@ -3009,7 +3147,15 @@ function bindEvents() {
   $("#helpView").addEventListener("click", (event) => { const view = event.target.closest("[data-help-view]")?.dataset.helpView; if (view) showView(view); });
   $("#startWalkthroughBtn").addEventListener("click", openWalkthrough);
   $("#openSetupWizardBtn").addEventListener("click", openSetupWizard);
+  $("#openFullGuideBtn").addEventListener("click", async () => { if (await window.cardSale.openUserGuide()) toast("Full user guide opened."); });
+  $("#downloadCardYearsBtn").addEventListener("click", async () => { if (await window.cardSale.downloadCardYearFolders()) toast("Optional image-folder starter saved."); });
+  $("#cardStitcherBtn").addEventListener("click", () => window.cardSale.openCardStitcher());
+  $("#contactSupportBtn").addEventListener("click", openSupportDialog);
   $("#saveDiagnosticBtn").addEventListener("click", openDiagnosticDialog);
+  $("#guideSearch").addEventListener("input", (event) => renderDetailedGuide(event.target.value));
+  $("#expandGuideBtn").addEventListener("click", () => $$("#detailedGuideSections details").forEach((section) => section.open = true));
+  $("#collapseGuideBtn").addEventListener("click", () => $$("#detailedGuideSections details").forEach((section) => section.open = false));
+  $("#sendSupportBtn").addEventListener("click", sendSupportEmail);
   $("#saleIntroBtn").addEventListener("click", openSaleIntroduction);
   $("#saleIntroTemplate").addEventListener("input", (event) => { $("#saleIntroPreview").value = saleIntroduction(event.target.value); });
   $("#resetSaleIntroBtn").addEventListener("click", () => { $("#saleIntroTemplate").value = DEFAULT_SALE_INTRO; $("#saleIntroPreview").value = saleIntroduction(DEFAULT_SALE_INTRO); });
@@ -3100,7 +3246,7 @@ function bindEvents() {
   $("#archivedSalesList").addEventListener("click", (event) => { const button = event.target.closest("[data-restore-archived-sale]"); if (button) { restoreArchivedSale(button.dataset.restoreArchivedSale); $("#archivedSalesDialog").close(); } });
   $("#createSaleBtn").addEventListener("click", (event) => {
     event.preventDefault(); const name = $("#newSaleName").value.trim(); if (!name) return;
-    const sale = { id: uid(), name, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [], additionalLookupFolders: [], excludedLookupFolders: [] };
+    const sale = { id: uid(), name, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), shippingRules: clone(ensureShippingRules(activeSale())), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [], additionalLookupFolders: [], excludedLookupFolders: [] };
     state.sales.push(sale); state.activeSaleId = sale.id; state.selectedBuyer = ""; resetListingView(); $("#newSaleDialog").close(); saveSoon(); render(); toast("New sale created.");
   });
   $("#saleSelect").addEventListener("change", (event) => { state.activeSaleId = event.target.value; state.selectedBuyer = ""; resetListingView(); saveSoon(); render(); });
@@ -3151,7 +3297,8 @@ function bindEvents() {
     const image = event.target.closest("[data-image-path]");
     if (!image) return;
     event.preventDefault();
-    await window.cardSale.startDrag(image.dataset.imagePath);
+    const dragged = await window.cardSale.startDrag(image.dataset.imagePath);
+    if (!dragged) { if (currentLicense.configured && !currentLicense.licensed) $("#licenseDialog").showModal(); return; }
     const imageRecord = activeSale().images.find((item) => item.id === image.dataset.imageId);
     if (imageRecord) {
       imageRecord.hiddenAfterDrag = true;
@@ -3254,10 +3401,12 @@ function bindEvents() {
   $("#buyerList").addEventListener("click", (event) => { const button = event.target.closest("[data-buyer]"); if (button) { state.selectedBuyer = button.dataset.buyer; renderOrders(); } });
   $("#orderSearch").addEventListener("input", (event) => { orderDeskSettings().query = event.target.value; saveSoon(); renderOrders(); });
   $("#orderStatusFilter").addEventListener("change", (event) => { orderDeskSettings().status = event.target.value; saveSoon(); renderOrders(); });
+  $("#shippingRulesBtn").addEventListener("click", openShippingRules);
+  $("#saveShippingRulesBtn").addEventListener("click", saveShippingRules);
   $("#orderDetail").addEventListener("input", (event) => {
     if (!state.selectedBuyer) return; const order = orderFor(state.selectedBuyer);
     const rerender = ["orderShippingMethod", "orderDiscount", "orderPaymentMethod"].includes(event.target.id);
-    if (event.target.id === "orderShippingMethod") order.shippingMethod = event.target.value;
+    if (event.target.id === "orderShippingMethod") { order.shippingMethod = event.target.value; order.shippingAutoSelected = false; }
     if (event.target.id === "orderDiscount") order.discount = Number(event.target.value || 0);
     if (event.target.id === "orderPaymentMethod") order.paymentMethod = event.target.value;
     if (event.target.id === "buyerAddress") ensureBuyerProfile(state.selectedBuyer).address = event.target.value;
@@ -3336,7 +3485,7 @@ function bindEvents() {
     if (event.target.hasAttribute("data-live-next")) { liveIndex = Math.min(liveIndex + 1, Math.max(0, liveCards().length - 1)); renderLiveSale(); }
     if (event.target.hasAttribute("data-live-prev")) { liveIndex = Math.max(0, liveIndex - 1); renderLiveSale(); }
   });
-  $("#liveSaleContent").addEventListener("dragstart", async (event) => { const image = event.target.closest("[data-live-image]"); if (!image) return; event.preventDefault(); await window.cardSale.startDrag(image.dataset.liveImage); const record = activeSale().images.find((item) => item.path === image.dataset.liveImage); if (record) { record.hiddenAfterDrag = true; record.hiddenAt = new Date().toISOString(); undoStack.push({ saleId: activeSale().id, imageId: record.id }); saveSoon(); renderImages(); toast("Image dragged and hidden. Ctrl+Z to undo."); } });
+  $("#liveSaleContent").addEventListener("dragstart", async (event) => { const image = event.target.closest("[data-live-image]"); if (!image) return; event.preventDefault(); const dragged = await window.cardSale.startDrag(image.dataset.liveImage); if (!dragged) { if (currentLicense.configured && !currentLicense.licensed) $("#licenseDialog").showModal(); return; } const record = activeSale().images.find((item) => item.path === image.dataset.liveImage); if (record) { record.hiddenAfterDrag = true; record.hiddenAt = new Date().toISOString(); undoStack.push({ saleId: activeSale().id, imageId: record.id }); saveSoon(); renderImages(); toast("Image dragged and hidden. Ctrl+Z to undo."); } });
   $("#imageFolderSettingsBtn").addEventListener("click", () => { renderFolderSettings(); $("#folderSettingsDialog").showModal(); });
   $("#choosePrimaryFolderBtn").addEventListener("click", async () => { const folder = await window.cardSale.chooseLookupFolder(); if (folder) { lookupSettings().primaryFolder = folder; renderFolderSettings(); renderImages(); saveSoon(); } });
   $("#addLookupFolderBtn").addEventListener("click", async () => { const folders = await window.cardSale.chooseLookupFolders("Choose image lookup folders"); const settings = lookupSettings(); folders.forEach((folder) => { if (folder !== settings.primaryFolder && !settings.additionalFolders.includes(folder)) settings.additionalFolders.push(folder); }); if (folders.length) { renderFolderSettings(); renderImages(); saveSoon(); } });
@@ -3354,12 +3503,6 @@ function bindEvents() {
   $("#openImageFolderBtn").addEventListener("click", () => { const folder = lookupSettings().primaryFolder; if (!folder) return toast("Choose a primary image folder first."); window.cardSale.openFolder(folder); });
   $("#restoreSaleBtn").addEventListener("click", () => { renderVersionList(); $("#restoreDialog").showModal(); });
   $("#versionList").addEventListener("click", (event) => { if (event.target.dataset.restoreVersion) restoreVersion(event.target.dataset.restoreVersion); });
-  $("#parseClaimsBtn").addEventListener("click", () => { parsedClaimMatches = []; $("#claimParseResults").innerHTML = ""; $("#applyParsedClaimsBtn").disabled = true; $("#claimWordsInput").value = claimWords().join(", "); renderUnrecognizedComments(); $("#claimParserDialog").showModal(); });
-  $("#previewClaimsBtn").addEventListener("click", parseClaimComments);
-  $("#applyParsedClaimsBtn").addEventListener("click", applyParsedClaims);
-  $("#openFacebookBtn").addEventListener("click", () => window.cardSale.openFacebook($("#facebookPostUrl").value));
-  $("#fetchFacebookBtn").addEventListener("click", async () => { const button = $("#fetchFacebookBtn"); button.disabled = true; button.textContent = "Trying…"; const result = await window.cardSale.fetchFacebookPost($("#facebookPostUrl").value); button.disabled = false; button.textContent = "Try link"; if (!result.ok) return toast(result.message); $("#claimComments").value = result.text; parseClaimComments(); toast("Public post text loaded. Review the matches carefully."); });
-  $("#unrecognizedComments").addEventListener("click", (event) => { const queue = activeSale().unrecognizedComments ||= []; if (event.target.hasAttribute("data-clear-unrecognized")) queue.length = 0; if (event.target.dataset.removeComment !== undefined) queue.splice(Number(event.target.dataset.removeComment), 1); if (event.target.dataset.retryComment !== undefined) { const line = queue.splice(Number(event.target.dataset.retryComment), 1)[0]; $("#claimComments").value = [$("#claimComments").value.trim(), line].filter(Boolean).join("\n"); $("#claimComments").focus(); } renderUnrecognizedComments(); saveSoon(); });
   $("#salePresetsBtn").addEventListener("click", () => { renderPresetDialog(); $("#salePresetsDialog").showModal(); });
   $("#csmFileBtn").addEventListener("click", () => { renderCsmFileManager(true); $("#csmFileDialog").showModal(); });
   $("#openCsmBtn").addEventListener("click", () => openCsmFile());
@@ -3402,8 +3545,8 @@ function bindEvents() {
   $("#setupSkipBtn").addEventListener("click", () => { state.preferences.setupCompleted = true; saveSoon(); $("#setupWizardDialog").close(); });
   $("#setupNextBtn").addEventListener("click", () => { if (setupStep < 2) { setupStep += 1; return renderSetupStep(); } const firstSetup = !state.preferences.setupCompleted; state.preferences.sellerName = $("#setupSellerName").value.trim(); activeSale().pweShipping = Number($("#setupPwePrice").value || 0); activeSale().pmwtShipping = Number($("#setupPmwtPrice").value || 0); const folder = $("#setupImageFolder").value.trim(); if (folder) lookupSettings().primaryFolder = folder; if (state.preferences.sellerName) { ensurePackingSettings().brandName = state.preferences.sellerName; ensurePweLabelSettings().returnName ||= state.preferences.sellerName; } if (firstSetup && !$("#setupUseSample").checked) { activeSale().name = "My first sale"; activeSale().cards = []; activeSale().orders = {}; activeSale().images = []; } state.preferences.setupCompleted = true; saveSoon(); $("#setupWizardDialog").close(); render(); showView("command"); toast("Setup complete. Your defaults are saved locally."); if ($("#setupStartGuide").checked) setTimeout(openWalkthrough, 250); });
   $("#walkthroughBackBtn").addEventListener("click", () => { walkthroughStep = Math.max(0, walkthroughStep - 1); renderWalkthrough(); });
-  $("#walkthroughNextBtn").addEventListener("click", () => { if (walkthroughStep >= WALKTHROUGH_STEPS.length - 1) return $("#walkthroughDialog").close(); walkthroughStep += 1; renderWalkthrough(); });
-  $("#walkthroughOpenBtn").addEventListener("click", () => { const view = WALKTHROUGH_STEPS[walkthroughStep].view; $("#walkthroughDialog").close(); showView(view); });
+  $("#walkthroughNextBtn").addEventListener("click", () => { const steps = activeWalkthroughSteps(); if (walkthroughStep >= steps.length - 1) return $("#walkthroughDialog").close(); walkthroughStep += 1; renderWalkthrough(); });
+  $("#walkthroughOpenBtn").addEventListener("click", () => { const view = activeWalkthroughSteps()[walkthroughStep].view; $("#walkthroughDialog").close(); showView(view); });
   $("#copyDiagnosticBtn").addEventListener("click", async () => copyText(JSON.stringify(await diagnosticReport(), null, 2), "Anonymous diagnostic report copied."));
   $("#downloadDiagnosticBtn").addEventListener("click", async () => { const result = await window.cardSale.saveDiagnosticReport(await diagnosticReport()); if (result?.success) { $("#diagnosticDialog").close(); toast("Anonymous diagnostic report saved."); } });
   $("#refreshHealthBtn").addEventListener("click", () => { renderHealthCheck(); toast("Health check refreshed."); });
@@ -3507,6 +3650,7 @@ async function init() {
       if (!sale.template || legacyTemplates.has(sale.template)) sale.template = DEFAULT_TEMPLATE;
       sale.pweShipping ??= 1;
       sale.pmwtShipping ??= sale.shipping ?? 5;
+      ensureShippingRules(sale);
       sale.additionalLookupFolders ||= [];
       sale.excludedLookupFolders ||= [];
       sale.orders ||= {};
@@ -3518,7 +3662,7 @@ async function init() {
       sale.images ||= [];
       sale.versions ||= [];
       sale.audit ||= [];
-      sale.unrecognizedComments ||= [];
+      delete sale.unrecognizedComments;
       sale.sortMode ||= "spreadsheet";
       catalogSettings(sale);
       const usedImages = new Set();
@@ -3548,7 +3692,7 @@ async function init() {
         if (imageKey && usedImages.has(imageKey)) card.imagePath = "";
         else if (imageKey) usedImages.add(imageKey);
       });
-      Object.values(sale.orders).forEach((order) => { if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : ""; order.packingNotes ||= ""; order.packingSlipNote ||= ""; order.packingSlipPrintCount ||= 0; });
+      Object.values(sale.orders).forEach((order) => { if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : ""; order.shippingAutoSelected ??= false; order.packingNotes ||= ""; order.packingSlipNote ||= ""; order.packingSlipPrintCount ||= 0; });
     });
     Object.entries(state.buyerProfiles).forEach(([name, profile]) => {
       profile.tags ||= []; profile.aliases ||= []; profile.previousAddresses ||= [];
@@ -3567,7 +3711,9 @@ async function init() {
   if (firstLaunch) state.preferences.setupCompleted ??= false;
   state.importPresets ||= [];
   if (![...$("#packingPageSize").options].some((option) => option.value === "two-up")) $("#packingPageSize").add(new Option("Two half-slips per letter page", "two-up"));
-  claimWords(); presets(); importPresets(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); bindEvents(); resetListingView(); applyDisplayPreferences(); render();
+  claimWords(); presets(); importPresets(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); bindEvents();
+  await refreshLicenseEntitlements(false).catch(() => applyLicenseEntitlements({ configured: false, licensed: false, owner: false, catalogVisible: false }));
+  resetListingView(); applyDisplayPreferences(); render();
   const csmInfo = await window.cardSale.csmStatus();
   portableDocument = csmInfo.document;
   recentCsmFiles = csmInfo.recent || [];
@@ -3586,8 +3732,10 @@ async function init() {
   window.cardSale.onCatalogPublishProgress((details) => {
     $("#catalogPublishProgress").classList.remove("hidden"); $("#catalogPublishProgressBar").style.width = `${Math.max(0, Math.min(100, Number(details.percent || 0)))}%`; $("#catalogPublishProgressText").textContent = details.message || "Publishing catalog…";
   });
-  catalogCloudflareConnection = await window.cardSale.catalogConnectionStatus();
-  renderCatalog();
+  if (currentLicense.owner && currentLicense.catalogVisible) {
+    catalogCloudflareConnection = await window.cardSale.catalogConnectionStatus();
+    renderCatalog();
+  }
   installedVersion = await window.cardSale.version();
   $("#appVersion").textContent = `Version ${installedVersion}`;
   if (recoveryNotice) toast(recoveryNotice);

@@ -1,0 +1,424 @@
+{
+  "title": "Card Sale Manager User Guide",
+  "subtitle": "A practical walkthrough from your first spreadsheet to the last shipped order",
+  "sections": [
+    {
+      "id": "start-here",
+      "group": "Getting started",
+      "title": "Start here",
+      "summary": "Activate CSM, run the setup wizard, and decide whether to practice with the sample sale.",
+      "image": "assets/help-example-cards.png",
+      "paragraphs": [
+        "Card Sale Manager keeps your sales, buyers, images, and backups on your computer. You do not need OneDrive or any other cloud service to use it.",
+        "Your license can be active on two computers at the same time. You can use more computers over time, but you will need to deactivate one of the two currently authorized computers before activating another.",
+        "The sample sale is safe to keep. Use it to click around, try an offer, print a packing slip, or practice closing a sale. It stays available until you deliberately remove it."
+      ],
+      "steps": [
+        "Open License in the sidebar and paste the license key from your purchase email.",
+        "Choose Activate. If this is your third active computer, deactivate CSM on an older computer first.",
+        "Run the setup wizard. Enter your seller name, shipping prices, and primary image folder if you already have one.",
+        "Keep the sample sale while you learn. Create your real sale when you are ready."
+      ],
+      "tips": [
+        "CSM automatically checks for updates. Confirm the update when prompted and let the installer finish.",
+        "Updates create a protected backup before installation and do not remove sales or buyer profiles."
+      ]
+    },
+    {
+      "id": "organize-images",
+      "group": "Getting started",
+      "title": "Organize card images",
+      "summary": "Use year folders and descriptive filenames so automatic matching has enough information.",
+      "paragraphs": [
+        "CSM works with your existing folders. The optional Card Years download is only a starter. If you use it, extract it somewhere permanent, such as Documents\\Card Images, instead of leaving it in Downloads.",
+        "A sport folder is helpful when you sell several sports, but it is not required. The recommended setup is Main Image Folder, then Sport, then Year. CSM can also work with year folders directly under the main folder.",
+        "Spaces, hyphens, and underscores in filenames are fine. Matching improves when the filename includes the card number, player name, and purchase date.",
+        "CSM currently supports one image file per card. If you want to show the front, back, and close-up details, CardStitcher can combine those photos into one finished image before you add it to CSM."
+      ],
+      "steps": [
+        "Create or choose one main image folder.",
+        "Optionally add Baseball, Basketball, Football, and Hockey folders.",
+        "Create year folders inside them, such as Baseball\\1961.",
+        "Name an image like 20 Robin Roberts 09132026.jpg when the sheet lists 1961, Robin Roberts, card 20, and a purchase date of 09/13/2026.",
+        "For exact duplicate cards bought on the same date, add a final sequence number: 20 Robin Roberts 09132026 1.jpg and 20 Robin Roberts 09132026 2.jpg."
+      ],
+      "tips": [
+        "The date code in a filename can be MMDDYYYY or MDDYYYY. CSM compares it with the purchase date from the spreadsheet.",
+        "One image may be used again in a later sale, but CSM will not attach the same file to two listings in the same sale.",
+        "CardStitcher is available at https://rowdysportscards.lemonsqueezy.com/checkout/buy/ce687056-a2c0-4515-9a00-7ad45e2c9358."
+      ]
+    },
+    {
+      "id": "prepare-sheet",
+      "group": "Complete workflow",
+      "title": "Prepare the spreadsheet",
+      "summary": "Put one physical card on each row and keep private purchase information in the same file.",
+      "paragraphs": [
+        "Use one row for every physical card. If you have three identical copies, enter three rows even when every visible detail is the same. CSM uses those separate rows to track images, claims, buyers, and profit correctly.",
+        "The standard columns are Year, Brand, Player, Number, Flaw(s), Grade, Claim Price, Purchase Price, and Purchase Date. Sport and Team(s) are useful additions, and any extra column can become a custom field.",
+        "Claim and purchase prices may be entered as 7.00 or $7.00. Commas are fine. A blank flaw cell and the word None both disappear from the customer-facing listing. Unknown purchase information may be blank or zero."
+      ],
+      "steps": [
+        "Download the current import template from the CSM sidebar if you do not already have a sheet.",
+        "Enter one card per row. Keep the player name and year consistent with the matching image.",
+        "Use MM/DD/YYYY for purchase dates when possible. Excel date formatting is also accepted.",
+        "Add storage details such as Box, Row, Binder, or Location as extra columns if you want to sort cards while pulling orders.",
+        "Save the workbook as XLSX, CSV, or TSV."
+      ],
+      "tips": [
+        "Purchase price and purchase date stay private. They appear in your workspace and profit tools, never in copied listings or buyer messages.",
+        "Save a column preset after your first import if you plan to reuse the same spreadsheet layout."
+      ]
+    },
+    {
+      "id": "import-review",
+      "group": "Complete workflow",
+      "title": "Create a sale and review the import",
+      "summary": "Map the sheet, fix warnings, and check the listing preview before adding cards.",
+      "image": "assets/help/workspace.png",
+      "paragraphs": [
+        "Create a new sale before importing. Give it a name you will recognize later, such as October Vintage Sale. CSM keeps each sale separate while preserving buyer history across sales.",
+        "The import window guesses which spreadsheet column belongs to each CSM field. Check the mapping rather than assuming every guess is correct. The review screen catches missing names, years, prices, and other problems before they enter the sale.",
+        "The listing preview shows exactly what will be copied to Facebook. Blank grades, numbers, and flaws are cleaned up automatically so the final line does not contain awkward spaces or empty punctuation."
+      ],
+      "steps": [
+        "Choose New sale and enter the sale name and shipping prices.",
+        "Choose Import spreadsheet and select the workbook.",
+        "Check every mapped column. Mark useful extra columns as custom fields.",
+        "Review warnings and correct the source sheet or mapping when needed.",
+        "Check the listing preview, then finish the import."
+      ],
+      "tips": [
+        "A normal listing may read: 1961 Topps Robin Roberts #20 VG (Light corner wear) - $7.00.",
+        "Use Bulk edit in Sale Workspace when several imported rows need the same year, brand, grade, flaw, or price change."
+      ]
+    },
+    {
+      "id": "match-images",
+      "group": "Complete workflow",
+      "title": "Match and review images",
+      "summary": "Let CSM find likely images, then spend your time only on uncertain or conflicting matches.",
+      "paragraphs": [
+        "Choose Image lookup folders the first time you use a computer. Your primary, additional, and excluded folders carry from sale to sale.",
+        "A unique year, player, card number, and purchase-date match should confirm automatically. CSM sends uncertain matches to review when several files could represent the same card or when an image was suggested for more than one listing.",
+        "The same file cannot be attached to multiple listings within one sale. If CSM finds a conflict, both cards stay unconfirmed until you choose separate images."
+      ],
+      "steps": [
+        "Open Sale Workspace and choose Auto-match card images.",
+        "Watch the progress count while CSM scans the folders.",
+        "Confirm uncertain matches individually or select several review rows at once.",
+        "Use Add image or the image dropdown to assign a file manually.",
+        "Use Re-run lookup on one card when its suggestion is wrong. Use the full recheck only when you want CSM to reconsider current and past matches."
+      ],
+      "tips": [
+        "A 100 percent match should not need manual approval unless the file conflicts with another listing.",
+        "Manual matches are remembered when the same card is carried into another sale."
+      ]
+    },
+    {
+      "id": "post-live",
+      "group": "Complete workflow",
+      "title": "Post cards with Live Sale Mode",
+      "summary": "Drag the image first, then copy the listing so CSM advances in the correct order.",
+      "image": "assets/help/workspace.png",
+      "paragraphs": [
+        "Live Sale Mode is the easiest way to post a large sale one card at a time. It shows one image and one ready-to-paste listing without the rest of the workspace getting in the way.",
+        "Always drag the image into Facebook before clicking Copy listing. Copy listing hides that text and advances CSM to the next card. Dragging the image and copying the text are separate actions, so one does not hide the other.",
+        "Wait until Facebook finishes attaching the image before pasting the listing. That small pause prevents the text from being posted against the wrong image when Facebook is slow."
+      ],
+      "steps": [
+        "Open Live Sale Mode and confirm the correct card is on screen.",
+        "Drag the image into the Facebook comment or post composer.",
+        "Wait for the image thumbnail to finish loading in Facebook.",
+        "Choose Copy listing, paste the text, and submit the Facebook post or comment.",
+        "Repeat with the next card. Use Ctrl+Z in CSM if you hide a listing or image by mistake."
+      ],
+      "tips": [
+        "Use Sale Workspace instead when you need to search, bulk edit, reorder, or compare several cards at once.",
+        "CSM does not post to Facebook automatically. You remain in control of every image and listing."
+      ]
+    },
+    {
+      "id": "claims-offers",
+      "group": "Complete workflow",
+      "title": "Record claims and offers",
+      "summary": "Assign buyers manually, keep pending offers separate, and give full-price claims priority.",
+      "image": "assets/help/offers.png",
+      "paragraphs": [
+        "You may enter claims while the sale is active or enter them afterward. Live entry keeps Buyer Orders current; batch entry can be easier when comments arrive quickly.",
+        "Use the buyer's full Facebook display name when possible. It is not required, but it reduces duplicate profiles. If the same person uses another name later, add it as an alias to the existing profile.",
+        "A full-price claim takes priority over an earlier pending offer unless you already told the first buyer that the offer was accepted. Once you accept an offer, treat it as a completed agreement rather than an open negotiation."
+      ],
+      "steps": [
+        "Find the card in Claims Desk.",
+        "Check Claim for a full-price claim or Offer for a lower proposed price.",
+        "Enter the buyer and offer price when needed, then save the assignment.",
+        "Open Offers to accept, reject, or counter pending offers.",
+        "For a bundle offer, select the cards in Sale Workspace, assign the buyer and total offer, then review it in Offers. An accepted bundle spreads the discount proportionally across the cards."
+      ],
+      "tips": [
+        "Rejecting an offer returns the card to the open pool and removes that buyer from the card.",
+        "Use the editable counter message when you want CSM to include the listed price, original offer, and your counter."
+      ]
+    },
+    {
+      "id": "finish-order",
+      "group": "Complete workflow",
+      "title": "Confirm the order and collect payment",
+      "summary": "Make sure the buyer is finished shopping before sending the final total.",
+      "image": "assets/help/orders.png",
+      "paragraphs": [
+        "Before choosing shipping or copying a payment summary, ask the buyer whether they want anything else. This avoids sending a total that immediately becomes outdated.",
+        "Shipping rules can select PMWT when an order exceeds a card-count limit, an order-value limit, or either one. The default is more than three cards or more than $50, but every seller may change or disable those limits. You may override the result for an individual buyer.",
+        "Addresses from PayPal or Venmo are usually fine, but confirm the address with the buyer before shipping. Record payment in CSM only after the payment service shows that the money was received."
+      ],
+      "steps": [
+        "Ask the buyer to confirm they are finished shopping.",
+        "Open Buyer Orders and select the buyer.",
+        "Choose PWE or PMWT. Review any automatic PMWT recommendation before overriding it.",
+        "Confirm the mailing address with the buyer and save it to the profile.",
+        "Copy the order summary or payment-due message.",
+        "Verify the payment in Cash, PayPal, Venmo, or the other service, then record the method and mark the order paid."
+      ],
+      "tips": [
+        "Customer-facing messages use the buyer's first name. Purchase costs remain private.",
+        "Message templates can be edited for payment due, payment received, shipped, delayed, order confirmation, and counter offers."
+      ]
+    },
+    {
+      "id": "pull-pack-ship",
+      "group": "Complete workflow",
+      "title": "Pull pack and ship",
+      "summary": "Find cards in storage, verify every item, and finish the order with the right paperwork.",
+      "image": "assets/help/packing.png",
+      "paragraphs": [
+        "Card Pulling Mode is useful when a sale contains hundreds of cards. Sort by buyer, year, location, or any custom field you imported. Mark cards as pulled as you remove them from storage.",
+        "Packing slips are optional for every order, although buyers usually appreciate receiving one. You can customize the design, logo, links, QR code, notes, and included sections, then preview a single slip or a combined batch before printing.",
+        "PMWT orders need a tracking number before CSM will mark them shipped. PWE orders may be marked shipped without tracking and can still use the normal shipped message."
+      ],
+      "steps": [
+        "Open Pull Cards and choose the sort order that matches your storage system.",
+        "Mark each card pulled, then open Packing and choose the buyer.",
+        "Compare every physical card with the reference, player, year, brand, and image shown in CSM.",
+        "Print a packing slip or PWE label if desired. PWE labels support portrait and landscape 4 by 6 layouts.",
+        "Check every packed card. Enter tracking for PMWT and complete the package.",
+        "Copy the shipped message. For PWE, the message simply omits the tracking line."
+      ],
+      "tips": [
+        "Use Print all slips when several orders are ready. Filters let you limit the batch by payment, packing, shipping method, address, or print history.",
+        "Keep private packing notes separate from the buyer-facing note printed on the slip."
+      ]
+    },
+    {
+      "id": "close-sale",
+      "group": "Complete workflow",
+      "title": "Close and preserve the sale",
+      "summary": "Wait until every order is shipped, then carry over unsold cards and preserve the record.",
+      "paragraphs": [
+        "Keep the sale active until every order is marked shipped. The Sale Closing Assistant shows unpaid buyers and incomplete packages so you can deal with them before closing.",
+        "Unsold cards may stay in the closed sale or move into a new carryover sale. Carried cards keep their details and remembered image matches, and you may adjust all carryover prices by a percentage.",
+        "Removing a sale from the active list does not erase its history. CSM moves the record to Archived Sale Records so buyer histories, orders, and reporting data remain available."
+      ],
+      "steps": [
+        "Check Notifications and Health Check for unpaid, unpacked, missing-address, or missing-tracking items.",
+        "Confirm every order is marked shipped.",
+        "Choose Close sale in Sale Workspace.",
+        "Choose what should happen to unsold cards and finish the closing steps.",
+        "Remove the closed sale from the active list only when you no longer need it there. Its protected record remains archived."
+      ],
+      "tips": [
+        "A packed PMWT order without tracking is not marked shipped by the closing assistant.",
+        "Restore earlier version can undo supported imports, bulk edits, claims, and deletions when you need to return to a previous sale snapshot."
+      ]
+    },
+    {
+      "id": "tab-command",
+      "group": "Sidebar reference",
+      "title": "Command Center",
+      "summary": "See what needs attention and what can move forward next.",
+      "paragraphs": [
+        "Command Center is the best place to start a work session. It summarizes the active sale, puts urgent problems first, and links directly to cards or orders that need action.",
+        "Use Needs attention for problems such as unresolved images, pending offers, unpaid orders, or incomplete packing. Ready for the next step shows work that can move forward without another decision."
+      ],
+      "tips": ["Refresh after a large batch of edits if you want to rebuild the checklist immediately."]
+    },
+    {
+      "id": "tab-notifications",
+      "group": "Sidebar reference",
+      "title": "Notifications",
+      "summary": "Keep follow-ups in one place without losing the underlying card or order.",
+      "paragraphs": [
+        "Notifications collects offers, payment issues, image problems, missing addresses, tracking reminders, and other unfinished work. Opening an item takes you to the relevant screen.",
+        "Snooze an item when it is real but cannot be handled today. Dismiss it when it no longer matters. You can restore dismissed notifications later."
+      ]
+    },
+    {
+      "id": "tab-workspace",
+      "group": "Sidebar reference",
+      "title": "Sale Workspace",
+      "summary": "Manage every listing, image, custom field, order, and bulk change in the active sale.",
+      "paragraphs": [
+        "Sale Workspace is the main editing screen. Search and filter cards, copy individual listings, change images, select several rows, build bundles, bulk edit, review teams, carry over unsold cards, and close the sale.",
+        "The Post queue follows listing order. Copying listing text hides only the listing. Dragging an image hides only the image. Ctrl+Z restores the most recently hidden item."
+      ],
+      "tips": [
+        "Use References to renumber cards safely after deletions or reordering.",
+        "Use Custom fields for storage location, consignor, source, parallel, or any detail your normal sheet includes."
+      ]
+    },
+    {
+      "id": "tab-live",
+      "group": "Sidebar reference",
+      "title": "Live Sale Mode",
+      "summary": "Post one card at a time with fewer distractions.",
+      "paragraphs": [
+        "Live Sale Mode shows the next available, uncopied listing. Use the arrow buttons or keyboard controls to move through cards.",
+        "Drag the image first. After Facebook attaches it, copy and paste the listing. Copying advances CSM to the next card."
+      ]
+    },
+    {
+      "id": "tab-claims",
+      "group": "Sidebar reference",
+      "title": "Claims Desk",
+      "summary": "Assign a buyer, choose claim or offer, and keep a timestamped history.",
+      "paragraphs": [
+        "Every sale card appears automatically. A claim uses the listed price. An offer stores the proposed price and waits for a decision in Offers.",
+        "Clicking recent activity jumps to the related card. Use Clear when an assignment was entered by mistake or when a buyer backs out before an agreement is final."
+      ]
+    },
+    {
+      "id": "tab-offers",
+      "group": "Sidebar reference",
+      "title": "Offers",
+      "summary": "Compare list price, offer, purchase cost, and decision status.",
+      "paragraphs": [
+        "Sort and filter offers by card, buyer, price, cost, margin, or status. Accept adds the card to the buyer's order at the agreed price. Reject returns it to the available pool. Counter creates an editable message using the listed, offered, and counter prices.",
+        "Bundle offers appear here too. When accepted, CSM distributes the bundle discount proportionally so profit remains accurate at the card level."
+      ]
+    },
+    {
+      "id": "tab-pull",
+      "group": "Sidebar reference",
+      "title": "Pull Cards",
+      "summary": "Sort sold cards in the same order as your boxes, binders, or shelves.",
+      "paragraphs": [
+        "Choose a primary sort, secondary sort, and optional group. Imported custom fields are available alongside buyer, year, player, and reference.",
+        "Use Mark shown pulled after completing a filtered group. The pull sheet provides a printable version when you do not want the computer beside your storage area."
+      ]
+    },
+    {
+      "id": "tab-orders",
+      "group": "Sidebar reference",
+      "title": "Buyer Orders",
+      "summary": "Confirm totals, shipping, addresses, payment, and buyer messages.",
+      "paragraphs": [
+        "The buyer list scrolls separately and can be filtered by payment, packing, shipping, address, or attention status. The selected order shows images, filenames, accepted prices, totals, notes, and buyer history.",
+        "Open Shipping rules to change the automatic PMWT thresholds. Use full buyer names where possible and save alternate Facebook names as aliases rather than creating duplicate profiles."
+      ]
+    },
+    {
+      "id": "tab-packing",
+      "group": "Sidebar reference",
+      "title": "Packing",
+      "summary": "Verify cards, print paperwork, record tracking, and finish packages.",
+      "paragraphs": [
+        "Choose a buyer and check each card as it enters the package. Packed appears beside completed buyers in the buyer menu.",
+        "Customize packing slips and PWE labels before printing. Use preview when page count matters. Combined printing creates one batch from the buyers and filters you select."
+      ]
+    },
+    {
+      "id": "tab-profit",
+      "group": "Sidebar reference",
+      "title": "Profit Dashboard",
+      "summary": "Review revenue, cost, profit, buyer interests, and aging inventory.",
+      "paragraphs": [
+        "The dashboard uses private purchase cost and accepted sale prices. Sort the card table by card, buyer, revenue, cost, or profit.",
+        "Inventory aging depends on purchase date. Blank or unknown dates stay in a separate group until you add them. None of this information appears in customer messages."
+      ]
+    },
+    {
+      "id": "tab-profiles",
+      "group": "Sidebar reference",
+      "title": "Buyer Profiles",
+      "summary": "Keep addresses, aliases, tags, notes, history, and repeat-buyer interests together.",
+      "paragraphs": [
+        "Profiles follow the buyer across sales. Add aliases when one person uses different Facebook display names. Tags such as Vintage, Yankees, or Set Builder make the directory easier to search.",
+        "Delete a profile when it was created by mistake, such as a rejected offer from someone who never became a customer. Historical sale records remain protected."
+      ]
+    },
+    {
+      "id": "tab-health",
+      "group": "Sidebar reference",
+      "title": "Health Check",
+      "summary": "Find data problems before they interrupt posting, payment, or shipping.",
+      "paragraphs": [
+        "Health Check flags missing prices, image conflicts, below-cost sales, incomplete buyer information, and other issues. Open a result to jump to the related card or order.",
+        "Run it before posting, before requesting payment, and again before closing a sale."
+      ]
+    },
+    {
+      "id": "tab-archive",
+      "group": "Sidebar reference",
+      "title": "Archived Sale Records",
+      "summary": "Remove clutter without erasing buyer and order history.",
+      "paragraphs": [
+        "Removing a sale moves its protected record here. Buyer profiles, purchase history, card details, and reporting totals continue to use the archived data.",
+        "Restore a sale when you need it back in the active-sale menu."
+      ]
+    },
+    {
+      "id": "tab-help",
+      "group": "Sidebar reference",
+      "title": "Help and Guide",
+      "summary": "Reopen setup, search this guide, download files, and prepare a support request.",
+      "paragraphs": [
+        "Use this screen to restart the guided walkthrough, download the import template or optional year folders, open the always-current online user guide, run anonymous diagnostics, or email support.",
+        "The diagnostic report contains app and system versions, settings, counts, and recent technical errors. It does not include buyer names, addresses, card names, message text, prices, or image paths."
+      ]
+    },
+    {
+      "id": "portable-files",
+      "group": "Files and safety",
+      "title": "Use a portable CSM file",
+      "summary": "Move one workspace between computers without turning CSM into a cloud service.",
+      "paragraphs": [
+        "A portable .csm file contains your CSM workspace. Store it locally, on a USB or network drive, or in OneDrive, Google Drive, Dropbox, or another synced folder.",
+        "Never edit the same file on two computers at once. Close CSM on the first computer and wait for the storage service to finish syncing before opening it on the second. CSM warns about locks and newer copies, but waiting for sync is still important.",
+        "Images remain separate files. If image paths differ on another computer, use the portable-file manager to choose the image folder and relink them."
+      ],
+      "steps": [
+        "Choose Portable CSM file in the sidebar.",
+        "Save or Save as, then choose the folder where the file should live.",
+        "Close CSM before moving to another computer.",
+        "Wait for cloud syncing to complete, then open the .csm file on the other computer.",
+        "Relink the image folder if CSM reports missing files."
+      ]
+    },
+    {
+      "id": "backups-updates",
+      "group": "Files and safety",
+      "title": "Backups updates and recovery",
+      "summary": "Understand what CSM saves and where to look when something goes wrong.",
+      "paragraphs": [
+        "CSM saves locally as you work and shows Changes saved locally in the lower-left corner. Daily rotating backups protect recent work. Before an update, CSM creates a permanent update archive of the local workspace and any open portable file.",
+        "Updates should not remove sales or buyer profiles. If the current workspace ever looks wrong, stop entering new data until you inspect the portable file, update archive, and daily backups. Restoring one copy can replace newer work, so protect the current file first.",
+        "Open data folder shows the local files CSM manages. Restore earlier version returns only the active sale to an earlier snapshot. The portable-file manager handles full-workspace recovery copies."
+      ]
+    },
+    {
+      "id": "support",
+      "group": "Files and safety",
+      "title": "Get help when something breaks",
+      "summary": "Send a useful report without exposing buyer or card information.",
+      "paragraphs": [
+        "Start with Health Check. If the problem continues, open Help and Guide and choose Contact support. Describe what you clicked, what you expected, and what happened instead.",
+        "Include the anonymous diagnostic when the problem is technical. CSM adds its version and your Windows version automatically. The diagnostic excludes names, addresses, card details, prices, notes, image paths, and message contents.",
+        "The support button opens a prefilled email to rowdysportscards@gmail.com. If your computer has no default email application, copy the information into your normal email service."
+      ],
+      "tips": [
+        "A useful description is specific: I imported 212 rows, chose Auto-match, and the progress stopped at 87 of 212.",
+        "Do not send a buyer address, payment login, password, or full license key."
+      ]
+    }
+  ]
+}
