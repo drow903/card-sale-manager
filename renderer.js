@@ -17,7 +17,7 @@ const PACKING_SECTIONS = [
 ];
 const DEFAULT_PACKING_DESIGN = {
   name: "Standard branded slip", pageSize: "letter", accent: "#19b56b", brandName: "Card Sale Manager", contact: "Post. Sell. Track.", logoPath: "",
-  socialLink: "", paymentLink: "", feedbackLink: "", upcomingLink: "", qrType: "social", qrUrl: "",
+  socialLink: "", paymentLink: "", feedbackLink: "", upcomingLink: "", qrType: "social", qrUrl: "", extraLinks: [],
   header: "Thanks for joining the sale!", thanks: "Thank you for your purchase. I appreciate your business!", returnPolicy: "Please contact me if anything in your order needs attention.", footer: "Packed with care.",
   showAddress: true, showOrderNumber: true, showPayment: true, showShipping: true, showPrices: true, showDetails: true, showThumbnails: false, includeLabel: false,
   sectionOrder: PACKING_SECTIONS.map(([id]) => id)
@@ -42,6 +42,7 @@ const starterSale = {
   pmwtShipping: 5,
   shippingRules: { cardCountEnabled: true, maxPweCards: 3, valueEnabled: true, maxPweValue: 50 },
   template: DEFAULT_TEMPLATE,
+  imageMode: "single",
   cards: [
     { id: uid(), ref: "1", year: "1961", set: "Heritage Stars", number: "12", name: "Jack Mercer", sport: "Baseball", teams: ["New York Stars"], teamStatus: "confirmed", condition: "VG-EX", price: 12, purchasePrice: 6, purchaseDate: "", notes: "Light corner wear", status: "available", imagePath: "" },
     { id: uid(), ref: "2", year: "1974", set: "Court Kings", number: "8", name: "Eli Turner", sport: "Basketball", teams: ["Chicago Kings"], teamStatus: "confirmed", condition: "EX", price: 18, purchasePrice: 9, purchaseDate: "", notes: "None", status: "offered", buyer: "Jamie Example", offerPrice: 15, offerStatus: "pending", claimType: "offer", claimedAt: new Date().toISOString(), imagePath: "" },
@@ -370,6 +371,15 @@ function displayPurchaseDate(value) {
   return /^\d{8}$/.test(code) ? `${code.slice(0, 2)}/${code.slice(2, 4)}/${code.slice(4)}` : code || "—";
 }
 
+function saleImageMode(sale = activeSale()) { return sale?.imageMode === "front-back" ? "front-back" : "single"; }
+function requiredImageSlots(sale = activeSale()) { return saleImageMode(sale) === "front-back" ? ["front", "back"] : ["single"]; }
+function imagePathFor(card, slot = "single") { return slot === "back" ? String(card?.backImagePath || "") : String(card?.imagePath || ""); }
+function setImagePathFor(card, slot, value) { if (slot === "back") card.backImagePath = value || ""; else card.imagePath = value || ""; }
+function cardHasRequiredImages(card, sale = activeSale()) { return requiredImageSlots(sale).every((slot) => Boolean(imagePathFor(card, slot))); }
+function imageMatchKey(card, slot = "single") { return `${card.id}::${slot}`; }
+function imageSlotLabel(slot) { return slot === "front" ? "Front" : slot === "back" ? "Back" : "Image"; }
+function cardImagePaths(card) { return [card?.imagePath, card?.backImagePath].filter(Boolean); }
+
 function ensureShippingRules(sale = activeSale()) {
   sale.shippingRules ||= {};
   sale.shippingRules.cardCountEnabled ??= true;
@@ -470,11 +480,11 @@ function renderCsmFileManager(refreshRecent = false) {
   const missing = portableDocument.missingImageFiles || [];
   $("#csmMissingSection").classList.toggle("hidden", !missing.length);
   $("#csmMissingImages").innerHTML = missing.map((item) => {
-    const links = historicalSales().flatMap((sale) => sale.cards.filter((card) => String(card.imagePath || "").toLowerCase() === String(item.originalPath || "").toLowerCase()).map((card) => ({ sale, card })));
+    const links = historicalSales().flatMap((sale) => sale.cards.flatMap((card) => [["single", card.imagePath], ["back", card.backImagePath]].filter(([, path]) => String(path || "").toLowerCase() === String(item.originalPath || "").toLowerCase()).map(([slot]) => ({ sale, card, slot }))));
     const label = links.length ? links.map(({ sale, card }) => `${sale.name}: ${card.year} ${card.set} ${card.name} ${numberLabel(card)}`.replace(/\s+/g, " ").trim()).join(" · ") : item.fileName;
     const first = links[0];
     const activeLink = links.find(({ sale }) => state.sales.some((item) => item.id === sale.id));
-    return `<article class="csm-manager-item"><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(item.fileName || item.originalPath)}</small></div><div class="row-actions">${activeLink ? `<button type="button" class="secondary" data-csm-manual-image="${escapeHtml(activeLink.card.id)}" data-csm-sale="${escapeHtml(activeLink.sale.id)}">Choose image</button>` : ""}<button type="button" class="secondary" data-csm-clear-image="${escapeHtml(item.originalPath)}">Leave unmatched</button></div></article>`;
+    return `<article class="csm-manager-item"><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(item.fileName || item.originalPath)}</small></div><div class="row-actions">${activeLink ? `<button type="button" class="secondary" data-csm-manual-image="${escapeHtml(activeLink.card.id)}" data-csm-sale="${escapeHtml(activeLink.sale.id)}" data-csm-image-slot="${escapeHtml(activeLink.slot)}">Choose image</button>` : ""}<button type="button" class="secondary" data-csm-clear-image="${escapeHtml(item.originalPath)}">Leave unmatched</button></div></article>`;
   }).join("");
   $("#csmBackupSection").classList.toggle("hidden", !portableDocument.active || !csmBackups.length);
   $("#csmBackupList").innerHTML = csmBackups.map((item) => `<article class="csm-manager-item"><div><strong>${escapeHtml(new Date(item.savedAt).toLocaleString())}</strong><small>Revision ${Number(item.revision || 0)} · ${Math.max(1, Math.round(Number(item.size || 0) / 1024))} KB</small></div><button type="button" class="secondary" data-restore-csm-backup="${escapeHtml(item.path)}">Restore</button></article>`).join("");
@@ -537,7 +547,7 @@ async function savePortableCsm() {
 function clearMissingImagePath(originalPath) {
   const key = String(originalPath || "").toLowerCase();
   historicalSales().forEach((sale) => {
-    sale.cards.forEach((card) => { if (String(card.imagePath || "").toLowerCase() === key) card.imagePath = ""; });
+    sale.cards.forEach((card) => { if (String(card.imagePath || "").toLowerCase() === key) card.imagePath = ""; if (String(card.backImagePath || "").toLowerCase() === key) card.backImagePath = ""; });
     sale.images = sale.images.filter((image) => String(image.path || "").toLowerCase() !== key);
   });
 }
@@ -546,7 +556,7 @@ function applyImageReplacements(replacements) {
   const map = new Map(Object.entries(replacements || {}).map(([from, to]) => [String(from).toLowerCase(), to]));
   const replace = (value) => map.get(String(value || "").toLowerCase()) || value;
   historicalSales().forEach((sale) => {
-    sale.cards.forEach((card) => { card.imagePath = replace(card.imagePath); });
+    sale.cards.forEach((card) => { card.imagePath = replace(card.imagePath); card.backImagePath = replace(card.backImagePath); });
     sale.images.forEach((image) => { image.path = replace(image.path); image.name = image.path.split(/[\\/]/).pop(); });
   });
   if (state.preferences?.packingSlip?.logoPath) state.preferences.packingSlip.logoPath = replace(state.preferences.packingSlip.logoPath);
@@ -726,7 +736,7 @@ function renderCommandCenter() {
   const shippingNeeded = buyerNames.filter((buyer) => !orderFor(buyer).shippingMethod);
   const readyToPack = buyerNames.filter((buyer) => orderFor(buyer).status === "paid" && cardsForBuyer(buyer).some((card) => !card.packed));
   const readyToShip = buyerNames.filter((buyer) => cardsForBuyer(buyer).length && cardsForBuyer(buyer).every((card) => card.packed) && orderFor(buyer).status !== "shipped");
-  const missingImages = sale.cards.filter((card) => card.status === "available" && !card.imagePath);
+  const missingImages = sale.cards.filter((card) => card.status === "available" && !cardHasRequiredImages(card, sale));
   $("#commandStats").innerHTML = [["Available", sale.cards.filter((card) => card.status === "available").length, "cards still open"], ["Pending offers", pendingOffers.length, "need a decision"], ["Unpaid orders", unpaid.length, "awaiting payment"], ["Ready to ship", readyToShip.length, "fully packed"]].map(([label, value, sub]) => `<article class="stat"><span class="label">${label}</span><strong>${value}</strong><span class="sub">${sub}</span></article>`).join("");
   const attention = [
     [pendingOffers.length, "Offers awaiting a decision", "Review offers", "offers"],
@@ -739,7 +749,7 @@ function renderCommandCenter() {
   const ready = [
     [readyToPack.length, "Paid orders ready to pack", "packing"],
     [readyToShip.length, "Packed orders ready to ship", "packing"],
-    [sale.cards.filter((card) => card.status === "available" && card.imagePath && !card.hiddenAfterCopy).length, "Listings ready to copy", "live"]
+    [sale.cards.filter((card) => card.status === "available" && cardHasRequiredImages(card, sale) && !card.hiddenAfterCopy).length, "Listings ready to copy", "live"]
   ].filter(([count]) => count);
   $("#commandReady").innerHTML = ready.length ? ready.map(([count, title, view]) => `<button class="command-item ready" data-command-view="${view}"><span>${count}</span><div><strong>${escapeHtml(title)}</strong><small>Open workflow</small></div><b>›</b></button>`).join("") : `<div class="empty-state"><p>No items are ready for the next step yet.</p></div>`;
   const activity = (sale.audit || []).slice(0, 8);
@@ -758,7 +768,7 @@ function saleNotifications() {
   const bundleIds = new Set((sale.bundles || []).filter((bundle) => ["pending", "countered"].includes(bundle.status)).map((bundle) => bundle.id));
   (sale.bundles || []).filter((bundle) => bundleIds.has(bundle.id)).forEach((bundle) => add(`bundle:${bundle.id}`, "offers", `Bundle offer from ${bundle.buyer}`, `${bundle.cardIds.length} cards · ${money(bundleDecisionPrice(bundle))}`, "offers", { urgent: true }));
   sale.cards.filter((card) => !card.bundleId && card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus || "pending")).forEach((card) => add(`offer:${card.id}`, "offers", `Offer awaiting a decision`, `${card.ref} · ${card.name} · ${money(offerDecisionPrice(card))}`, "offers", { cardId: card.id, urgent: true }));
-  sale.cards.filter((card) => card.status === "available" && !card.imagePath).forEach((card) => add(`image:${card.id}`, "images", "Card is missing an image", `${card.ref} · ${card.year} ${card.set} ${card.name}`, "sale", { cardId: card.id }));
+  sale.cards.filter((card) => card.status === "available" && !cardHasRequiredImages(card, sale)).forEach((card) => add(`image:${card.id}`, "images", saleImageMode(sale) === "front-back" ? "Card is missing a front or back image" : "Card is missing an image", `${card.ref} · ${card.year} ${card.set} ${card.name}`, "sale", { cardId: card.id }));
   sale.cards.filter(cardInOrder).forEach((card) => { const price = Number(card.claimPrice ?? card.price); if (Number(card.purchasePrice) > 0 && price < Number(card.purchasePrice)) add(`below-cost:${card.id}`, "profit", "Sale price is below purchase cost", `${card.ref} · ${card.name} · ${money(price)} vs ${money(card.purchasePrice)} cost`, "dashboard", { cardId: card.id }); });
   buyers().forEach((buyer) => {
     const order = orderFor(buyer); const cards = cardsForBuyer(buyer); const encoded = encodeURIComponent(buyer);
@@ -840,8 +850,8 @@ function renderListings() {
     const filterMatch = state.filter === "copied" ? hidden : !hidden && (state.filter === "all"
       || (state.filter === "available" && card.status === "available")
       || (state.filter === "claimed" && card.status !== "available")
-      || (state.filter === "with-image" && Boolean(card.imagePath))
-      || (state.filter === "missing-image" && !card.imagePath));
+      || (state.filter === "with-image" && cardHasRequiredImages(card, sale))
+      || (state.filter === "missing-image" && !cardHasRequiredImages(card, sale)));
     return filterMatch && [...Object.values(card).filter((value) => typeof value !== "object"), ...Object.values(card.customFields || {})].join(" ").toLowerCase().includes(query);
   }));
   const validIds = new Set(sale.cards.map((card) => card.id));
@@ -855,7 +865,7 @@ function renderListings() {
       <td>${escapeHtml(card.condition || "—")}</td>
       <td><strong class="money">${money(card.price)}</strong><small class="cost-note">Cost ${card.purchasePrice !== "" && card.purchasePrice != null ? money(card.purchasePrice) : "—"}</small><small class="cost-note">Purchased ${displayPurchaseDate(card.purchaseDate)}</small></td>
       <td><span class="status ${card.status === "available" ? "available" : card.status === "offered" ? "offered" : "claimed"}">${escapeHtml(statusLabel)}</span></td>
-      <td><div class="row-actions">${card.hiddenAfterCopy ? `<button class="row-action" data-restore-card="${card.id}">Restore</button>` : `<button class="row-action" data-image-card="${card.id}">${card.imagePath ? "Change image" : "Add image"}</button><button class="row-action" data-rematch-card="${card.id}">Re-run lookup</button><button class="row-action" data-copy-card="${card.id}">Copy</button>`}<button class="row-action" data-edit-card="${card.id}">Edit</button><button class="row-action" data-move-card="${card.id}">Move</button><button class="row-action danger-link" data-delete-card="${card.id}">Delete</button></div></td>
+      <td><div class="row-actions">${card.hiddenAfterCopy ? `<button class="row-action" data-restore-card="${card.id}">Restore</button>` : `${saleImageMode(sale) === "front-back" ? `<button class="row-action" data-image-card="${card.id}" data-image-side="front">${card.imagePath ? "Change front" : "Add front"}</button><button class="row-action" data-image-card="${card.id}" data-image-side="back">${card.backImagePath ? "Change back" : "Add back"}</button>` : `<button class="row-action" data-image-card="${card.id}" data-image-side="single">${card.imagePath ? "Change image" : "Add image"}</button>`}<button class="row-action" data-rematch-card="${card.id}">Re-run lookup</button><button class="row-action" data-copy-card="${card.id}">Copy</button>`}<button class="row-action" data-edit-card="${card.id}">Edit</button><button class="row-action" data-move-card="${card.id}">Move</button><button class="row-action danger-link" data-delete-card="${card.id}">Delete</button></div></td>
     </tr>`;
   }).join("");
   $("#listingEmpty").classList.toggle("hidden", sale.cards.length !== 0);
@@ -888,10 +898,13 @@ function orderedSaleImages(sale = activeSale()) {
   const tiedPaths = new Set();
   const orderedImages = [];
   sortedSaleCards(sale).forEach((card) => {
-    if (!card.imagePath) return;
-    const key = card.imagePath.toLowerCase();
-    const image = imageByPath.get(key);
-    if (image && !tiedPaths.has(key)) { orderedImages.push(image); tiedPaths.add(key); }
+    requiredImageSlots(sale).forEach((slot) => {
+      const path = imagePathFor(card, slot);
+      if (!path) return;
+      const key = path.toLowerCase();
+      const image = imageByPath.get(key);
+      if (image && !tiedPaths.has(key)) { orderedImages.push(image); tiedPaths.add(key); }
+    });
   });
   sale.images.forEach((image) => { if (!tiedPaths.has(image.path.toLowerCase())) orderedImages.push(image); });
   return orderedImages;
@@ -1164,7 +1177,7 @@ function renderPacking() {
   const names = buyers();
   const select = $("#packingBuyer");
   const current = select.value || names[0] || "";
-  select.innerHTML = names.map((buyer) => `<option value="${escapeHtml(buyer)}" ${buyer === current ? "selected" : ""}>${escapeHtml(buyer)}${orderFor(buyer).status === "packed" ? " (Packed)" : ""}</option>`).join("");
+  select.innerHTML = names.map((buyer) => { const status = orderFor(buyer).status; const suffix = status === "shipped" ? " (Shipped)" : status === "packed" ? " (Packed)" : ""; return `<option value="${escapeHtml(buyer)}" ${buyer === current ? "selected" : ""}>${escapeHtml(buyer)}${suffix}</option>`; }).join("");
   const buyer = select.value || names[0];
   if (!buyer) {
     $("#packingWarnings").innerHTML = "";
@@ -1182,7 +1195,7 @@ function renderPacking() {
   $("#packingWarnings").innerHTML = warnings.length ? warnings.map((warning) => `<span>${escapeHtml(warning)}</span>`).join("") : `<span class="valid-text">Order ready</span>`;
   const firstImage = cards.find((card) => card.imagePath)?.imagePath;
   const printed = Number(order.packingSlipPrintCount || 0);
-  $("#packingContent").innerHTML = `<section class="packing-card"><div class="packing-progress"><div><h2>${escapeHtml(buyer)}</h2><p>${packed} of ${cards.length} cards verified · ${escapeHtml(order.shippingMethod)}${profile.address ? "" : " · Missing address"}${printed ? ` · Slip printed ${printed}×` : ""}</p><div class="progress-track"><div class="progress-bar" style="width:${percent}%"></div></div></div><div class="packing-actions"><button class="secondary" id="previewPackingSlipBtn">Preview PDF</button><button class="secondary" id="printPackingSlipBtn">${printed ? "Reprint" : "Print"} packing slip</button><button class="secondary" id="checkAllCardsBtn">${packed === cards.length ? "Uncheck all" : "Check all cards"}</button><button class="primary" id="completePackingBtn" ${packed !== cards.length ? "disabled" : ""}>Complete package</button></div></div><div class="packing-order-summary">${firstImage ? `<img src="${fileUrl(firstImage)}" alt="First card in order" />` : `<div class="placeholder-thumb">No image</div>`}<div><strong>${escapeHtml(activeSale().name)}</strong><p>${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p><div class="packing-order-stats"><span><strong>${cards.length}</strong><br>cards</span><span><strong>${money(total)}</strong><br>order total</span><span><strong>${escapeHtml(order.status || "awaiting")}</strong><br>status</span></div></div></div><div class="pack-list">${cards.map((card) => `<label class="pack-item ${card.packed ? "checked" : ""}" data-pack-row="${card.id}"><input type="checkbox" data-pack-card="${card.id}" ${card.packed ? "checked" : ""} /><span><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><small>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)} · ${card.claimType === "offer" ? "Offer" : "Claim"}</small></span><strong>${money(card.claimPrice ?? card.price)}</strong></label>`).join("")}</div><div class="packing-notes"><label>Internal packing notes<textarea id="packingInternalNotes" placeholder="Private notes — never printed">${escapeHtml(order.packingNotes || "")}</textarea></label><label>Buyer-facing slip note<textarea id="packingBuyerNote" placeholder="Optional note printed on this buyer’s slip">${escapeHtml(order.packingSlipNote || "")}</textarea></label></div><div class="tracking-panel"><label>Tracking number<input id="trackingNumber" value="${escapeHtml(order.trackingNumber || "")}" placeholder="Enter USPS or carrier tracking number" /></label><div class="tracking-actions"><button class="secondary" id="copyTrackingMessageBtn" ${order.trackingNumber ? "" : "disabled"}>Copy shipping message</button><button class="secondary" id="openTrackingBtn" data-open-tracking="${escapeHtml(trackingUrl(order.trackingNumber))}" ${order.trackingNumber ? "" : "disabled"}>Track package ↗</button></div></div></section>`;
+  $("#packingContent").innerHTML = `<section class="packing-card"><div class="packing-progress"><div><h2>${escapeHtml(buyer)}</h2><p>${packed} of ${cards.length} cards verified · ${escapeHtml(order.shippingMethod)}${profile.address ? "" : " · Missing address"}${printed ? ` · Slip printed ${printed}×` : ""}</p><div class="progress-track"><div class="progress-bar" style="width:${percent}%"></div></div></div><div class="packing-actions"><button class="secondary" id="previewPackingSlipBtn">Preview PDF</button><button class="secondary" id="printPackingSlipBtn">${printed ? "Reprint" : "Print"} packing slip</button><button class="secondary" id="checkAllCardsBtn">${packed === cards.length ? "Uncheck all" : "Check all cards"}</button><button class="secondary" id="completePackingBtn" ${packed !== cards.length || order.status === "shipped" ? "disabled" : ""}>${order.status === "packed" ? "Package complete" : "Complete package"}</button><button class="primary" id="markShippedBtn" ${packed !== cards.length || order.status === "shipped" ? "disabled" : ""}>${order.status === "shipped" ? "Shipped" : "Mark shipped"}</button></div></div><div class="packing-order-summary">${firstImage ? `<img src="${fileUrl(firstImage)}" alt="First card in order" />` : `<div class="placeholder-thumb">No image</div>`}<div><strong>${escapeHtml(activeSale().name)}</strong><p>${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p><div class="packing-order-stats"><span><strong>${cards.length}</strong><br>cards</span><span><strong>${money(total)}</strong><br>order total</span><span><strong>${escapeHtml(order.status || "awaiting")}</strong><br>status</span></div></div></div><div class="pack-list">${cards.map((card) => `<label class="pack-item ${card.packed ? "checked" : ""}" data-pack-row="${card.id}"><input type="checkbox" data-pack-card="${card.id}" ${card.packed ? "checked" : ""} /><span><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><small>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)} · ${card.claimType === "offer" ? "Offer" : "Claim"}</small></span><strong>${money(card.claimPrice ?? card.price)}</strong></label>`).join("")}</div><div class="packing-notes"><label>Internal packing notes<textarea id="packingInternalNotes" placeholder="Private notes — never printed">${escapeHtml(order.packingNotes || "")}</textarea></label><label>Buyer-facing slip note<textarea id="packingBuyerNote" placeholder="Optional note printed on this buyer’s slip">${escapeHtml(order.packingSlipNote || "")}</textarea></label></div><div class="tracking-panel"><label>Tracking number<input id="trackingNumber" value="${escapeHtml(order.trackingNumber || "")}" placeholder="Enter USPS or carrier tracking number" /></label><div class="tracking-actions"><button class="secondary" id="copyTrackingMessageBtn" ${order.trackingNumber ? "" : "disabled"}>Copy shipping message</button><button class="secondary" id="openTrackingBtn" data-open-tracking="${escapeHtml(trackingUrl(order.trackingNumber))}" ${order.trackingNumber ? "" : "disabled"}>Track package ↗</button></div></div></section>`;
   const legacyProgress = $(".packing-card .progress-track");
   if (legacyProgress) {
     const meter = document.createElement("progress");
@@ -1273,12 +1286,12 @@ function healthIssues() {
     const label = `${card.ref} · ${card.name || "Unnamed card"}`;
     if (!card.year || !card.set || !card.name) issues.push({ level: "error", area: "Card data", message: `${label} is missing year, brand or player.`, cardId: card.id });
     if (!Number.isFinite(Number(card.price)) || Number(card.price) <= 0) issues.push({ level: "error", area: "Pricing", message: `${label} has no valid claim price.`, cardId: card.id });
-    if (!card.imagePath) issues.push({ level: "warning", area: "Images", message: `${label} has no matched image.`, cardId: card.id });
+    if (!cardHasRequiredImages(card, sale)) issues.push({ level: "warning", area: "Images", message: `${label} is missing ${saleImageMode(sale) === "front-back" ? "a front or back scan" : "a matched image"}.`, cardId: card.id });
     if (card.status !== "available" && !card.buyer) issues.push({ level: "error", area: "Claims", message: `${label} is claimed without a buyer.`, cardId: card.id });
     const decisionPrice = card.claimType === "offer" && card.offerPrice != null ? offerDecisionPrice(card) : Number(card.claimPrice ?? card.price);
     if (card.buyer && decisionPrice < Number(card.purchasePrice || 0)) issues.push({ level: "warning", area: "Profit", message: `${label} is selling below purchase price.`, cardId: card.id });
   });
-  const paths = new Set(); sale.cards.filter((card) => card.imagePath).forEach((card) => { const key = card.imagePath.toLowerCase(); if (paths.has(key)) issues.push({ level: "error", area: "Images", message: `An image is linked to more than one card: ${card.imagePath.split(/[\\/]/).pop()}.`, cardId: card.id }); paths.add(key); });
+  const paths = new Set(); sale.cards.forEach((card) => cardImagePaths(card).forEach((path) => { const key = path.toLowerCase(); if (paths.has(key)) issues.push({ level: "error", area: "Images", message: `An image is linked more than once: ${path.split(/[\\/]/).pop()}.`, cardId: card.id }); paths.add(key); }));
   buyers().forEach((buyer) => orderFlags(buyer).forEach((flag) => issues.push({ level: "warning", area: "Order", message: `${buyer}: ${flag}.`, buyer })));
   return issues;
 }
@@ -1301,7 +1314,9 @@ function renderLiveSale() {
   }
   liveIndex = Math.max(0, Math.min(liveIndex, cards.length - 1));
   const card = cards[liveIndex];
-  $("#liveSaleContent").innerHTML = `<div class="live-progress"><strong>Card ${liveIndex + 1} of ${cards.length}</strong><span>${cards.length} available and not copied</span></div><div class="live-layout"><div class="live-image">${card.imagePath ? `<img draggable="true" data-live-image="${escapeHtml(card.imagePath)}" src="${fileUrl(card.imagePath)}" alt="${escapeHtml(card.name)}" /><small>Drag the image to Facebook</small>` : `<div class="empty-icon">▧</div><p>No image matched</p>`}</div><div class="live-copy"><p class="eyebrow">READY TO POST</p><h2>${escapeHtml(card.name)}</h2><pre>${escapeHtml(formatLine(card))}</pre><div class="live-actions"><button class="primary" data-live-copy="${card.id}">Copy listing</button><button class="secondary" data-live-image-card="${card.id}">${card.imagePath ? "Change image" : "Add image"}</button><button class="secondary" data-live-prev>Previous</button><button class="secondary" data-live-next>Skip / next</button></div><p class="live-private">Cost ${card.purchasePrice !== "" ? money(card.purchasePrice) : "—"} · Purchased ${displayPurchaseDate(card.purchaseDate)} · ${escapeHtml(card.notes || "No flaws listed")}</p></div></div>`;
+  const imageMode = saleImageMode(activeSale());
+  const liveImages = requiredImageSlots(activeSale()).map((slot) => { const path = imagePathFor(card, slot); return `<div class="live-scan"><strong>${imageMode === "front-back" ? imageSlotLabel(slot) : "Card image"}</strong>${path ? `<img draggable="true" data-live-image="${escapeHtml(path)}" src="${fileUrl(path)}" alt="${escapeHtml(card.name)} ${imageSlotLabel(slot)}" /><small>Drag this image to Facebook</small>` : `<div class="empty-icon">▧</div><p>No ${imageSlotLabel(slot).toLowerCase()} matched</p>`}</div>`; }).join("");
+  $("#liveSaleContent").innerHTML = `<div class="live-progress"><strong>Card ${liveIndex + 1} of ${cards.length}</strong><span>${cards.length} available and not copied</span></div><div class="live-layout"><div class="live-image ${imageMode === "front-back" ? "paired" : ""}">${liveImages}</div><div class="live-copy"><p class="eyebrow">READY TO POST</p><h2>${escapeHtml(card.name)}</h2><pre>${escapeHtml(formatLine(card))}</pre><div class="live-actions"><button class="primary" data-live-copy="${card.id}">Copy listing</button>${imageMode === "front-back" ? `<button class="secondary" data-live-image-card="${card.id}" data-live-image-side="front">${card.imagePath ? "Change front" : "Add front"}</button><button class="secondary" data-live-image-card="${card.id}" data-live-image-side="back">${card.backImagePath ? "Change back" : "Add back"}</button>` : `<button class="secondary" data-live-image-card="${card.id}" data-live-image-side="single">${card.imagePath ? "Change image" : "Add image"}</button>`}<button class="secondary" data-live-prev>Previous</button><button class="secondary" data-live-next>Skip / next</button></div><p class="live-private">Cost ${card.purchasePrice !== "" ? money(card.purchasePrice) : "—"} · Purchased ${displayPurchaseDate(card.purchaseDate)} · ${escapeHtml(card.notes || "No flaws listed")}</p></div></div>`;
 }
 
 function showView(view) {
@@ -1378,7 +1393,7 @@ function addSingleCard() {
   if (!draft.name) return toast("Enter the player name.");
   const nextRef = Math.max(0, ...sale.cards.map((card) => Number(card.ref) || 0)) + 1;
   const nextOrder = Math.max(0, ...sale.cards.map((card) => Number(card.sourceOrder) || 0)) + 1;
-  const card = { id: uid(), ref: String(nextRef), sourceOrder: nextOrder, customOrder: sale.cards.length + 1, ...draft, teamStatus: draft.teams.length ? "confirmed" : "", teamSource: draft.teams.length ? "manual" : "", customFields: {}, imagePath: "", status: "available" };
+  const card = { id: uid(), ref: String(nextRef), sourceOrder: nextOrder, customOrder: sale.cards.length + 1, ...draft, teamStatus: draft.teams.length ? "confirmed" : "", teamSource: draft.teams.length ? "manual" : "", customFields: {}, imagePath: "", backImagePath: "", status: "available" };
   sale.cards.push(card);
   renumberCardReferences(sale, { audit: false });
   recordAudit("manual-add", `Added ${card.ref} · ${card.name}`, { cardId: card.id });
@@ -1425,7 +1440,7 @@ function finishCloseSale() {
   if ($("#closeSaleUnsoldAction").value === "new") {
     const name = $("#closeSaleName").value.trim(); if (!name) return toast("Enter a name for the carryover sale.");
     const percent = Number($("#closeSalePercent").value || 0); const cards = sale.cards.filter((card) => card.status === "available").map((card, index) => ({ ...clone(card), id: uid(), ref: String(index + 1), sourceOrder: index + 1, customOrder: index + 1, price: Math.max(0, Number(card.price) * (1 + percent / 100)), hiddenAfterCopy: false }));
-    const next = { id: uid(), name, pweShipping: sale.pweShipping, pmwtShipping: sale.pmwtShipping, shippingRules: clone(ensureShippingRules(sale)), template: sale.template, cards, images: clone(sale.images.filter((image) => cards.some((card) => card.imagePath === image.path))), orders: {}, bundles: [], customFieldDefinitions: clone(customFields(sale)), versions: [], audit: [], sortMode: "spreadsheet" }; state.sales.push(next); recordAudit("close", `Created ${name} with ${cards.length} unsold cards`, {}, sale);
+    const next = { id: uid(), name, imageMode: saleImageMode(sale), pweShipping: sale.pweShipping, pmwtShipping: sale.pmwtShipping, shippingRules: clone(ensureShippingRules(sale)), template: sale.template, cards, images: clone(sale.images.filter((image) => cards.some((card) => cardImagePaths(card).includes(image.path)))), orders: {}, bundles: [], customFieldDefinitions: clone(customFields(sale)), versions: [], audit: [], sortMode: "spreadsheet" }; state.sales.push(next); recordAudit("close", `Created ${name} with ${cards.length} unsold cards`, {}, sale);
   }
   sale.closedAt = new Date().toISOString(); recordAudit("close", "Sale closed with the closing assistant"); $("#closeSaleDialog").close(); saveSoon(); render(); toast(missingTracking.length ? `${missingTracking.length} packed PMWT order${missingTracking.length === 1 ? " still needs" : "s still need"} tracking and was not marked shipped.` : "Sale closing steps completed.");
 }
@@ -1558,19 +1573,26 @@ function confirmImport(event) {
     const value = (field) => mapping[field] ? row[mapping[field]] : "";
     const customValues = Object.fromEntries(importedCustomFields.map((field, fieldIndex) => [field.key, row[customHeaders[fieldIndex]] ?? ""]));
     const teams = parseTeams(value("teams"));
-    const card = { id: uid(), ref: String(start + index + 1), sourceOrder: start + index + 1, customOrder: start + index + 1, year: value("year"), set: value("set"), number: value("number"), name: value("name"), sport: normalizeSport(value("sport")), teams, teamStatus: teams.length ? "confirmed" : "", teamSource: teams.length ? "import" : "", condition: value("condition"), price: Number(String(value("price")).replace(/[$,]/g, "")) || 0, purchasePrice: value("purchasePrice") === "" ? "" : Number(String(value("purchasePrice")).replace(/[$,]/g, "")) || 0, purchaseDate: normalizePurchaseDate(value("purchaseDate")), notes: value("notes"), customFields: customValues, imagePath: "", status: "available" };
+    const card = { id: uid(), ref: String(start + index + 1), sourceOrder: start + index + 1, customOrder: start + index + 1, year: value("year"), set: value("set"), number: value("number"), name: value("name"), sport: normalizeSport(value("sport")), teams, teamStatus: teams.length ? "confirmed" : "", teamSource: teams.length ? "import" : "", condition: value("condition"), price: Number(String(value("price")).replace(/[$,]/g, "")) || 0, purchasePrice: value("purchasePrice") === "" ? "" : Number(String(value("purchasePrice")).replace(/[$,]/g, "")) || 0, purchaseDate: normalizePurchaseDate(value("purchaseDate")), notes: value("notes"), customFields: customValues, imagePath: "", backImagePath: "", status: "available" };
     const rememberedTeams = state.teamMatchMemory?.[teamMemoryKey(card)];
     if (!teams.length && rememberedTeams?.length) { card.teams = [...rememberedTeams]; card.teamStatus = "confirmed"; card.teamSource = "remembered"; }
-    const remembered = state.manualMatchMemory?.[normalizedCardKey(card)];
+    const memoryKey = normalizedCardKey(card);
+    const frontSlot = saleImageMode(sale) === "front-back" ? "front" : "single";
+    const remembered = state.manualMatchMemory?.[`${memoryKey}::${frontSlot}`] || state.manualMatchMemory?.[memoryKey];
+    const rememberedBack = saleImageMode(sale) === "front-back" ? state.manualMatchMemory?.[`${memoryKey}::back`] : "";
     if (remembered) card.rememberedImagePath = remembered;
+    if (rememberedBack) card.rememberedBackImagePath = rememberedBack;
     return card;
   });
   sale.cards.push(...imported);
   renumberCardReferences(sale, { audit: false });
   imported.forEach((card) => {
     const remembered = card.rememberedImagePath;
+    const rememberedBack = card.rememberedBackImagePath;
     delete card.rememberedImagePath;
-    if (remembered) attachImage(card, remembered, true);
+    delete card.rememberedBackImagePath;
+    if (remembered) attachImage(card, remembered, true, sale, saleImageMode(sale) === "front-back" ? "front" : "single");
+    if (rememberedBack) attachImage(card, rememberedBack, true, sale, "back");
   });
   recordAudit("import", `Imported ${imported.length} cards`);
   $("#importDialog").close();
@@ -1621,6 +1643,22 @@ function cardRecord(cardId) {
   return allCardRecords().find((record) => record.card.id === cardId);
 }
 
+function imageSide(image, card = null) {
+  const tokens = normalizeMatchText(image?.stem || image?.name || "").split(" ").filter(Boolean);
+  if (tokens.includes("back")) return "back";
+  if (tokens.includes("front")) return "front";
+  const remaining = [...tokens];
+  if (card) normalizeMatchText(card.name).split(" ").filter(Boolean).forEach((nameToken) => { const index = remaining.indexOf(nameToken); if (index >= 0) remaining.splice(index, 1); });
+  const hasFront = remaining.includes("f");
+  const hasBack = remaining.includes("b");
+  if (hasFront !== hasBack) return hasFront ? "front" : "back";
+  return "";
+}
+
+function imageMatchRecords(records) {
+  return records.flatMap(({ sale, card }) => requiredImageSlots(sale).map((slot) => ({ sale, card, slot, key: imageMatchKey(card, slot) })));
+}
+
 function scoreImage(card, image, sale = activeSale()) {
   const stem = normalizeMatchText(image.stem);
   const stemTokens = stem.split(" ").filter(Boolean);
@@ -1658,8 +1696,13 @@ function scoreImage(card, image, sale = activeSale()) {
   return { image, score, reasons };
 }
 
-function proposedImageMatch(card, images, sale = activeSale()) {
-  let candidates = images.map((image) => scoreImage(card, image, sale)).filter((item) => item.score > 0)
+function proposedImageMatch(card, images, sale = activeSale(), slot = "single") {
+  const eligibleImages = saleImageMode(sale) === "front-back" ? images.filter((image) => imageSide(image, card) === slot) : images;
+  let candidates = eligibleImages.map((image) => {
+    const candidate = scoreImage(card, image, sale);
+    if (saleImageMode(sale) === "front-back" && imageSide(image, card) === slot) { candidate.score += 30; candidate.reasons.push(`${slot} filename key`); }
+    return candidate;
+  }).filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || String(a.image.path).localeCompare(String(b.image.path), undefined, { numeric: true }));
   const sameYearCandidates = candidates.filter((candidate) => candidate.reasons.includes("year folder"));
   if (sameYearCandidates.length) candidates = sameYearCandidates;
@@ -1677,6 +1720,8 @@ function proposedImageMatch(card, images, sale = activeSale()) {
   return {
     card,
     sale,
+    slot,
+    key: imageMatchKey(card, slot),
     candidates,
     automatic: Boolean(top && !ambiguous && ((top.score >= 100 && hasDefinitiveFilename) || uniquePurchaseDateMatch)),
     automaticReason: uniquePurchaseDateMatch ? "unique purchase date code" : "exact filename match",
@@ -1685,20 +1730,26 @@ function proposedImageMatch(card, images, sale = activeSale()) {
   };
 }
 
-function imageOwner(imagePath, exceptCardId = "", sale = activeSale()) {
+function imageOwner(imagePath, exceptCardId = "", sale = activeSale(), exceptSlot = "") {
   const key = String(imagePath || "").toLowerCase();
-  const card = sale.cards.find((item) => item.id !== exceptCardId && String(item.imagePath || "").toLowerCase() === key);
-  return card ? { sale, card } : null;
+  const normalizedExceptSlot = exceptSlot === "front" ? "single" : exceptSlot;
+  for (const card of sale.cards) {
+    for (const slot of ["single", "back"]) {
+      if (card.id === exceptCardId && slot === normalizedExceptSlot) continue;
+      if (imagePathFor(card, slot).toLowerCase() === key) return { sale, card, slot };
+    }
+  }
+  return null;
 }
 
-function attachImage(card, imagePath, quiet = false, sale = activeSale()) {
+function attachImage(card, imagePath, quiet = false, sale = activeSale(), slot = "single") {
   if (!imagePath) return true;
-  const owner = imageOwner(imagePath, card.id, sale);
+  const owner = imageOwner(imagePath, card.id, sale, slot);
   if (owner) {
     if (!quiet) toast(`That image is already linked to another listing in ${owner.sale.name}: ${owner.card.ref} · ${owner.card.name}.`);
     return false;
   }
-  card.imagePath = imagePath;
+  setImagePathFor(card, slot, imagePath);
   const existingImage = sale.images.find((image) => image.path.toLowerCase() === imagePath.toLowerCase());
   if (existingImage) {
     delete existingImage.hiddenAfterDrag;
@@ -1710,9 +1761,10 @@ function attachImage(card, imagePath, quiet = false, sale = activeSale()) {
 }
 
 function detachImage(record) {
-  const previousPath = record.card.imagePath;
-  record.card.imagePath = "";
-  if (previousPath && !record.sale.cards.some((card) => card.imagePath && card.imagePath.toLowerCase() === previousPath.toLowerCase())) record.sale.images = record.sale.images.filter((image) => image.path.toLowerCase() !== previousPath.toLowerCase());
+  const slot = record.slot || "single";
+  const previousPath = imagePathFor(record.card, slot);
+  setImagePathFor(record.card, slot, "");
+  if (previousPath && !record.sale.cards.some((card) => cardImagePaths(card).some((path) => path.toLowerCase() === previousPath.toLowerCase()))) record.sale.images = record.sale.images.filter((image) => image.path.toLowerCase() !== previousPath.toLowerCase());
 }
 
 async function autoMatchImages(options = {}) {
@@ -1726,15 +1778,17 @@ async function autoMatchImages(options = {}) {
   saveSoon();
   $("#lookupFolderLabel").textContent = folder;
   const allRecords = allCardRecords();
-  let records = options.allSales
+  let baseRecords = options.allSales
     ? allRecords.slice()
     : options.cardIds?.length
       ? allRecords.filter((record) => options.cardIds.includes(record.card.id))
-      : sale.cards.filter((card) => !card.imagePath).map((card) => ({ sale, card }));
+      : sale.cards.filter((card) => !cardHasRequiredImages(card, sale)).map((card) => ({ sale, card }));
+  let records = imageMatchRecords(baseRecords).filter((record) => options.force || !imagePathFor(record.card, record.slot));
   if (!records.length) return toast(options.force ? "No cards were selected for image lookup." : "Every card already has a confirmed image.");
   const oldPendingMatches = pendingMatches;
   const targetSaleIds = new Set(records.map((record) => record.sale.id));
-  const confirmedPaths = new Set(allRecords.filter((record) => targetSaleIds.has(record.sale.id) && !records.some((target) => target.card.id === record.card.id) && record.card.imagePath).map((record) => record.card.imagePath.toLowerCase()));
+  const targetKeys = new Set(records.map((record) => `${record.sale.id}::${record.key}`));
+  const confirmedPaths = new Set(imageMatchRecords(allRecords).filter((record) => targetSaleIds.has(record.sale.id) && !targetKeys.has(`${record.sale.id}::${record.key}`) && imagePathFor(record.card, record.slot)).map((record) => imagePathFor(record.card, record.slot).toLowerCase()));
   const button = $("#autoMatchBtn");
   const forceAllButton = $("#forceAllImageLookupBtn");
   const progress = $("#lookupProgress");
@@ -1765,17 +1819,17 @@ async function autoMatchImages(options = {}) {
     forceAllButton.disabled = false;
   }
   if (!images.length) { progress.classList.add("hidden"); return toast("No unconfirmed supported images were found."); }
-  let proposed = records.map((record) => proposedImageMatch(record.card, images, record.sale));
+  let proposed = records.map((record) => proposedImageMatch(record.card, images, record.sale, record.slot));
   proposed.forEach((match) => { match.card.lastSuggestedImagePath = match.candidates[0]?.image.path || ""; });
   if (options.includeRelated) {
     const suggestedPaths = new Set(proposed.map((match) => match.candidates[0]?.image.path?.toLowerCase()).filter(Boolean));
-    const relatedRecords = allRecords.filter((record) => targetSaleIds.has(record.sale.id) && [record.card.imagePath, record.card.lastSuggestedImagePath].filter(Boolean).some((imagePath) => suggestedPaths.has(imagePath.toLowerCase())));
+    const relatedRecords = imageMatchRecords(allRecords).filter((record) => targetSaleIds.has(record.sale.id) && [imagePathFor(record.card, record.slot), record.card.lastSuggestedImagePath].filter(Boolean).some((imagePath) => suggestedPaths.has(imagePath.toLowerCase())));
     (oldPendingMatches?.review || []).forEach((match) => {
       const topPath = match.candidates[0]?.image.path?.toLowerCase();
-      if (topPath && suggestedPaths.has(topPath) && !relatedRecords.some((record) => record.card.id === match.card.id)) relatedRecords.push({ sale: match.sale || activeSale(), card: match.card });
+      if (topPath && suggestedPaths.has(topPath) && !relatedRecords.some((record) => record.key === match.key)) relatedRecords.push({ sale: match.sale || activeSale(), card: match.card, slot: match.slot || "single", key: match.key || imageMatchKey(match.card, match.slot || "single") });
     });
-    relatedRecords.forEach((record) => { if (!records.some((target) => target.card.id === record.card.id)) records.push(record); });
-    proposed = records.map((record) => proposedImageMatch(record.card, images, record.sale));
+    relatedRecords.forEach((record) => { if (!records.some((target) => target.key === record.key)) records.push(record); });
+    proposed = records.map((record) => proposedImageMatch(record.card, images, record.sale, record.slot));
     proposed.forEach((match) => { match.card.lastSuggestedImagePath = match.candidates[0]?.image.path || ""; });
   }
   if (options.force) records.forEach(detachImage);
@@ -1803,18 +1857,18 @@ async function autoMatchImages(options = {}) {
     }
   });
 
-  const targetIds = new Set(records.map((record) => record.card.id));
-  const used = new Set(allCardRecords().filter((record) => !targetIds.has(record.card.id) && record.card.imagePath).map((record) => `${record.sale.id}::${record.card.imagePath.toLowerCase()}`));
+  const targetRecordKeys = new Set(records.map((record) => `${record.sale.id}::${record.key}`));
+  const used = new Set(imageMatchRecords(allCardRecords()).filter((record) => !targetRecordKeys.has(`${record.sale.id}::${record.key}`) && imagePathFor(record.card, record.slot)).map((record) => `${record.sale.id}::${imagePathFor(record.card, record.slot).toLowerCase()}`));
   const automatic = [];
   const review = [];
   proposed.sort((a, b) => (b.candidates[0]?.score || 0) - (a.candidates[0]?.score || 0)).forEach((match) => {
     const topPath = match.candidates[0]?.image.path;
     const topKey = topPath ? `${match.sale.id}::${topPath.toLowerCase()}` : "";
     if (match.automatic && topPath && !used.has(topKey)) {
-      if (attachImage(match.card, topPath, true, match.sale)) {
+      if (attachImage(match.card, topPath, true, match.sale, match.slot)) {
         automatic.push({ card: match.card, candidate: match.candidates[0] });
         state.manualMatchMemory ||= {};
-        state.manualMatchMemory[normalizedCardKey(match.card)] = topPath;
+        state.manualMatchMemory[`${normalizedCardKey(match.card)}::${match.slot}`] = topPath;
         used.add(topKey);
       } else {
         match.automatic = false;
@@ -1868,20 +1922,20 @@ function renderMatchReview() {
     const searchText = `${match.card.year} ${match.card.set} ${match.card.number} ${match.card.name} ${match.card.notes} ${match.candidates.map((candidate) => candidate.image.relativePath).join(" ")}`.toLowerCase();
     return filterMatch && searchText.includes(query);
   });
-  const validIds = new Set(pendingMatches.review.map((match) => match.card.id));
+  const validIds = new Set(pendingMatches.review.map((match) => match.key));
   selectedMatchIds = new Set([...selectedMatchIds].filter((id) => validIds.has(id)));
   $("#matchReviewList").innerHTML = filtered.length ? filtered.map((match) => {
     const top = match.candidates[0];
     const selectTop = match.selected !== undefined ? Boolean(match.selected) : Boolean(top && top.score >= 45);
     const selectedPath = match.selected !== undefined ? match.selected : (selectTop ? top.image.path : "");
-    return `<article class="match-row ${match.conflict ? "match-conflict" : ""}" data-match-card="${match.card.id}">
-      <label class="match-select-box"><input type="checkbox" data-select-match="${match.card.id}" ${selectedMatchIds.has(match.card.id) ? "checked" : ""} /> Select</label>
-      <div class="match-card-name"><strong>${escapeHtml(match.sale?.name || activeSale().name)} · ${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.year)} ${escapeHtml(match.card.set)} #${escapeHtml(match.card.number)} ${escapeHtml(match.card.name)} ${escapeHtml(duplicateInfo(match.card, match.sale || activeSale()).label)}</strong><span>Flaws: ${escapeHtml(match.card.notes && !/^none$/i.test(match.card.notes) ? match.card.notes : "None listed")}</span><span>Purchase date: ${displayPurchaseDate(match.card.purchaseDate)}</span>${match.conflict ? `<span class="match-warning">${escapeHtml(match.conflictReason || "Choose the correct image manually.")}</span>` : ""}</div>
+    return `<article class="match-row ${match.conflict ? "match-conflict" : ""}" data-match-card="${match.card.id}" data-match-key="${match.key}">
+      <label class="match-select-box"><input type="checkbox" data-select-match="${match.key}" ${selectedMatchIds.has(match.key) ? "checked" : ""} /> Select</label>
+      <div class="match-card-name"><strong>${escapeHtml(match.sale?.name || activeSale().name)} · ${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.year)} ${escapeHtml(match.card.set)} #${escapeHtml(match.card.number)} ${escapeHtml(match.card.name)} ${escapeHtml(duplicateInfo(match.card, match.sale || activeSale()).label)}</strong>${saleImageMode(match.sale) === "front-back" ? `<span class="status available">${imageSlotLabel(match.slot)} scan</span>` : ""}<span>Flaws: ${escapeHtml(match.card.notes && !/^none$/i.test(match.card.notes) ? match.card.notes : "None listed")}</span><span>Purchase date: ${displayPurchaseDate(match.card.purchaseDate)}</span>${match.conflict ? `<span class="match-warning">${escapeHtml(match.conflictReason || "Choose the correct image manually.")}</span>` : ""}</div>
       <div class="candidate-picker"><img data-match-preview src="${selectedPath ? fileUrl(selectedPath) : "assets/favicon.svg"}" alt="" /><div><select data-match-select ${match.confirmed ? "disabled" : ""}><option value="">Leave unmatched</option>${match.candidates.map((candidate) => `<option value="${escapeHtml(candidate.image.path)}" ${selectedPath === candidate.image.path ? "selected" : ""}>${escapeHtml(candidate.image.relativePath)} — ${Math.max(0, Math.min(100, candidate.score))}% match</option>`).join("")}</select><div class="confidence-note">${top ? `Best clue: ${escapeHtml(top.reasons.join(", ") || "partial filename")}` : "No likely filename found"}</div></div></div>
-      <div class="match-confirm">${match.confirmed ? `<span class="status available">Confirmed</span><button type="button" class="row-action" data-reopen-match="${match.card.id}">Reopen</button>` : `<button type="button" class="primary" data-confirm-match="${match.card.id}">${selectedPath ? "Confirm match" : "Confirm no image"}</button>`}<button type="button" class="row-action" data-rematch-match="${match.card.id}">Re-run related</button></div>
+      <div class="match-confirm">${match.confirmed ? `<span class="status available">Confirmed</span><button type="button" class="row-action" data-reopen-match="${match.key}">Reopen</button>` : `<button type="button" class="primary" data-confirm-match="${match.key}">${selectedPath ? "Confirm match" : "Confirm no image"}</button>`}<button type="button" class="row-action" data-rematch-match="${match.card.id}">Re-run related</button></div>
     </article>`;
   }).join("") : `<div class="empty-state"><h3>No matches in this filter</h3><p>Change the filter or search text to see other cards.</p></div>`;
-  const visibleIds = filtered.map((match) => match.card.id);
+  const visibleIds = filtered.map((match) => match.key);
   const selectedVisible = visibleIds.filter((id) => selectedMatchIds.has(id)).length;
   $("#matchSelectionCount").textContent = `${selectedMatchIds.size} selected`;
   $("#confirmSelectedMatchesBtn").disabled = selectedMatchIds.size === 0;
@@ -1895,23 +1949,23 @@ function confirmMatch(match, selectedPath = match.selected) {
   if (!match || match.confirmed) return false;
   match.selected = selectedPath || "";
   if (match.selected) {
-    const previousPath = match.card.imagePath;
-    if (!attachImage(match.card, match.selected, true, match.sale || activeSale())) return false;
+    const previousPath = imagePathFor(match.card, match.slot);
+    if (!attachImage(match.card, match.selected, true, match.sale || activeSale(), match.slot)) return false;
     state.manualMatchMemory ||= {};
-    state.manualMatchMemory[normalizedCardKey(match.card)] = match.selected;
+    state.manualMatchMemory[`${normalizedCardKey(match.card)}::${match.slot}`] = match.selected;
     const sale = match.sale || activeSale();
-    if (previousPath && previousPath !== match.selected && !sale.cards.some((card) => card.id !== match.card.id && card.imagePath === previousPath)) sale.images = sale.images.filter((image) => image.path !== previousPath);
+    if (previousPath && previousPath !== match.selected && !sale.cards.some((card) => cardImagePaths(card).includes(previousPath))) sale.images = sale.images.filter((image) => image.path !== previousPath);
   }
   match.confirmed = true;
-  selectedMatchIds.delete(match.card.id);
+  selectedMatchIds.delete(match.key);
   return true;
 }
 
 function confirmSelectedMatches(ids = selectedMatchIds) {
   let confirmed = 0;
   let conflicts = 0;
-  pendingMatches.review.filter((match) => ids.has(match.card.id)).forEach((match) => {
-    const row = $(`[data-match-card="${CSS.escape(match.card.id)}"]`);
+  pendingMatches.review.filter((match) => ids.has(match.key)).forEach((match) => {
+    const row = $(`[data-match-key="${CSS.escape(match.key)}"]`);
     const selected = row ? $("[data-match-select]", row)?.value : (match.selected ?? match.candidates[0]?.image.path ?? "");
     if (confirmMatch(match, selected)) confirmed += 1;
     else if (!match.confirmed) conflicts += 1;
@@ -1921,23 +1975,24 @@ function confirmSelectedMatches(ids = selectedMatchIds) {
 }
 
 function confirmPerfectMatches() {
-  const perfect = new Set(pendingMatches.review.filter((match) => !match.confirmed && !match.conflict && (match.candidates[0]?.score || 0) >= 100).map((match) => match.card.id));
+  const perfect = new Set(pendingMatches.review.filter((match) => !match.confirmed && !match.conflict && (match.candidates[0]?.score || 0) >= 100).map((match) => match.key));
   perfect.forEach((id) => {
-    const match = pendingMatches.review.find((item) => item.card.id === id);
+    const match = pendingMatches.review.find((item) => item.key === id);
     if (match) match.selected = match.candidates[0]?.image.path || "";
   });
   confirmSelectedMatches(perfect);
 }
 
 function deleteSelectedMatches() {
-  const count = selectedMatchIds.size;
+  const cardIds = new Set(pendingMatches.review.filter((match) => selectedMatchIds.has(match.key)).map((match) => match.card.id));
+  const count = cardIds.size;
   if (!count || !window.confirm(`Delete ${count} selected card${count === 1 ? "" : "s"} from this sale?`)) return;
-  const ids = new Set(selectedMatchIds);
+  const ids = cardIds;
   state.sales.forEach((sale) => {
     const removed = sale.cards.filter((card) => ids.has(card.id));
     sale.cards = sale.cards.filter((card) => !ids.has(card.id));
     renumberCardReferences(sale, { audit: false });
-    removed.forEach((card) => { if (card.imagePath && !sale.cards.some((item) => item.imagePath === card.imagePath)) sale.images = sale.images.filter((image) => image.path !== card.imagePath); });
+    removed.forEach((card) => cardImagePaths(card).forEach((path) => { if (!sale.cards.some((item) => cardImagePaths(item).includes(path))) sale.images = sale.images.filter((image) => image.path !== path); }));
   });
   pendingMatches.review = pendingMatches.review.filter((match) => !ids.has(match.card.id));
   selectedMatchIds.clear();
@@ -1960,20 +2015,20 @@ function renderFolderSettings() {
   $("#excludedFolderList").innerHTML = settings.excludedFolders.length ? settings.excludedFolders.map((folder, index) => `<div class="folder-item excluded"><span>${escapeHtml(folder)}</span><button type="button" data-remove-excluded="${index}">Remove</button></div>`).join("") : `<p class="folder-empty">No folders excluded.</p>`;
 }
 
-async function chooseManualImage(cardId) {
+async function chooseManualImage(cardId, slot = "single") {
   if (!requireImportLicense()) return;
   const card = activeSale().cards.find((item) => item.id === cardId);
   if (!card) return;
   const paths = await window.cardSale.chooseImages();
   if (!paths.length) return;
-  const previousPath = card.imagePath;
-  if (!attachImage(card, paths[0])) return;
+  const previousPath = imagePathFor(card, slot);
+  if (!attachImage(card, paths[0], false, activeSale(), slot)) return;
   state.manualMatchMemory ||= {};
-  state.manualMatchMemory[normalizedCardKey(card)] = paths[0];
-  if (previousPath && previousPath !== paths[0] && !activeSale().cards.some((item) => item.id !== card.id && item.imagePath === previousPath)) {
+  state.manualMatchMemory[`${normalizedCardKey(card)}::${slot}`] = paths[0];
+  if (previousPath && previousPath !== paths[0] && !activeSale().cards.some((item) => cardImagePaths(item).includes(previousPath))) {
     activeSale().images = activeSale().images.filter((image) => image.path !== previousPath);
   }
-  saveSoon(); render(); toast(`Image attached to ${card.name}.`);
+  saveSoon(); render(); toast(`${imageSlotLabel(slot)} attached to ${card.name}.`);
 }
 
 function deleteCard(cardId) {
@@ -1984,7 +2039,7 @@ function deleteCard(cardId) {
   snapshotSale(`Before deleting ${card.ref} · ${card.name}`);
   sale.cards = sale.cards.filter((item) => item.id !== cardId);
   renumberCardReferences(sale, { audit: false });
-  if (card.imagePath && !sale.cards.some((item) => item.imagePath === card.imagePath)) sale.images = sale.images.filter((image) => image.path !== card.imagePath);
+  cardImagePaths(card).forEach((path) => { if (!sale.cards.some((item) => cardImagePaths(item).includes(path))) sale.images = sale.images.filter((image) => image.path !== path); });
   recordAudit("delete", `Deleted ${card.ref} · ${card.name}`, { cardId: card.id });
   saveSoon(); renderStats(); renderListings(); renderImages(); toast("Card removed from the sale.");
 }
@@ -1998,7 +2053,7 @@ function deleteSelectedCards() {
   const removed = sale.cards.filter((card) => selectedListingIds.has(card.id));
   sale.cards = sale.cards.filter((card) => !selectedListingIds.has(card.id));
   renumberCardReferences(sale, { audit: false });
-  removed.forEach((card) => { if (card.imagePath && !sale.cards.some((item) => item.imagePath === card.imagePath)) sale.images = sale.images.filter((image) => image.path !== card.imagePath); });
+  removed.forEach((card) => cardImagePaths(card).forEach((path) => { if (!sale.cards.some((item) => cardImagePaths(item).includes(path))) sale.images = sale.images.filter((image) => image.path !== path); }));
   selectedListingIds.clear();
   recordAudit("delete", `Deleted ${count} selected cards`);
   saveSoon(); renderStats(); renderListings(); renderImages(); toast(`${count} cards removed from the sale.`);
@@ -2541,7 +2596,7 @@ function resetMessageTemplates() {
 const PACKING_PRINT_STYLES = `
   body{font:14px "Segoe UI",Arial,sans-serif;color:#172333;background:#fff}
   .slip-page{min-height:100vh;padding:.42in;page-break-after:always;display:flex;flex-direction:column;background:#fff;break-inside:avoid}
-  .slip-page:last-child{page-break-after:auto}.slip-brand{display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid var(--accent);padding-bottom:14px}.slip-brand-main{display:flex;align-items:center;gap:14px}.slip-logo{max-width:92px;max-height:70px;object-fit:contain}.slip-logo.app-brand-logo{width:210px;max-width:210px;max-height:62px}.slip-brand h1{font:700 27px "Segoe UI",Arial,sans-serif;margin:0}.slip-brand p,.slip-muted{margin:4px 0 0;color:#607080}.slip-header{font-size:18px;font-weight:800;color:var(--accent);margin:20px 0 8px}.slip-order{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0;padding:14px;background:#f3f6f8;border-radius:10px}.slip-order h2{margin:0 0 5px;font:700 21px "Segoe UI",Arial,sans-serif}.slip-order p{margin:3px 0}.slip-message{padding:12px 14px;border-left:4px solid var(--accent);background:#e9fff3;margin:4px 0 16px}.slip-table{width:100%;border-collapse:collapse}.slip-table th{text-align:left;text-transform:uppercase;font-size:10px;letter-spacing:.06em;color:#607080;border-bottom:2px solid #d9e0e6;padding:8px 6px}.slip-table td{padding:9px 6px;border-bottom:1px solid #e2e7eb;vertical-align:middle}.slip-table .price{text-align:right;font-weight:800}.slip-thumb{width:42px;height:42px;object-fit:cover;border-radius:5px}.slip-card-detail{font-size:11px;color:#607080;margin-top:2px}.slip-totals{margin:15px 0 10px auto;width:min(290px,100%)}.slip-total-line{display:flex;justify-content:space-between;padding:4px 0}.slip-total-line.grand{font-size:19px;font-weight:900;border-top:2px solid var(--accent);padding-top:9px;margin-top:5px}.slip-policy{font-size:11px;color:#607080;border-top:1px solid #d9e0e6;padding-top:10px;margin-top:12px}.slip-links{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center;margin-top:15px;padding:12px;border-radius:10px;background:#f3f6f8}.slip-links img{width:92px;height:92px}.slip-footer{margin-top:auto;text-align:center;color:#607080;font-size:11px;padding-top:16px}.shipping-label-page{justify-content:center;align-items:center}.shipping-label{width:100%;border:2px solid #172333;border-radius:12px;padding:.35in}.shipping-label h1{font-size:17px;text-transform:uppercase}.shipping-label address{font-size:22px;line-height:1.45;font-style:normal;margin-top:25px}.slip-note{font-style:italic;margin-top:10px;color:#465767}
+  .slip-page:last-child{page-break-after:auto}.slip-brand{display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid var(--accent);padding-bottom:14px}.slip-brand-main{display:flex;align-items:center;gap:14px}.slip-logo{max-width:92px;max-height:70px;object-fit:contain}.slip-logo.app-brand-logo{width:210px;max-width:210px;max-height:62px}.slip-brand h1{font:700 27px "Segoe UI",Arial,sans-serif;margin:0}.slip-brand p,.slip-muted{margin:4px 0 0;color:#607080}.slip-header{font-size:18px;font-weight:800;color:var(--accent);margin:20px 0 8px}.slip-order{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0;padding:14px;background:#f3f6f8;border-radius:10px}.slip-order h2{margin:0 0 5px;font:700 21px "Segoe UI",Arial,sans-serif}.slip-order p{margin:3px 0}.slip-message{padding:12px 14px;border-left:4px solid var(--accent);background:#e9fff3;margin:4px 0 16px}.slip-table{width:100%;border-collapse:collapse}.slip-table th{text-align:left;text-transform:uppercase;font-size:10px;letter-spacing:.06em;color:#607080;border-bottom:2px solid #d9e0e6;padding:8px 6px}.slip-table td{padding:9px 6px;border-bottom:1px solid #e2e7eb;vertical-align:middle}.slip-table .price{text-align:right;font-weight:800}.slip-thumb{width:42px;height:42px;object-fit:cover;border-radius:5px}.slip-card-detail{font-size:11px;color:#607080;margin-top:2px}.slip-totals{margin:15px 0 10px auto;width:min(290px,100%)}.slip-total-line{display:flex;justify-content:space-between;padding:4px 0}.slip-total-line.grand{font-size:19px;font-weight:900;border-top:2px solid var(--accent);padding-top:9px;margin-top:5px}.slip-policy{font-size:11px;color:#607080;border-top:1px solid #d9e0e6;padding-top:10px;margin-top:12px}.slip-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:15px}.slip-link-item{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:12px;border-radius:10px;background:#f3f6f8;overflow-wrap:anywhere}.slip-links img{width:82px;height:82px}.slip-footer{margin-top:auto;text-align:center;color:#607080;font-size:11px;padding-top:16px}.shipping-label-page{justify-content:center;align-items:center}.shipping-label{width:100%;border:2px solid #172333;border-radius:12px;padding:.35in}.shipping-label h1{font-size:17px;text-transform:uppercase}.shipping-label address{font-size:22px;line-height:1.45;font-style:normal;margin-top:25px}.slip-note{font-style:italic;margin-top:10px;color:#465767}
   .slip-dense{font-size:12px;padding:.3in}.slip-dense .slip-brand h1{font-size:22px}.slip-dense .slip-header{margin:11px 0 5px}.slip-dense .slip-order{margin:8px 0;padding:9px}.slip-dense .slip-message{padding:8px 10px;margin:3px 0 8px}.slip-dense .slip-table td{padding:5px}.slip-dense .slip-thumb{width:34px;height:34px}.slip-dense .slip-totals{margin:8px 0 5px auto}.slip-dense .slip-links{margin-top:7px;padding:7px}.slip-dense .slip-links img{width:68px;height:68px}.slip-ultra-dense{font-size:10px;padding:.22in}.slip-ultra-dense .slip-brand h1{font-size:18px}.slip-ultra-dense .slip-brand{padding-bottom:7px}.slip-ultra-dense .slip-header{font-size:14px;margin:7px 0 3px}.slip-ultra-dense .slip-order{margin:5px 0;padding:6px}.slip-ultra-dense .slip-order h2{font-size:16px}.slip-ultra-dense .slip-message{padding:5px 8px;margin:2px 0 5px}.slip-ultra-dense .slip-table td{padding:3px}.slip-ultra-dense .slip-thumb{width:28px;height:28px}.slip-ultra-dense .slip-totals{margin:5px 0 3px auto}.slip-ultra-dense .slip-links{margin-top:4px;padding:5px}.slip-ultra-dense .slip-links img{width:52px;height:52px}.slip-ultra-dense .slip-policy,.slip-ultra-dense .slip-footer{padding-top:5px;margin-top:5px}
   @media print{.slip-page{break-after:page}.slip-page:last-child{break-after:auto}}
 `;
@@ -2564,6 +2619,8 @@ async function buildPackingSlip(buyer, design = ensurePackingSettings()) {
   const logoData = design.logoPath ? await window.cardSale.packingFileDataUrl(design.logoPath) : design.brandName === "Card Sale Manager" ? BUILT_IN_BRAND_LOGO : "";
   const qrValue = packingQrValue(design);
   const qrData = qrValue ? await window.cardSale.packingQrDataUrl(qrValue, design.accent) : "";
+  const extraLinks = (design.extraLinks || []).filter((link) => String(link.url || "").trim());
+  const extraQrData = await Promise.all(extraLinks.map((link) => link.showQr === false ? Promise.resolve("") : window.cardSale.packingQrDataUrl(link.url, design.accent)));
   const thumbData = design.showThumbnails ? await Promise.all(cards.map((card) => card.imagePath ? window.cardSale.packingFileDataUrl(card.imagePath) : Promise.resolve(""))) : [];
   const appBrand = !design.logoPath && design.brandName === "Card Sale Manager";
   const brand = `<section class="slip-brand"><div class="slip-brand-main">${logoData ? `<img class="slip-logo${appBrand ? " app-brand-logo" : ""}" src="${logoData}" alt="" />` : ""}${appBrand ? "" : `<div><h1>${escapeHtml(design.brandName || sale.name)}</h1><p>${escapeHtml(design.contact || "")}</p></div>`}</div><div class="slip-muted">${escapeHtml(sale.name)}</div></section>${design.header ? `<div class="slip-header">${escapeHtml(design.header)}</div>` : ""}`;
@@ -2572,7 +2629,9 @@ async function buildPackingSlip(buyer, design = ensurePackingSettings()) {
   const items = `<table class="slip-table"><thead><tr>${design.showThumbnails ? "<th></th>" : ""}<th>Ref</th><th>Card</th>${design.showPrices ? "<th class=\"price\">Price</th>" : ""}</tr></thead><tbody>${cards.map((card, index) => { const packingFields = customFields().filter((field) => field.includePacking && customFieldValue(card, field.key) !== "").map((field) => `${field.label}: ${customFieldValue(card, field.key)}`); return `<tr>${design.showThumbnails ? `<td>${thumbData[index] ? `<img class="slip-thumb" src="${thumbData[index]}" alt="" />` : ""}</td>` : ""}<td><strong>${escapeHtml(card.ref)}</strong></td><td><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong>${design.showDetails ? `<div class="slip-card-detail">${[card.condition, card.notes && String(card.notes).toLowerCase() !== "none" ? card.notes : "", ...packingFields].filter(Boolean).map(escapeHtml).join(" · ")}</div>` : ""}</td>${design.showPrices ? `<td class="price">${money(card.claimPrice ?? card.price)}</td>` : ""}</tr>`; }).join("")}</tbody></table>`;
   const totals = design.showPrices ? `<section class="slip-totals"><div class="slip-total-line"><span>Cards</span><strong>${money(subtotal)}</strong></div><div class="slip-total-line"><span>${escapeHtml(order.shippingMethod || "Shipping")}</span><strong>${money(shipping)}</strong></div>${discount ? `<div class="slip-total-line"><span>Discount</span><strong>−${money(discount)}</strong></div>` : ""}<div class="slip-total-line grand"><span>Total</span><span>${money(total)}</span></div></section>` : "";
   const policy = design.returnPolicy ? `<section class="slip-policy"><strong>Questions or concerns?</strong><br>${escapeHtml(design.returnPolicy)}</section>` : "";
-  const qr = qrData || design.socialLink ? `<section class="slip-links"><div><strong>Stay connected</strong>${design.socialLink ? `<p>${escapeHtml(design.socialLink)}</p>` : ""}${qrValue ? `<p class="slip-muted">Scan to open ${escapeHtml(design.qrType === "social" ? "our page" : design.qrType)}.</p>` : ""}</div>${qrData ? `<img src="${qrData}" alt="QR code" />` : ""}</section>` : "";
+  const mainLink = qrData || design.socialLink ? `<div class="slip-link-item"><div><strong>Stay connected</strong>${design.socialLink ? `<p>${escapeHtml(design.socialLink)}</p>` : ""}${qrValue ? `<p class="slip-muted">Scan to open ${escapeHtml(design.qrType === "social" ? "our page" : design.qrType)}.</p>` : ""}</div>${qrData ? `<img src="${qrData}" alt="QR code" />` : ""}</div>` : "";
+  const extraLinkHtml = extraLinks.map((link, index) => `<div class="slip-link-item"><div><strong>${escapeHtml(link.label || "Link")}</strong>${link.showText === false ? "" : `<p>${escapeHtml(link.url)}</p>`}</div>${extraQrData[index] ? `<img src="${extraQrData[index]}" alt="${escapeHtml(link.label || "Link")} QR code" />` : ""}</div>`).join("");
+  const qr = mainLink || extraLinkHtml ? `<section class="slip-links">${mainLink}${extraLinkHtml}</section>` : "";
   const footer = design.footer ? `<footer class="slip-footer">${escapeHtml(design.footer)}</footer>` : "";
   const sectionHtml = { header: brand, buyer: buyerBlock, message, items, totals, policy, qr, footer };
   const densityClass = cards.length > 16 ? " slip-ultra-dense" : cards.length > 8 ? " slip-dense" : "";
@@ -2607,6 +2666,24 @@ async function outputPackingSlips(names, action = "print", design = ensurePackin
 
 async function printPackingSlip(buyer) { return outputPackingSlips([buyer]); }
 
+function ensurePackingExtraLinksEditor() {
+  if ($("#packingExtraLinkRows")) return;
+  const anchor = $("#packingUpcomingLink")?.closest("label");
+  if (!anchor) return;
+  const section = document.createElement("section");
+  section.className = "packing-extra-links";
+  section.innerHTML = `<div class="panel-header compact"><div><h3>Additional lines and QR codes</h3><p>Add as many extra destinations as you need.</p></div><button id="addPackingLinkBtn" type="button" class="secondary">+ Add link</button></div><div id="packingExtraLinkRows"></div>`;
+  anchor.insertAdjacentElement("afterend", section);
+}
+
+function renderPackingExtraLinks() {
+  ensurePackingExtraLinksEditor();
+  const rows = $("#packingExtraLinkRows");
+  if (!rows) return;
+  const links = packingDesignerDraft?.extraLinks || [];
+  rows.innerHTML = links.length ? links.map((link, index) => `<div class="packing-extra-link-row" data-packing-extra-link="${index}"><input data-extra-link-label placeholder="Label (Facebook, next sale…)" value="${escapeHtml(link.label || "")}" /><input data-extra-link-url type="url" placeholder="https://…" value="${escapeHtml(link.url || "")}" /><label><input data-extra-link-text type="checkbox" ${link.showText === false ? "" : "checked"} /> Print URL</label><label><input data-extra-link-qr type="checkbox" ${link.showQr === false ? "" : "checked"} /> QR code</label><button type="button" class="icon-btn" data-remove-packing-link="${index}" aria-label="Remove link">×</button></div>`).join("") : `<p class="dialog-copy">No additional links yet. Your main QR destination above still works as before.</p>`;
+}
+
 function readPackingDesignerForm() {
   const draft = packingDesignerDraft || clone(ensurePackingSettings());
   const field = (id) => $(id).value.trim();
@@ -2615,7 +2692,8 @@ function readPackingDesignerForm() {
     brandName: field("#packingBrandName"), contact: field("#packingContact"), socialLink: field("#packingSocialLink"), qrType: $("#packingQrType").value, qrUrl: field("#packingQrUrl"),
     paymentLink: field("#packingPaymentLink"), feedbackLink: field("#packingFeedbackLink"), upcomingLink: field("#packingUpcomingLink"), header: field("#packingHeader"), thanks: field("#packingThanks"), returnPolicy: field("#packingReturnPolicy"), footer: field("#packingFooter"),
     showAddress: $("#packingShowAddress").checked, showOrderNumber: $("#packingShowOrderNumber").checked, showPayment: $("#packingShowPayment").checked, showShipping: $("#packingShowShipping").checked,
-    showPrices: $("#packingShowPrices").checked, showDetails: $("#packingShowDetails").checked, showThumbnails: $("#packingShowThumbnails").checked, includeLabel: $("#packingIncludeLabel").checked
+    showPrices: $("#packingShowPrices").checked, showDetails: $("#packingShowDetails").checked, showThumbnails: $("#packingShowThumbnails").checked, includeLabel: $("#packingIncludeLabel").checked,
+    extraLinks: $$('[data-packing-extra-link]').map((row) => ({ label: $("[data-extra-link-label]", row).value.trim(), url: $("[data-extra-link-url]", row).value.trim(), showText: $("[data-extra-link-text]", row).checked, showQr: $("[data-extra-link-qr]", row).checked }))
   });
   packingDesignerDraft = draft;
   return draft;
@@ -2623,6 +2701,7 @@ function readPackingDesignerForm() {
 
 function populatePackingDesigner(design = ensurePackingSettings(), selectedId = "") {
   packingDesignerDraft = clone(design);
+  packingDesignerDraft.extraLinks ||= [];
   $("#packingTemplateSelect").innerHTML = `<option value="">Current active design</option>${state.packingTemplates.map((template) => `<option value="${template.id}" ${template.id === selectedId ? "selected" : ""}>${escapeHtml(template.name)}</option>`).join("")}`;
   const values = { packingTemplateName: design.name, packingPageSize: design.pageSize, packingAccent: design.accent, packingBrandName: design.brandName, packingContact: design.contact, packingSocialLink: design.socialLink, packingQrType: design.qrType, packingQrUrl: design.qrUrl, packingPaymentLink: design.paymentLink, packingFeedbackLink: design.feedbackLink, packingUpcomingLink: design.upcomingLink, packingHeader: design.header, packingThanks: design.thanks, packingReturnPolicy: design.returnPolicy, packingFooter: design.footer };
   Object.entries(values).forEach(([id, value]) => { $(`#${id}`).value = value || ""; });
@@ -2630,6 +2709,7 @@ function populatePackingDesigner(design = ensurePackingSettings(), selectedId = 
   Object.entries(checks).forEach(([id, value]) => { $(`#${id}`).checked = Boolean(value); });
   $("#packingLogoStatus").textContent = design.logoPath || (design.brandName === "Card Sale Manager" ? "Built-in Card Sale Manager logo" : "No logo selected");
   $("#deletePackingTemplateBtn").disabled = !selectedId;
+  renderPackingExtraLinks();
   renderPackingSectionOrder();
   return updatePackingPreview();
 }
@@ -2832,11 +2912,11 @@ async function outputPweLabels(names, action = "print") {
 
 const WALKTHROUGH_STEPS = [
   { title: "Welcome to Card Sale Manager", body: "Post. Sell. Track. The Command Center is your daily checklist from first claim to final shipment.", tips: ["Green actions move work forward", "Amber and red are reserved for items needing attention"], image: "assets/brand-logo-dark.svg", view: "command" },
-  { title: "Import and prepare listings", body: "Import your spreadsheet, choose a saved column preset, review warnings, and match each card to its image.", tips: ["Purchase data stays private", "Copying text and dragging an image are separate actions"], image: "assets/help/workspace.png", view: "sale" },
+  { title: "Import and prepare listings", body: "Choose one image or separate front and back scans when you create the sale, then import your spreadsheet, review warnings, and match the files.", tips: ["Front/back filenames can use F, B, Front, or Back", "Purchase data stays private", "Copying text and dragging an image are separate actions"], image: "assets/help/workspace.png", view: "sale" },
   { title: "Preview and publish your catalog", body: "Open Catalog to edit the public title, introduction, teams, card details, and images. Export an offline folder or connect Cloudflare once and publish the latest preview directly.", tips: ["Catalogs filter by player, year, and every attached team", "Year is always the primary sort and card number is the secondary sort", "Purchase data, buyer data, and listing-copy controls are never published"], image: "assets/help/workspace.png", view: "catalog" },
   { title: "Record claims and offers", body: "Claims Desk contains every sale card. Assign buyers, record claims or offers, and select several available listings to build one bundle offer.", tips: ["Accepted bundles split the final price proportionally across every card", "Accepted offers become orders", "Audit timestamps preserve what happened"], image: "assets/help/offers.png", view: "claims" },
   { title: "Confirm buyer orders", body: "Choose shipping, validate the mailing address, record payment, and copy the buyer summary.", tips: ["PWE or PMWT can be overridden", "Costs never appear in customer messages"], image: "assets/help/orders.png", view: "orders" },
-  { title: "Pack and print", body: "Check cards as they are packed, preview packing slips, print PWE thermal labels, and add tracking.", tips: ["Packed buyers are marked in the menu", "Print previews use the final PDF layout"], image: "assets/help/packing.png", view: "packing" },
+  { title: "Pack and print", body: "Check cards as they are packed, preview packing slips, print PWE thermal labels, add tracking, and mark the package shipped.", tips: ["Packing slips can include multiple link lines and QR codes", "Packed and shipped buyers are marked in the menu", "Print previews use the final PDF layout"], image: "assets/help/packing.png", view: "packing" },
   { title: "Pull, pack, and ship", body: "Card Pulling Mode sorts sold cards by location or any imported field. Packing handles verification, slips, labels, tracking, messages, and shipment.", tips: ["Use two sort levels and an optional group", "The Notification Center links directly to unfinished work"], image: "assets/help/packing.png", view: "pulling" },
   { title: "Your work is protected", body: "The green indicator confirms a local save. Daily copies rotate, while permanent update archives preserve the local workspace, portable file, sales, and buyer profiles.", tips: ["Open the data folder from the sidebar", "Updates never prune buyer profiles", "Anonymous diagnostics contain no buyer or card details"], image: "assets/brand-logo-dark.svg", view: "help" }
 ];
@@ -2864,6 +2944,8 @@ function openSetupWizard() {
 async function renderDetailedGuide(query = $("#guideSearch")?.value || "") {
   const container = $("#detailedGuideSections");
   if (!container) return;
+  const imageHelpNote = $("#helpView .help-hero .setup-note");
+  if (imageHelpNote) imageHelpNote.textContent = "Each sale can use one image per card or separate front and back scans. Front/back filenames should include F, B, Front, or Back. CardStitcher remains useful for combining more than two photos or detail shots. The optional year-folder download is available if you want it, but it is not required.";
   try {
     detailedGuideContent ||= await fetch("assets/help-guide-content.json").then((response) => {
       if (!response.ok) throw new Error("Guide file could not be loaded.");
@@ -3113,7 +3195,7 @@ function applyCarryover() {
   let destination = state.sales.find((sale) => sale.id === $("#carryoverDestination").value);
   const newName = $("#carryoverNewSale").value.trim();
   if (newName) {
-    destination = { id: uid(), name: newName, pweShipping: source.pweShipping, pmwtShipping: source.pmwtShipping, shippingRules: clone(ensureShippingRules(source)), template: source.template, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: clone(customFields(source)), versions: [], audit: [] };
+    destination = { id: uid(), name: newName, imageMode: saleImageMode(source), pweShipping: source.pweShipping, pmwtShipping: source.pmwtShipping, shippingRules: clone(ensureShippingRules(source)), template: source.template, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: clone(customFields(source)), versions: [], audit: [] };
     state.sales.push(destination);
   }
   if (!destination) return toast("Choose a destination or enter a new sale name.");
@@ -3122,20 +3204,21 @@ function applyCarryover() {
   snapshotSale(`Before receiving ${cards.length} carryover cards`, destination);
   const percent = Number($("#carryoverPricePercent").value || 0);
   const start = destination.cards.length;
-  const usedDestinationImages = new Set(destination.cards.filter((card) => card.imagePath).map((card) => card.imagePath.toLowerCase()));
+  const usedDestinationImages = new Set(destination.cards.flatMap(cardImagePaths).map((path) => path.toLowerCase()));
   cards.forEach((card, index) => {
     const copy = clone(card);
     copy.id = uid(); copy.ref = String(start + index + 1); copy.sourceOrder = start + index + 1; copy.customOrder = start + index + 1;
     copy.price = Math.max(0, Math.round(Number(copy.price) * (1 + percent / 100) * 100) / 100);
     copy.status = "available";
     ["buyer", "claimPrice", "offerPrice", "offerStatus", "counterPrice", "counteredAt", "offerReceivedAt", "offerAcceptedAt", "claimedAt", "claimUpdatedAt", "claimType", "claimNote", "pulled", "pulledAt", "packed", "bundleId", "hiddenAfterCopy", "completedBy", "completedAt"].forEach((key) => delete copy[key]);
-    if (copy.imagePath) {
-      const imageKey = copy.imagePath.toLowerCase();
-      if (usedDestinationImages.has(imageKey)) copy.imagePath = "";
+    ["imagePath", "backImagePath"].forEach((field) => {
+      if (!copy[field]) return;
+      const imageKey = copy[field].toLowerCase();
+      if (usedDestinationImages.has(imageKey)) copy[field] = "";
       else usedDestinationImages.add(imageKey);
-    }
+    });
     destination.cards.push(copy);
-    if (copy.imagePath && !destination.images.some((image) => image.path.toLowerCase() === copy.imagePath.toLowerCase())) destination.images.push({ id: uid(), path: copy.imagePath, name: copy.imagePath.split(/[\\/]/).pop() });
+    cardImagePaths(copy).forEach((path) => { if (!destination.images.some((image) => image.path.toLowerCase() === path.toLowerCase())) destination.images.push({ id: uid(), path, name: path.split(/[\\/]/).pop() }); });
   });
   recordAudit("carryover", `Received ${cards.length} unsold cards from ${source.name}`, {}, destination);
   $("#carryoverDialog").close(); selectedListingIds.clear(); saveSoon(); render(); toast(`${cards.length} cards carried into ${destination.name}.`);
@@ -3268,13 +3351,14 @@ function bindEvents() {
   $("#closeSaleBtn").addEventListener("click", openCloseSale);
   $("#closeSaleUnsoldAction").addEventListener("change", (event) => $("#closeSaleNameLabel").classList.toggle("hidden", event.target.value !== "new"));
   $("#finishCloseSaleBtn").addEventListener("click", finishCloseSale);
-  $("#newSaleBtn").addEventListener("click", () => $("#newSaleDialog").showModal());
+  $("#newSaleBtn").addEventListener("click", () => { const single = document.querySelector('input[name="newSaleImageMode"][value="single"]'); if (single) single.checked = true; $("#newSaleDialog").showModal(); });
   $("#deleteSaleBtn").addEventListener("click", deleteActiveSale);
   $("#archivedSalesBtn").addEventListener("click", () => { renderArchivedSales(); $("#archivedSalesDialog").showModal(); });
   $("#archivedSalesList").addEventListener("click", (event) => { const button = event.target.closest("[data-restore-archived-sale]"); if (button) { restoreArchivedSale(button.dataset.restoreArchivedSale); $("#archivedSalesDialog").close(); } });
   $("#createSaleBtn").addEventListener("click", (event) => {
     event.preventDefault(); const name = $("#newSaleName").value.trim(); if (!name) return;
-    const sale = { id: uid(), name, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), shippingRules: clone(ensureShippingRules(activeSale())), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [], additionalLookupFolders: [], excludedLookupFolders: [] };
+    const imageMode = document.querySelector('input[name="newSaleImageMode"]:checked')?.value === "front-back" ? "front-back" : "single";
+    const sale = { id: uid(), name, imageMode, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), shippingRules: clone(ensureShippingRules(activeSale())), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [], additionalLookupFolders: [], excludedLookupFolders: [] };
     state.sales.push(sale); state.activeSaleId = sale.id; state.selectedBuyer = ""; resetListingView(); $("#newSaleDialog").close(); saveSoon(); render(); toast("New sale created.");
   });
   $("#saleSelect").addEventListener("change", (event) => { state.activeSaleId = event.target.value; state.selectedBuyer = ""; resetListingView(); saveSoon(); render(); });
@@ -3290,7 +3374,7 @@ function bindEvents() {
     const editId = event.target.dataset.editCard;
     const moveId = event.target.dataset.moveCard;
     if (copyId) copyAndHideCard(copyId);
-    if (imageId) chooseManualImage(imageId);
+    if (imageId) chooseManualImage(imageId, event.target.dataset.imageSide || "single");
     if (rematchId) forceImageLookupForCard(rematchId);
     if (deleteId) deleteCard(deleteId);
     if (restoreId) restoreCard(restoreId);
@@ -3400,7 +3484,7 @@ function bindEvents() {
     const row = event.target.closest("[data-match-card]");
     const preview = $("[data-match-preview]", row);
     preview.src = event.target.value ? fileUrl(event.target.value) : "assets/favicon.svg";
-    const match = pendingMatches?.review.find((item) => item.card.id === row.dataset.matchCard);
+    const match = pendingMatches?.review.find((item) => item.key === row.dataset.matchKey);
     if (match) match.selected = event.target.value;
   });
   $("#matchReviewList").addEventListener("click", (event) => {
@@ -3409,7 +3493,7 @@ function bindEvents() {
     if (rematchId) { forceImageLookupForCard(rematchId); return; }
     const confirmId = event.target.dataset.confirmMatch;
     const reopenId = event.target.dataset.reopenMatch;
-    const match = pendingMatches.review.find((item) => item.card.id === (confirmId || reopenId));
+    const match = pendingMatches.review.find((item) => item.key === (confirmId || reopenId));
     if (!match) return;
     if (confirmId) {
       const row = event.target.closest("[data-match-card]");
@@ -3465,6 +3549,15 @@ function bindEvents() {
     const buyer = $("#packingBuyer").value;
     if (event.target.id === "checkAllCardsBtn") { const cards = cardsForBuyer(buyer); const shouldPack = cards.some((card) => !card.packed); cards.forEach((card) => card.packed = shouldPack); saveSoon(); renderPacking(); toast(shouldPack ? "All cards checked." : "All cards unchecked."); }
     if (event.target.id === "completePackingBtn" && !event.target.disabled) { if (!orderFor(buyer).shippingMethod) return toast("Select PWE or PMWT in Buyer Orders first."); orderFor(buyer).status = "packed"; saveSoon(); render(); toast(`${buyer}'s package is complete.`); }
+    if (event.target.id === "markShippedBtn" && !event.target.disabled) {
+      const order = orderFor(buyer);
+      if (!order.shippingMethod) return toast("Select PWE or PMWT in Buyer Orders first.");
+      order.trackingNumber = $("#trackingNumber")?.value.trim() || order.trackingNumber || "";
+      if (order.shippingMethod === "PMWT" && !order.trackingNumber) return toast("Enter the tracking number before marking a PMWT order shipped.");
+      order.status = "shipped"; order.shippedAt = new Date().toISOString();
+      recordAudit("shipping", `${buyer} marked shipped${order.trackingNumber ? ` · ${order.trackingNumber}` : ""}`, { buyer, trackingNumber: order.trackingNumber });
+      saveSoon(); render(); toast(`${buyer}'s order is marked shipped.`);
+    }
     if (event.target.id === "copyTrackingMessageBtn") { const order = orderFor(buyer); order.trackingNumber = $("#trackingNumber").value.trim(); if (!order.trackingNumber) return toast("Enter a tracking number first."); copyText(trackingMessage(buyer), "Shipping message copied."); }
     if (event.target.id === "previewPackingSlipBtn") outputPackingSlips([buyer], "preview");
     if (event.target.id === "printPackingSlipBtn") printPackingSlip(buyer);
@@ -3489,6 +3582,11 @@ function bindEvents() {
   });
 
   $("#packingDesignerDialog").addEventListener("input", (event) => { if (event.target.matches("input, textarea, select")) updatePackingPreview(); });
+  $("#packingDesignerDialog").addEventListener("click", (event) => {
+    if (event.target.id === "addPackingLinkBtn") { readPackingDesignerForm(); packingDesignerDraft.extraLinks.push({ label: "", url: "", showText: true, showQr: true }); renderPackingExtraLinks(); return; }
+    const remove = event.target.closest("[data-remove-packing-link]");
+    if (remove) { readPackingDesignerForm(); packingDesignerDraft.extraLinks.splice(Number(remove.dataset.removePackingLink), 1); renderPackingExtraLinks(); updatePackingPreview(); }
+  });
   $("#packingTemplateSelect").addEventListener("change", (event) => { const template = state.packingTemplates.find((item) => item.id === event.target.value); populatePackingDesigner(template || ensurePackingSettings(), event.target.value); });
   $("#choosePackingLogoBtn").addEventListener("click", async () => { const logoPath = await window.cardSale.choosePackingLogo(); if (!logoPath) return; packingDesignerDraft.logoPath = logoPath; $("#packingLogoStatus").textContent = logoPath; updatePackingPreview(); });
   $("#clearPackingLogoBtn").addEventListener("click", () => { packingDesignerDraft.logoPath = ""; $("#packingLogoStatus").textContent = packingDesignerDraft.brandName === "Card Sale Manager" ? "Built-in Card Sale Manager logo" : "No logo selected"; updatePackingPreview(); });
@@ -3509,7 +3607,7 @@ function bindEvents() {
   $("#exportPackingPdfBtn").addEventListener("click", async () => { const names = packingFilteredBuyers().filter((buyer) => packingBulkSelection.has(buyer)); if (await outputPackingSlips(names, "pdf")) $("#packingBulkDialog").close(); });
   $("#liveSaleContent").addEventListener("click", (event) => {
     if (event.target.dataset.liveCopy) copyAndHideCard(event.target.dataset.liveCopy).then(() => { liveIndex = Math.min(liveIndex, Math.max(0, liveCards().length - 1)); renderLiveSale(); });
-    if (event.target.dataset.liveImageCard) chooseManualImage(event.target.dataset.liveImageCard);
+    if (event.target.dataset.liveImageCard) chooseManualImage(event.target.dataset.liveImageCard, event.target.dataset.liveImageSide || "single");
     if (event.target.hasAttribute("data-live-next")) { liveIndex = Math.min(liveIndex + 1, Math.max(0, liveCards().length - 1)); renderLiveSale(); }
     if (event.target.hasAttribute("data-live-prev")) { liveIndex = Math.max(0, liveIndex - 1); renderLiveSale(); }
   });
@@ -3549,7 +3647,7 @@ function bindEvents() {
   $("#csmBackupList").addEventListener("click", async (event) => { const button = event.target.closest("[data-restore-csm-backup]"); if (!button || !window.confirm("Restore this recovery copy? CSM will protect the current version first.")) return; const result = await window.cardSale.restoreCsmBackup(button.dataset.restoreCsmBackup); if (!result?.success) return toast(result?.message || "That recovery copy could not be restored."); window.location.reload(); });
   $("#csmMissingImages").addEventListener("click", async (event) => {
     const choose = event.target.closest("[data-csm-manual-image]");
-    if (choose) { state.activeSaleId = choose.dataset.csmSale; await chooseManualImage(choose.dataset.csmManualImage); await saveNow(); renderCsmFileManager(true); return; }
+    if (choose) { state.activeSaleId = choose.dataset.csmSale; await chooseManualImage(choose.dataset.csmManualImage, choose.dataset.csmImageSlot || "single"); await saveNow(); renderCsmFileManager(true); return; }
     const clear = event.target.closest("[data-csm-clear-image]");
     if (clear) { clearMissingImagePath(clear.dataset.csmClearImage); await saveNow(); render(); renderCsmFileManager(true); }
   });
@@ -3692,6 +3790,7 @@ async function init() {
       sale.audit ||= [];
       delete sale.unrecognizedComments;
       sale.sortMode ||= "spreadsheet";
+      sale.imageMode = sale.imageMode === "front-back" ? "front-back" : "single";
       catalogSettings(sale);
       const usedImages = new Set();
       sale.cards.forEach((card, index) => {
@@ -3704,6 +3803,7 @@ async function init() {
         card.sourceOrder ??= index + 1;
         card.customOrder ??= card.sourceOrder;
         card.purchaseDate = normalizePurchaseDate(card.purchaseDate);
+        card.backImagePath ||= "";
         if (card.status !== "available") card.claimType ||= card.offerPrice != null ? "offer" : "claim";
         if (card.claimType === "offer" && card.offerPrice != null) {
           card.offerStatus ||= card.status === "offered" ? "pending" : "accepted";
@@ -3716,9 +3816,11 @@ async function init() {
           }
         }
         if (card.claimedAt && !sale.audit.some((item) => item.cardId === card.id && ["claim", "offer"].includes(item.type))) sale.audit.push({ id: uid(), at: card.claimedAt, type: card.claimType || "claim", message: `${card.claimType === "offer" ? "Offer" : "Claim"} recorded for ${card.ref} · ${card.name}`, cardId: card.id, buyer: card.buyer });
-        const imageKey = String(card.imagePath || "").toLowerCase();
-        if (imageKey && usedImages.has(imageKey)) card.imagePath = "";
-        else if (imageKey) usedImages.add(imageKey);
+        ["imagePath", "backImagePath"].forEach((field) => {
+          const imageKey = String(card[field] || "").toLowerCase();
+          if (imageKey && usedImages.has(imageKey)) card[field] = "";
+          else if (imageKey) usedImages.add(imageKey);
+        });
       });
       Object.values(sale.orders).forEach((order) => { if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : ""; order.shippingAutoSelected ??= false; order.packingNotes ||= ""; order.packingSlipNote ||= ""; order.packingSlipPrintCount ||= 0; });
     });

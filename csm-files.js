@@ -22,7 +22,7 @@ function portableData(value) {
 function imagePaths(data) {
   const found = new Set();
   [...(data.sales || []), ...(data.archivedSales || [])].forEach((sale) => {
-    (sale.cards || []).forEach((card) => { if (card.imagePath) found.add(card.imagePath); });
+    (sale.cards || []).forEach((card) => { if (card.imagePath) found.add(card.imagePath); if (card.backImagePath) found.add(card.backImagePath); });
     (sale.images || []).forEach((image) => { if (image.path) found.add(image.path); });
   });
   const logo = data.preferences?.packingSlip?.logoPath;
@@ -84,7 +84,7 @@ function replacePaths(data, replacements) {
   const map = new Map(Object.entries(replacements || {}).map(([from, to]) => [String(from).toLowerCase(), to]));
   const replace = (value) => map.get(String(value || "").toLowerCase()) || value;
   [...(next.sales || []), ...(next.archivedSales || [])].forEach((sale) => {
-    (sale.cards || []).forEach((card) => { card.imagePath = replace(card.imagePath); });
+    (sale.cards || []).forEach((card) => { card.imagePath = replace(card.imagePath); card.backImagePath = replace(card.backImagePath); });
     (sale.images || []).forEach((image) => { image.path = replace(image.path); image.name = path.basename(image.path || image.name || ""); });
   });
   if (next.preferences?.packingSlip?.logoPath) next.preferences.packingSlip.logoPath = replace(next.preferences.packingSlip.logoPath);

@@ -345,7 +345,12 @@
       <form method="dialog" class="dialog-card">
         <div class="dialog-header"><div><p class="eyebrow">NEW SALE</p><h2>Start a sale</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
         <label>Sale name<input id="newSaleName" placeholder="September vintage sale" required /></label>
-        <div class="two-columns"><label>PWE shipping<input id="newSalePweShipping" type="number" min="0" step="0.01" value="1.00" /></label><label>PMWT shipping<input id="newSalePmwtShipping" type="number" min="0" step="0.01" value="5.00" /></label></div><p class="setup-note">This sale starts with your current automatic shipping rules. You can change them from Buyer Orders.</p>
+        <div class="two-columns"><label>PWE shipping<input id="newSalePweShipping" type="number" min="0" step="0.01" value="1.00" /></label><label>PMWT shipping<input id="newSalePmwtShipping" type="number" min="0" step="0.01" value="5.00" /></label></div>
+        <fieldset class="image-mode-fieldset"><legend>Images for this sale</legend><div class="image-mode-options">
+          <label class="image-mode-option"><input type="radio" name="newSaleImageMode" value="single" checked /><span class="image-mode-copy"><strong>One image per card</strong><small>Use a single combined image, photo, or scan for each listing.</small><span class="image-mode-example single"><img src="assets/help-example-cards.png" alt="Example of one card image" /><em>1 image</em></span></span></label>
+          <label class="image-mode-option"><input type="radio" name="newSaleImageMode" value="front-back" /><span class="image-mode-copy"><strong>Separate front and back scans</strong><small>Attach two files per card. File names should include F, B, Front, or Back.</small><span class="image-mode-example paired"><span><img src="assets/help-example-cards.png" alt="Example front scan" /><em>Front</em></span><span><img src="assets/help-example-cards.png" alt="Example back scan" /><em>Back</em></span></span></span></label>
+        </div></fieldset>
+        <p class="setup-note">This choice applies only to this sale. Existing sales remain in their current one-image format. Shipping rules can be changed from Buyer Orders.</p>
         <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="createSaleBtn" value="default" class="primary">Create sale</button></div>
       </form>
     </dialog>

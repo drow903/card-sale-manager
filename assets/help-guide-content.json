@@ -33,18 +33,21 @@
         "CSM works with your existing folders. The optional Card Years download is only a starter. If you use it, extract it somewhere permanent, such as Documents\\Card Images, instead of leaving it in Downloads.",
         "A sport folder is helpful when you sell several sports, but it is not required. The recommended setup is Main Image Folder, then Sport, then Year. CSM can also work with year folders directly under the main folder.",
         "Spaces, hyphens, and underscores in filenames are fine. Matching improves when the filename includes the card number, player name, and purchase date.",
-        "CSM currently supports one image file per card. If you want to show the front, back, and close-up details, CardStitcher can combine those photos into one finished image before you add it to CSM."
+        "Each sale can use one image per card or separate front and back scans. Choose the image style when you create the sale. Single-image mode is useful for one photo or a combined image; front-and-back mode keeps two separate files attached to each card.",
+        "CardStitcher is still useful when you want to combine more than two photos, close-up details, or a designed collage into one finished image before adding it to CSM."
       ],
       "steps": [
         "Create or choose one main image folder.",
         "Optionally add Baseball, Basketball, Football, and Hockey folders.",
         "Create year folders inside them, such as Baseball\\1961.",
         "Name an image like 20 Robin Roberts 09132026.jpg when the sheet lists 1961, Robin Roberts, card 20, and a purchase date of 09/13/2026.",
-        "For exact duplicate cards bought on the same date, add a final sequence number: 20 Robin Roberts 09132026 1.jpg and 20 Robin Roberts 09132026 2.jpg."
+        "For exact duplicate cards bought on the same date, add a final sequence number: 20 Robin Roberts 09132026 1.jpg and 20 Robin Roberts 09132026 2.jpg.",
+        "For a front-and-back sale, add a separate F, B, Front, or Back key: 20 Robin Roberts 09132026 Front.jpg and 20 Robin Roberts 09132026 Back.jpg. A standalone F or B works too."
       ],
       "tips": [
         "The date code in a filename can be MMDDYYYY or MDDYYYY. CSM compares it with the purchase date from the spreadsheet.",
-        "One image may be used again in a later sale, but CSM will not attach the same file to two listings in the same sale.",
+        "Front and back keys are not case-sensitive. Put the key on its own, separated by a space, hyphen, or underscore, so CSM does not confuse a letter inside a player name with an image side.",
+        "One image may be used again in a later sale, but CSM will not attach the same file to two image slots or listings in the same sale.",
         "CardStitcher is available at https://rowdysportscards.lemonsqueezy.com/checkout/buy/ce687056-a2c0-4515-9a00-7ad45e2c9358."
       ]
     },
@@ -82,7 +85,7 @@
         "The listing preview shows exactly what will be copied to Facebook. Blank grades, numbers, and flaws are cleaned up automatically so the final line does not contain awkward spaces or empty punctuation."
       ],
       "steps": [
-        "Choose New sale and enter the sale name and shipping prices.",
+        "Choose New sale, enter the sale name and shipping prices, and choose either one image per card or separate front and back scans. The choice stays with that sale.",
         "Choose Import spreadsheet and select the workbook.",
         "Check every mapped column. Mark useful extra columns as custom fields.",
         "Review warnings and correct the source sheet or mapping when needed.",
@@ -100,14 +103,14 @@
       "summary": "Let CSM find likely images, then spend your time only on uncertain or conflicting matches.",
       "paragraphs": [
         "Choose Image lookup folders the first time you use a computer. Your primary, additional, and excluded folders carry from sale to sale.",
-        "A unique year, player, card number, and purchase-date match should confirm automatically. CSM sends uncertain matches to review when several files could represent the same card or when an image was suggested for more than one listing.",
+        "A unique year, player, card number, and purchase-date match should confirm automatically. In front-and-back mode, CSM also uses F, B, Front, and Back filename keys to fill the correct image slot. CSM sends uncertain matches to review when several files could represent the same card or when an image was suggested for more than one listing.",
         "The same file cannot be attached to multiple listings within one sale. If CSM finds a conflict, both cards stay unconfirmed until you choose separate images."
       ],
       "steps": [
         "Open Sale Workspace and choose Auto-match card images.",
         "Watch the progress count while CSM scans the folders.",
         "Confirm uncertain matches individually or select several review rows at once.",
-        "Use Add image or the image dropdown to assign a file manually.",
+        "Use Add image to assign a file manually. Front-and-back sales provide separate Add front and Add back controls.",
         "Use Re-run lookup on one card when its suggestion is wrong. Use the full recheck only when you want CSM to reconsider current and past matches."
       ],
       "tips": [
@@ -122,13 +125,13 @@
       "summary": "Drag the image first, then copy the listing so CSM advances in the correct order.",
       "image": "assets/help/workspace.png",
       "paragraphs": [
-        "Live Sale Mode is the easiest way to post a large sale one card at a time. It shows one image and one ready-to-paste listing without the rest of the workspace getting in the way.",
+        "Live Sale Mode is the easiest way to post a large sale one card at a time. It shows the card's single image or its separate front and back images beside one ready-to-paste listing.",
         "Always drag the image into Facebook before clicking Copy listing. Copy listing hides that text and advances CSM to the next card. Dragging the image and copying the text are separate actions, so one does not hide the other.",
         "Wait until Facebook finishes attaching the image before pasting the listing. That small pause prevents the text from being posted against the wrong image when Facebook is slow."
       ],
       "steps": [
         "Open Live Sale Mode and confirm the correct card is on screen.",
-        "Drag the image into the Facebook comment or post composer.",
+        "Drag the image into the Facebook comment or post composer. For a front-and-back sale, drag both scans before copying the listing.",
         "Wait for the image thumbnail to finish loading in Facebook.",
         "Choose Copy listing, paste the text, and submit the Facebook post or comment.",
         "Repeat with the next card. Use Ctrl+Z in CSM if you hide a listing or image by mistake."
@@ -193,7 +196,7 @@
       "image": "assets/help/packing.png",
       "paragraphs": [
         "Card Pulling Mode is useful when a sale contains hundreds of cards. Sort by buyer, year, location, or any custom field you imported. Mark cards as pulled as you remove them from storage.",
-        "Packing slips are optional for every order, although buyers usually appreciate receiving one. You can customize the design, logo, links, QR code, notes, and included sections, then preview a single slip or a combined batch before printing.",
+        "Packing slips are optional for every order, although buyers usually appreciate receiving one. You can customize the design, logo, notes, included sections, and add multiple link lines with separate QR codes, then preview a single slip or a combined batch before printing.",
         "PMWT orders need a tracking number before CSM will mark them shipped. PWE orders may be marked shipped without tracking and can still use the normal shipped message."
       ],
       "steps": [
@@ -201,8 +204,8 @@
         "Mark each card pulled, then open Packing and choose the buyer.",
         "Compare every physical card with the reference, player, year, brand, and image shown in CSM.",
         "Print a packing slip or PWE label if desired. PWE labels support portrait and landscape 4 by 6 layouts.",
-        "Check every packed card. Enter tracking for PMWT and complete the package.",
-        "Copy the shipped message. For PWE, the message simply omits the tracking line."
+        "Check every packed card and choose Complete package. Enter tracking for PMWT.",
+        "Choose Mark shipped on the Packing screen. PMWT requires tracking; PWE can be marked shipped without it. Then copy the shipped message."
       ],
       "tips": [
         "Use Print all slips when several orders are ready. Filters let you limit the batch by payment, packing, shipping method, address, or print history.",
@@ -322,8 +325,9 @@
       "title": "Packing",
       "summary": "Verify cards, print paperwork, record tracking, and finish packages.",
       "paragraphs": [
-        "Choose a buyer and check each card as it enters the package. Packed appears beside completed buyers in the buyer menu.",
-        "Customize packing slips and PWE labels before printing. Use preview when page count matters. Combined printing creates one batch from the buyers and filters you select."
+        "Choose a buyer and check each card as it enters the package. Packed and Shipped appear beside completed buyers in the buyer menu.",
+        "Customize packing slips and PWE labels before printing. Packing slips can contain multiple link lines and QR codes. Use preview when page count matters. Combined printing creates one batch from the buyers and filters you select.",
+        "After packing is complete, use Mark shipped here. PMWT orders require a tracking number; PWE orders do not."
       ]
     },
     {
