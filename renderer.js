@@ -34,6 +34,17 @@ const MESSAGE_TEMPLATE_FIELDS = [
   ["orderSummary", "Order confirmation"], ["paymentDue", "Payment due"], ["paymentReceived", "Payment received"],
   ["shipped", "Shipping confirmation"], ["delayed", "Shipping delayed"], ["counterOffer", "Counter offer"]
 ];
+const DEFAULT_SALE_REPLIES = {
+  claim: "You got it, {firstName} — thank you!",
+  backup: "You’re next in line for {card}, {firstName}. I’ll let you know if it becomes available.",
+  unavailable: "Sorry, {card} has already been claimed.",
+  offerReceived: "Thanks, {firstName}. I have your {price} offer on {card} and will get back to you shortly.",
+  offerAccepted: "Your {price} offer on {card} is accepted. Thank you, {firstName}!",
+  stillShopping: "Before I total your order, are you finished shopping in {saleName}?"
+};
+const SALE_REPLY_FIELDS = [["claim", "Claim confirmed"], ["backup", "Backup claim"], ["unavailable", "Already claimed"], ["offerReceived", "Offer received"], ["offerAccepted", "Offer accepted"], ["stillShopping", "Finished shopping check"]];
+const WORKSPACE_COLUMNS = [["ref", "Reference"], ["grade", "Grade"], ["price", "Price / cost"], ["status", "Status"]];
+const DEFAULT_WORKSPACE_COLUMNS = ["ref", "grade", "price", "status"];
 
 const starterSale = {
   id: uid(),
@@ -146,6 +157,20 @@ function compareCardValues(a, b, key) {
   const left = cardSortValue(a, key); const right = cardSortValue(b, key);
   const numeric = left !== "" && right !== "" && Number.isFinite(Number(left)) && Number.isFinite(Number(right));
   return numeric ? Number(left) - Number(right) : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function cardNumberTokens(value) { return String(value ?? "").trim().replace(/^#/, "").toLowerCase().match(/[a-z]+|\d+|[^a-z\d]+/g) || []; }
+function normalizeCardNumber(value) { return String(value ?? "").trim().replace(/^#+\s*/, "").replace(/[–—]/g, "-").replace(/\s+/g, "").toUpperCase(); }
+function compareCardNumbers(left, right) {
+  const a = cardNumberTokens(left); const b = cardNumberTokens(right); const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    if (a[index] == null) return -1; if (b[index] == null) return 1;
+    const an = /^\d+$/.test(a[index]); const bn = /^\d+$/.test(b[index]);
+    if (an && bn && Number(a[index]) !== Number(b[index])) return Number(a[index]) - Number(b[index]);
+    const compared = a[index].localeCompare(b[index], undefined, { numeric: true, sensitivity: "base" });
+    if (compared) return compared;
+  }
+  return 0;
 }
 
 function referenceOrderedCards(sale = activeSale()) { return sortedSaleCards(sale); }
@@ -371,6 +396,31 @@ function displayPurchaseDate(value) {
   return /^\d{8}$/.test(code) ? `${code.slice(0, 2)}/${code.slice(2, 4)}/${code.slice(4)}` : code || "—";
 }
 
+function ensureSaleReplies() {
+  state.preferences ||= {}; state.preferences.saleReplies ||= {};
+  Object.entries(DEFAULT_SALE_REPLIES).forEach(([key, value]) => { state.preferences.saleReplies[key] ??= value; });
+  return state.preferences.saleReplies;
+}
+
+function workspaceColumns() {
+  state.preferences ||= {};
+  const valid = new Set(WORKSPACE_COLUMNS.map(([key]) => key));
+  state.preferences.workspaceColumns = (state.preferences.workspaceColumns || DEFAULT_WORKSPACE_COLUMNS).filter((key) => valid.has(key));
+  return state.preferences.workspaceColumns;
+}
+
+function uiState() {
+  state.uiState ||= { activeView: "command", scroll: {}, saleViews: {} };
+  state.uiState.scroll ||= {}; state.uiState.saleViews ||= {};
+  return state.uiState;
+}
+
+function saleViewState(sale = activeSale()) {
+  const root = uiState();
+  root.saleViews[sale.id] ||= { filter: "all", query: "", claimQuery: "", selectedListingIds: [] };
+  return root.saleViews[sale.id];
+}
+
 function saleImageMode(sale = activeSale()) { return sale?.imageMode === "front-back" ? "front-back" : "single"; }
 function requiredImageSlots(sale = activeSale()) { return saleImageMode(sale) === "front-back" ? ["front", "back"] : ["single"]; }
 function imagePathFor(card, slot = "single") { return slot === "back" ? String(card?.backImagePath || "") : String(card?.imagePath || ""); }
@@ -394,6 +444,14 @@ function pmwtRequired(buyer, sale = activeSale()) {
   const cards = sale.cards.filter((card) => card.buyer === buyer && cardInOrder(card));
   const value = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
   return (rules.cardCountEnabled && cards.length > rules.maxPweCards) || (rules.valueEnabled && value > rules.maxPweValue);
+}
+
+function shippingRuleExplanation(buyer, sale = activeSale()) {
+  const rules = ensureShippingRules(sale); const cards = sale.cards.filter((card) => card.buyer === buyer && cardInOrder(card));
+  const value = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0); const reasons = [];
+  if (rules.cardCountEnabled && cards.length > rules.maxPweCards) reasons.push(`${cards.length} cards exceeds the ${rules.maxPweCards}-card PWE limit`);
+  if (rules.valueEnabled && value > rules.maxPweValue) reasons.push(`${money(value)} exceeds the ${money(rules.maxPweValue)} PWE value limit`);
+  return reasons.length ? `PMWT recommended because ${reasons.join(" and ")}. You can still override it.` : "No automatic shipping rule was triggered; choose PWE or PMWT manually.";
 }
 
 function orderFor(buyer) {
@@ -786,24 +844,28 @@ function saleNotifications() {
 
 function visibleNotifications({ includeSnoozed = showSnoozedNotifications } = {}) {
   const saved = notificationState(); const now = Date.now();
-  return saleNotifications().filter((item) => !saved.dismissed[item.id] && (includeSnoozed || !saved.snoozed[item.id] || Number(saved.snoozed[item.id]) <= now));
+  const raw = saleNotifications().filter((item) => !saved.dismissed[item.id] && (includeSnoozed || !saved.snoozed[item.id] || Number(saved.snoozed[item.id]) <= now)).map((item) => ({ ...item, priority: item.urgent ? "blocking" : (["images", "profit", "orders", "payment", "packing", "shipping"].includes(item.category) ? "attention" : "info") }));
+  const groups = new Map();
+  raw.forEach((item) => { const key = `${item.category}:${item.title}`; const group = groups.get(key) || []; group.push(item); groups.set(key, group); });
+  return [...groups.entries()].map(([key, children]) => children.length === 1 ? children[0] : ({ ...children[0], id: `group:${key}`, childIds: children.map((item) => item.id), title: `${children.length} related: ${children[0].title}`, detail: children.slice(0, 3).map((item) => item.detail).join(" · ") + (children.length > 3 ? ` · +${children.length - 3} more` : ""), urgent: children.some((item) => item.urgent), priority: children.some((item) => item.priority === "blocking") ? "blocking" : "attention" }));
 }
 
 function renderNotifications() {
   if (!$("#notificationList")) return;
   const all = visibleNotifications();
-  const categories = [...new Set(all.map((item) => item.category))];
+  const categories = ["blocking", "attention", "info"].filter((priority) => all.some((item) => item.priority === priority));
   if (notificationCategory !== "all" && !categories.includes(notificationCategory)) notificationCategory = "all";
-  $("#notificationFilters").innerHTML = [`<button class="${notificationCategory === "all" ? "primary" : "secondary"}" data-notification-category="all">All (${all.length})</button>`, ...categories.map((category) => `<button class="${notificationCategory === category ? "primary" : "secondary"}" data-notification-category="${escapeHtml(category)}">${escapeHtml(category[0].toUpperCase() + category.slice(1))} (${all.filter((item) => item.category === category).length})</button>`)].join("");
-  const shown = all.filter((item) => notificationCategory === "all" || item.category === notificationCategory);
-  $("#notificationList").innerHTML = shown.length ? shown.map((item) => `<article class="notification-item ${item.urgent ? "urgent" : ""}" data-notification-id="${escapeHtml(item.id)}"><span>${item.urgent ? "!" : "•"}</span><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.detail)}</p></div><div class="notification-actions"><button class="primary" data-open-notification="${escapeHtml(item.id)}">Open</button><button class="secondary" data-snooze-notification="${escapeHtml(item.id)}">Snooze 1 day</button><button class="row-action danger-link" data-dismiss-notification="${escapeHtml(item.id)}">Dismiss</button></div></article>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>You’re caught up</h3><p>No active notifications match this view.</p></div>`;
+  const priorityLabel = { blocking: "Blocking", attention: "Needs attention", info: "Informational" };
+  $("#notificationFilters").innerHTML = [`<button class="${notificationCategory === "all" ? "primary" : "secondary"}" data-notification-category="all">All (${all.length})</button>`, ...categories.map((category) => `<button class="${notificationCategory === category ? "primary" : "secondary"}" data-notification-category="${escapeHtml(category)}">${priorityLabel[category]} (${all.filter((item) => item.priority === category).length})</button>`)].join("");
+  const shown = all.filter((item) => notificationCategory === "all" || item.priority === notificationCategory);
+  $("#notificationList").innerHTML = shown.length ? shown.map((item) => `<article class="notification-item priority-${item.priority} ${item.urgent ? "urgent" : ""}" data-notification-id="${escapeHtml(item.id)}"><span>${item.priority === "blocking" ? "!" : item.priority === "attention" ? "⚑" : "i"}</span><div><strong>${escapeHtml(item.title)}</strong><small>${priorityLabel[item.priority]}</small><p>${escapeHtml(item.detail)}</p></div><div class="notification-actions"><button class="primary" data-open-notification="${escapeHtml(item.id)}">${item.category === "images" ? "Match images" : item.category === "offers" ? "Review offers" : item.category === "shipping" ? "Open packing" : "Open"}</button><button class="secondary" data-snooze-notification="${escapeHtml(item.id)}">Snooze 1 day</button><button class="row-action danger-link" data-dismiss-notification="${escapeHtml(item.id)}">Dismiss</button></div></article>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>You’re caught up</h3><p>No active notifications match this view.</p></div>`;
   const activeCount = visibleNotifications({ includeSnoozed: false }).length;
   $("#notificationNavCount").textContent = activeCount; $("#notificationNavCount").classList.toggle("hidden", activeCount === 0);
   $("#showSnoozedNotificationsBtn").textContent = showSnoozedNotifications ? "Hide snoozed" : "Show snoozed";
 }
 
 function openNotification(id) {
-  const item = saleNotifications().find((notification) => notification.id === id); if (!item) return;
+  const item = visibleNotifications({ includeSnoozed: true }).find((notification) => notification.id === id) || saleNotifications().find((notification) => notification.id === id); if (!item) return;
   if (item.buyer) state.selectedBuyer = item.buyer;
   showView(item.view);
   if (item.view === "orders") renderOrders();
@@ -829,8 +891,8 @@ function renderStats() {
 function sortedSaleCards(sale = activeSale(), cards = sale.cards) {
   return cards.slice().sort((a, b) => {
     if (String(sale.sortMode).startsWith("field:")) return compareCardValues(a, b, `custom:${String(sale.sortMode).slice(6)}`) || Number(a.sourceOrder ?? a.ref) - Number(b.sourceOrder ?? b.ref);
-    if (sale.sortMode === "year") return String(a.year).localeCompare(String(b.year), undefined, { numeric: true }) || String(a.name).localeCompare(String(b.name));
-    if (sale.sortMode === "player") return String(a.name).localeCompare(String(b.name)) || Number(a.sourceOrder ?? a.ref) - Number(b.sourceOrder ?? b.ref);
+    if (sale.sortMode === "year") return String(a.year).localeCompare(String(b.year), undefined, { numeric: true }) || String(a.name).localeCompare(String(b.name)) || compareCardNumbers(a.number, b.number);
+    if (sale.sortMode === "player") return String(a.name).localeCompare(String(b.name)) || compareCardNumbers(a.number, b.number) || Number(a.sourceOrder ?? a.ref) - Number(b.sourceOrder ?? b.ref);
     if (sale.sortMode === "price-asc") return Number(a.price) - Number(b.price);
     if (sale.sortMode === "price-desc") return Number(b.price) - Number(a.price);
     if (sale.sortMode === "custom") return Number(a.customOrder ?? a.sourceOrder ?? a.ref) - Number(b.customOrder ?? b.sourceOrder ?? b.ref);
@@ -840,11 +902,12 @@ function sortedSaleCards(sale = activeSale(), cards = sale.cards) {
 
 function renderListings() {
   const sale = activeSale();
+  const columns = new Set(workspaceColumns());
   sale.sortMode ||= "spreadsheet";
   $$("#listingSort option[data-custom-sort]").forEach((option) => option.remove());
   customFields(sale).forEach((field) => { const option = new Option(field.label, `field:${field.key}`); option.dataset.customSort = "true"; $("#listingSort").add(option); });
   $("#listingSort").value = sale.sortMode;
-  const query = state.query.toLowerCase();
+  const query = String(state.query || "").toLowerCase();
   const cards = sortedSaleCards(sale, sale.cards.filter((card) => {
     const hidden = Boolean(card.hiddenAfterCopy);
     const filterMatch = state.filter === "copied" ? hidden : !hidden && (state.filter === "all"
@@ -856,29 +919,40 @@ function renderListings() {
   }));
   const validIds = new Set(sale.cards.map((card) => card.id));
   selectedListingIds = new Set([...selectedListingIds].filter((id) => validIds.has(id)));
+  $("#listingHead").innerHTML = `<tr><th class="select-column"></th>${columns.has("ref") ? "<th>Ref</th>" : ""}<th>Card</th>${columns.has("grade") ? "<th>Grade</th>" : ""}${columns.has("price") ? "<th>Claim price</th>" : ""}${columns.has("status") ? "<th>Status</th>" : ""}<th></th></tr>`;
   $("#listingRows").innerHTML = cards.map((card) => {
     const statusLabel = card.status === "available" ? "Available" : card.status === "offered" ? `Offer · ${card.buyer || "Pending"}` : card.buyer || "Claimed";
     return `<tr data-listing-row="${card.id}" draggable="${sale.sortMode === "custom"}">
       <td class="select-column"><input type="checkbox" data-select-listing="${card.id}" ${selectedListingIds.has(card.id) ? "checked" : ""} aria-label="Select ${escapeHtml(card.name)}" /></td>
-      <td class="ref">${escapeHtml(card.ref)}</td>
-      <td><div class="card-title">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</div><div class="card-line">${escapeHtml(formatLine(card))}</div></td>
-      <td>${escapeHtml(card.condition || "—")}</td>
-      <td><strong class="money">${money(card.price)}</strong><small class="cost-note">Cost ${card.purchasePrice !== "" && card.purchasePrice != null ? money(card.purchasePrice) : "—"}</small><small class="cost-note">Purchased ${displayPurchaseDate(card.purchaseDate)}</small></td>
-      <td><span class="status ${card.status === "available" ? "available" : card.status === "offered" ? "offered" : "claimed"}">${escapeHtml(statusLabel)}</span></td>
+      ${columns.has("ref") ? `<td class="ref">${escapeHtml(card.ref)}</td>` : ""}
+      <td><button class="card-detail-link" data-card-details="${card.id}"><span class="card-title">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</span><span class="card-line">${escapeHtml(formatLine(card))}</span></button></td>
+      ${columns.has("grade") ? `<td>${escapeHtml(card.condition || "—")}</td>` : ""}
+      ${columns.has("price") ? `<td><strong class="money">${money(card.price)}</strong><small class="cost-note">Cost ${card.purchasePrice !== "" && card.purchasePrice != null ? money(card.purchasePrice) : "—"}</small><small class="cost-note">Purchased ${displayPurchaseDate(card.purchaseDate)}</small></td>` : ""}
+      ${columns.has("status") ? `<td><span class="status ${card.status === "available" ? "available" : card.status === "offered" ? "offered" : "claimed"}">${escapeHtml(statusLabel)}</span></td>` : ""}
       <td><div class="row-actions">${card.hiddenAfterCopy ? `<button class="row-action" data-restore-card="${card.id}">Restore</button>` : `${saleImageMode(sale) === "front-back" ? `<button class="row-action" data-image-card="${card.id}" data-image-side="front">${card.imagePath ? "Change front" : "Add front"}</button><button class="row-action" data-image-card="${card.id}" data-image-side="back">${card.backImagePath ? "Change back" : "Add back"}</button>` : `<button class="row-action" data-image-card="${card.id}" data-image-side="single">${card.imagePath ? "Change image" : "Add image"}</button>`}<button class="row-action" data-rematch-card="${card.id}">Re-run lookup</button><button class="row-action" data-copy-card="${card.id}">Copy</button>`}<button class="row-action" data-edit-card="${card.id}">Edit</button><button class="row-action" data-move-card="${card.id}">Move</button><button class="row-action danger-link" data-delete-card="${card.id}">Delete</button></div></td>
     </tr>`;
   }).join("");
   $("#listingEmpty").classList.toggle("hidden", sale.cards.length !== 0);
+  const view = saleViewState(sale); view.filter = state.filter; view.query = state.query; view.selectedListingIds = [...selectedListingIds];
   updateListingBulkControls(cards);
 }
 
+function filteredListingCards() {
+  const query = String(state.query || "").toLowerCase();
+  return sortedSaleCards(activeSale(), activeSale().cards.filter((card) => {
+    const hidden = Boolean(card.hiddenAfterCopy);
+    const filterMatch = state.filter === "copied" ? hidden : !hidden && (state.filter === "all" || (state.filter === "available" && card.status === "available") || (state.filter === "claimed" && card.status !== "available") || (state.filter === "with-image" && cardHasRequiredImages(card)) || (state.filter === "missing-image" && !cardHasRequiredImages(card)));
+    return filterMatch && [...Object.values(card).filter((value) => typeof value !== "object"), ...Object.values(card.customFields || {})].join(" ").toLowerCase().includes(query);
+  }));
+}
+
 function resetListingView() {
-  state.filter = "all";
-  state.query = "";
-  selectedListingIds.clear();
+  const view = saleViewState(); state.filter = view.filter || "all"; state.query = view.query || ""; state.claimQuery = view.claimQuery || "";
+  selectedListingIds = new Set(view.selectedListingIds || []);
   const search = $("#cardSearch");
-  if (search) search.value = "";
-  $$('[data-filter]').forEach((button) => button.classList.toggle("active", button.dataset.filter === "all"));
+  if (search) search.value = state.query;
+  if ($("#claimSearch")) $("#claimSearch").value = state.claimQuery;
+  $$('[data-filter]').forEach((button) => button.classList.toggle("active", button.dataset.filter === state.filter));
 }
 
 function updateListingBulkControls(visibleCards = []) {
@@ -920,9 +994,15 @@ function renderImages() {
   const exclusionCount = settings.excludedFolders.length;
   $("#lookupFolderLabel").textContent = folderCount ? `${folderCount} search folder${folderCount === 1 ? "" : "s"}${exclusionCount ? ` · ${exclusionCount} excluded` : ""}` : "No lookup folder selected";
   $("#imageQueue").innerHTML = visibleImages.length ? visibleImages.map((image, index) => `<article class="image-card" draggable="true" data-image-id="${image.id}" data-image-path="${escapeHtml(image.path)}">
-    <img src="${fileUrl(image.path)}" alt="${escapeHtml(image.name)}" />
+    <img loading="lazy" data-thumb-path="${escapeHtml(image.path)}" src="${fileUrl(image.path)}" alt="${escapeHtml(image.name)}" />
     <div><strong>${escapeHtml(image.name)}</strong><span>Post image ${index + 1}</span><span class="drag-hint">Drag to Facebook ↗</span></div>
   </article>`).join("") : `<div class="empty-state"><div class="empty-icon">▧</div><h3>No sale images yet</h3><p>Add individual images or an entire folder.</p></div>`;
+  hydrateThumbnails($("#imageQueue"));
+}
+
+async function hydrateThumbnails(root = document) {
+  const images = $$('img[data-thumb-path]:not([data-thumb-ready])', root); images.forEach((image) => image.dataset.thumbReady = "loading");
+  await Promise.all(images.map(async (image) => { const source = image.dataset.thumbPath; const thumb = await window.cardSale.thumbnail(source).catch(() => ""); if (thumb && image.isConnected) image.src = fileUrl(thumb); image.dataset.thumbReady = "true"; }));
 }
 
 function renderClaims() {
@@ -1083,6 +1163,7 @@ function renderOrderDetail() {
         <div class="totals">
           <div class="total-line"><span>Cards (${cards.length})</span><strong>${money(subtotal)}</strong></div>
           <label>Shipping option<select id="orderShippingMethod"><option value="" ${order.shippingMethod ? "" : "selected"} disabled>Select PWE or PMWT…</option><option value="PMWT" ${order.shippingMethod === "PMWT" ? "selected" : ""}>PMWT — ${money(activeSale().pmwtShipping)}${order.shippingAutoSelected ? " (auto-selected by rule)" : ""}</option><option value="PWE" ${order.shippingMethod === "PWE" ? "selected" : ""}>PWE — ${money(activeSale().pweShipping)}${pweEligible(buyer) ? "" : " (manual override)"}</option></select></label>
+          <small class="shipping-rule-explanation">${escapeHtml(shippingRuleExplanation(buyer))}</small>
           <div class="total-line shipping-total"><span>${escapeHtml(order.shippingMethod || "Shipping not selected")}</span><strong>${order.shippingMethod ? money(shipping) : "—"}</strong></div>
           <label>Discount<input id="orderDiscount" type="number" min="0" step="0.01" value="${Number(order.discount || 0)}" /></label>
           <div class="total-line grand"><span>Total</span><span>${money(total)}</span></div>
@@ -1300,6 +1381,23 @@ function renderHealthCheck() {
   const issues = healthIssues(); const errors = issues.filter((item) => item.level === "error").length; const warnings = issues.length - errors;
   $("#healthSummary").innerHTML = [["Health status", issues.length ? (errors ? "Needs attention" : "Review") : "Ready", issues.length ? `${issues.length} item${issues.length === 1 ? "" : "s"}` : "No issues found"], ["Errors", errors, "Blocking data problems"], ["Warnings", warnings, "Recommended review"], ["Cards checked", activeSale().cards.length, activeSale().name]].map(([label, value, sub]) => `<article class="stat"><span class="label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><span class="sub">${escapeHtml(sub)}</span></article>`).join("");
   $("#healthIssues").innerHTML = issues.length ? issues.map((item) => `<button class="health-item ${item.level}" ${item.cardId ? `data-health-card="${item.cardId}"` : ""} ${item.buyer ? `data-health-buyer="${escapeHtml(item.buyer)}"` : ""}><span>${item.level === "error" ? "!" : "⚑"}</span><div><strong>${escapeHtml(item.area)}</strong><p>${escapeHtml(item.message)}</p></div></button>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>This sale is healthy</h3><p>No missing data, image conflicts, order warnings or below-cost claims were found.</p></div>`;
+  const repairable = activeSale().cards.filter((card) => [card.year, card.set, card.name, card.number, card.condition, card.notes].some((value) => typeof value === "string" && value !== value.trim()) || /^none$/i.test(String(card.notes || "").trim())).length;
+  $("#repairHealthSummary").textContent = repairable ? `${repairable} card${repairable === 1 ? " has" : "s have"} spacing or “None” cleanup that CSM can safely repair.` : "No safe automatic repairs are currently needed.";
+  $("#repairHealthBtn").disabled = repairable === 0;
+}
+
+function repairSafeHealthIssues() {
+  const sale = activeSale(); let changed = 0; snapshotSale("Before safe Health Check repairs");
+  sale.cards.forEach((card) => {
+    let cardChanged = false;
+    ["year", "set", "name", "number", "condition", "notes", "buyer"].forEach((field) => { if (typeof card[field] === "string") { const clean = card[field].trim().replace(/\s+/g, " "); if (clean !== card[field]) { card[field] = clean; cardChanged = true; } } });
+    if (/^none$/i.test(card.notes || "")) { card.notes = ""; cardChanged = true; }
+    const teams = parseTeams(card.teams); if (JSON.stringify(teams) !== JSON.stringify(card.teams || [])) { card.teams = teams; cardChanged = true; }
+    if (cardChanged) changed += 1;
+  });
+  const unique = new Map(); sale.images = (sale.images || []).filter((image) => { const key = String(image.path || "").toLowerCase(); if (!key || unique.has(key)) return false; unique.set(key, true); return true; });
+  if (!changed) { sale.versions?.pop(); undoStack.pop(); return toast("No safe repairs were needed."); }
+  recordAudit("health-repair", `Safely cleaned ${changed} card records`); saveSoon(); render(); toast(`${changed} card record${changed === 1 ? "" : "s"} safely repaired.`);
 }
 
 function liveCards() {
@@ -1307,16 +1405,20 @@ function liveCards() {
 }
 
 function renderLiveSale() {
-  const cards = liveCards();
+  const sale = activeSale(); const cards = liveCards();
+  $("#facebookPostUrl").value = sale.facebookPostUrl || "";
+  $("#openFacebookPostBtn").disabled = !sale.facebookPostUrl;
+  const posted = sale.cards.filter((card) => card.postedAt || card.hiddenAfterCopy).length;
+  const total = sale.cards.length; const overallPercent = total ? Math.round((posted / total) * 100) : 0;
   if (!cards.length) {
-    $("#liveSaleContent").innerHTML = `<div class="empty-state"><div class="empty-icon">✓</div><h3>No unposted cards remaining</h3><p>Restore copied cards or import another list to continue.</p></div>`;
+    $("#liveSaleContent").innerHTML = `<div class="live-overall-progress"><div><strong>${posted} of ${total} cards posted</strong><span>${overallPercent}% complete</span></div><progress max="${Math.max(1, total)}" value="${posted}"></progress></div><div class="empty-state"><div class="empty-icon">✓</div><h3>No unposted cards remaining</h3><p>Restore copied cards or import another list to continue.</p></div>`;
     return;
   }
   liveIndex = Math.max(0, Math.min(liveIndex, cards.length - 1));
   const card = cards[liveIndex];
-  const imageMode = saleImageMode(activeSale());
-  const liveImages = requiredImageSlots(activeSale()).map((slot) => { const path = imagePathFor(card, slot); return `<div class="live-scan"><strong>${imageMode === "front-back" ? imageSlotLabel(slot) : "Card image"}</strong>${path ? `<img draggable="true" data-live-image="${escapeHtml(path)}" src="${fileUrl(path)}" alt="${escapeHtml(card.name)} ${imageSlotLabel(slot)}" /><small>Drag this image to Facebook</small>` : `<div class="empty-icon">▧</div><p>No ${imageSlotLabel(slot).toLowerCase()} matched</p>`}</div>`; }).join("");
-  $("#liveSaleContent").innerHTML = `<div class="live-progress"><strong>Card ${liveIndex + 1} of ${cards.length}</strong><span>${cards.length} available and not copied</span></div><div class="live-layout"><div class="live-image ${imageMode === "front-back" ? "paired" : ""}">${liveImages}</div><div class="live-copy"><p class="eyebrow">READY TO POST</p><h2>${escapeHtml(card.name)}</h2><pre>${escapeHtml(formatLine(card))}</pre><div class="live-actions"><button class="primary" data-live-copy="${card.id}">Copy listing</button>${imageMode === "front-back" ? `<button class="secondary" data-live-image-card="${card.id}" data-live-image-side="front">${card.imagePath ? "Change front" : "Add front"}</button><button class="secondary" data-live-image-card="${card.id}" data-live-image-side="back">${card.backImagePath ? "Change back" : "Add back"}</button>` : `<button class="secondary" data-live-image-card="${card.id}" data-live-image-side="single">${card.imagePath ? "Change image" : "Add image"}</button>`}<button class="secondary" data-live-prev>Previous</button><button class="secondary" data-live-next>Skip / next</button></div><p class="live-private">Cost ${card.purchasePrice !== "" ? money(card.purchasePrice) : "—"} · Purchased ${displayPurchaseDate(card.purchaseDate)} · ${escapeHtml(card.notes || "No flaws listed")}</p></div></div>`;
+  const imageMode = saleImageMode(sale);
+  const liveImages = requiredImageSlots(sale).map((slot) => { const path = imagePathFor(card, slot); return `<div class="live-scan"><strong>${imageMode === "front-back" ? imageSlotLabel(slot) : "Card image"}</strong>${path ? `<img loading="lazy" draggable="true" data-live-image="${escapeHtml(path)}" src="${fileUrl(path)}" alt="${escapeHtml(card.name)} ${imageSlotLabel(slot)}" /><small>Drag this image to Facebook</small>` : `<div class="empty-icon">▧</div><p>No ${imageSlotLabel(slot).toLowerCase()} matched</p>`}</div>`; }).join("");
+  $("#liveSaleContent").innerHTML = `<div class="live-overall-progress"><div><strong>${posted} of ${total} cards posted</strong><span>${overallPercent}% complete</span></div><progress max="${Math.max(1, total)}" value="${posted}"></progress></div><div class="live-progress"><strong>Next card ${liveIndex + 1} of ${cards.length}</strong><span>${cards.length} available and not copied</span></div><div class="live-layout"><div class="live-image ${imageMode === "front-back" ? "paired" : ""}">${liveImages}</div><div class="live-copy"><p class="eyebrow">READY TO POST</p><h2>${escapeHtml(card.name)}</h2><pre>${escapeHtml(formatLine(card))}</pre><div class="live-actions"><button class="primary" data-live-copy="${card.id}">Copy listing</button>${imageMode === "front-back" ? `<button class="secondary" data-live-image-card="${card.id}" data-live-image-side="front">${card.imagePath ? "Change front" : "Add front"}</button><button class="secondary" data-live-image-card="${card.id}" data-live-image-side="back">${card.backImagePath ? "Change back" : "Add back"}</button>` : `<button class="secondary" data-live-image-card="${card.id}" data-live-image-side="single">${card.imagePath ? "Change image" : "Add image"}</button>`}<button class="secondary" data-live-prev>Previous</button><button class="secondary" data-live-next>Skip / next</button></div><p class="live-private">Cost ${card.purchasePrice !== "" ? money(card.purchasePrice) : "—"} · Purchased ${displayPurchaseDate(card.purchaseDate)} · ${escapeHtml(card.notes || "No flaws listed")}</p></div></div>`;
 }
 
 function showView(view) {
@@ -1324,12 +1426,22 @@ function showView(view) {
     toast("Catalog is available only in the private owner edition.");
     return;
   }
+  const previous = uiState().activeView || $$(".view.active")[0]?.id?.replace(/View$/, "");
+  if (previous) uiState().scroll[previous] = document.querySelector("main")?.scrollTop || window.scrollY || 0;
+  uiState().activeView = view;
   const refresh = { command: renderCommandCenter, sale: () => { renderListings(); renderImages(); }, catalog: renderCatalog, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, pulling: renderPulling, notifications: renderNotifications, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck, help: () => renderDetailedGuide() };
   refresh[view]?.();
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `${view}View`));
   const labels = { command: "COMMAND CENTER", sale: "SALE WORKSPACE", catalog: "CATALOG", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", pulling: "CARD PULLING", notifications: "NOTIFICATIONS", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK", help: "HELP & GUIDE" };
   $("#viewEyebrow").textContent = labels[view];
+  requestAnimationFrame(() => { const main = document.querySelector("main"); if (main) main.scrollTop = Number(uiState().scroll[view] || 0); });
+  saveSoon();
+}
+
+function openContextHelp() {
+  const view = uiState().activeView || "command"; const terms = { command: "Command Center", notifications: "Notification", sale: "Sale Workspace", live: "Live Sale", claims: "Claims", offers: "Offers", pulling: "Pull", orders: "Buyer Orders", packing: "Packing", dashboard: "Profit", buyers: "Buyer Profiles", health: "Health", catalog: "Catalog" };
+  showView("help"); const search = $("#guideSearch"); search.value = terms[view] || ""; renderDetailedGuide(search.value); requestAnimationFrame(() => $("#detailedGuideSections details")?.scrollIntoView({ behavior: "smooth", block: "start" }));
 }
 
 function openQuickEdit(cardId) {
@@ -1358,7 +1470,7 @@ function closeQuickEdit() { $("#quickEditDrawer").classList.remove("open"); $("#
 function saveQuickEdit() {
   const card = activeSale().cards.find((item) => item.id === $("#quickEditCardId").value); if (!card) return;
   snapshotSale(`Before editing ${card.ref} · ${card.name}`);
-  Object.assign(card, { year: $("#quickYear").value.trim(), set: $("#quickBrand").value.trim(), name: $("#quickPlayer").value.trim(), number: $("#quickNumber").value.trim(), sport: normalizeSport($("#quickSport").value), teams: parseTeams($("#quickTeams").value), condition: $("#quickGrade").value.trim(), notes: $("#quickFlaws").value.trim(), price: Number($("#quickPrice").value || 0), purchasePrice: $("#quickPurchasePrice").value === "" ? "" : Number($("#quickPurchasePrice").value), purchaseDate: normalizePurchaseDate($("#quickPurchaseDate").value) });
+  Object.assign(card, { year: $("#quickYear").value.trim(), set: $("#quickBrand").value.trim(), name: $("#quickPlayer").value.trim(), number: normalizeCardNumber($("#quickNumber").value), sport: normalizeSport($("#quickSport").value), teams: parseTeams($("#quickTeams").value), condition: $("#quickGrade").value.trim(), notes: $("#quickFlaws").value.trim(), price: Number($("#quickPrice").value || 0), purchasePrice: $("#quickPurchasePrice").value === "" ? "" : Number($("#quickPurchasePrice").value), purchaseDate: normalizePurchaseDate($("#quickPurchaseDate").value) });
   if (card.teams.length) { card.teamStatus = "confirmed"; card.teamSource = "manual"; state.teamMatchMemory ||= {}; state.teamMatchMemory[teamMemoryKey(card)] = card.teams; }
   card.customFields ||= {};
   $$('[data-quick-custom]').forEach((input) => { card.customFields[input.dataset.quickCustom] = input.type === "checkbox" ? input.checked : input.value.trim(); });
@@ -1368,7 +1480,7 @@ function saveQuickEdit() {
 function manualCardDraft() {
   return {
     year: $("#addCardYear").value.trim(), set: $("#addCardBrand").value.trim(), name: $("#addCardPlayer").value.trim(),
-    number: $("#addCardNumber").value.trim(), sport: normalizeSport($("#addCardSport").value), teams: parseTeams($("#addCardTeams").value), condition: $("#addCardGrade").value.trim(), notes: $("#addCardFlaws").value.trim(),
+    number: normalizeCardNumber($("#addCardNumber").value), sport: normalizeSport($("#addCardSport").value), teams: parseTeams($("#addCardTeams").value), condition: $("#addCardGrade").value.trim(), notes: $("#addCardFlaws").value.trim(),
     price: Number($("#addCardPrice").value || 0), purchasePrice: $("#addCardPurchasePrice").value === "" ? "" : Number($("#addCardPurchasePrice").value),
     purchaseDate: normalizePurchaseDate($("#addCardPurchaseDate").value)
   };
@@ -1573,7 +1685,7 @@ function confirmImport(event) {
     const value = (field) => mapping[field] ? row[mapping[field]] : "";
     const customValues = Object.fromEntries(importedCustomFields.map((field, fieldIndex) => [field.key, row[customHeaders[fieldIndex]] ?? ""]));
     const teams = parseTeams(value("teams"));
-    const card = { id: uid(), ref: String(start + index + 1), sourceOrder: start + index + 1, customOrder: start + index + 1, year: value("year"), set: value("set"), number: value("number"), name: value("name"), sport: normalizeSport(value("sport")), teams, teamStatus: teams.length ? "confirmed" : "", teamSource: teams.length ? "import" : "", condition: value("condition"), price: Number(String(value("price")).replace(/[$,]/g, "")) || 0, purchasePrice: value("purchasePrice") === "" ? "" : Number(String(value("purchasePrice")).replace(/[$,]/g, "")) || 0, purchaseDate: normalizePurchaseDate(value("purchaseDate")), notes: value("notes"), customFields: customValues, imagePath: "", backImagePath: "", status: "available" };
+    const card = { id: uid(), ref: String(start + index + 1), sourceOrder: start + index + 1, customOrder: start + index + 1, year: value("year"), set: value("set"), number: normalizeCardNumber(value("number")), name: value("name"), sport: normalizeSport(value("sport")), teams, teamStatus: teams.length ? "confirmed" : "", teamSource: teams.length ? "import" : "", condition: value("condition"), price: Number(String(value("price")).replace(/[$,]/g, "")) || 0, purchasePrice: value("purchasePrice") === "" ? "" : Number(String(value("purchasePrice")).replace(/[$,]/g, "")) || 0, purchaseDate: normalizePurchaseDate(value("purchaseDate")), notes: value("notes"), customFields: customValues, imagePath: "", backImagePath: "", status: "available" };
     const rememberedTeams = state.teamMatchMemory?.[teamMemoryKey(card)];
     if (!teams.length && rememberedTeams?.length) { card.teams = [...rememberedTeams]; card.teamStatus = "confirmed"; card.teamSource = "remembered"; }
     const memoryKey = normalizedCardKey(card);
@@ -1808,7 +1920,16 @@ async function autoMatchImages(options = {}) {
   });
   let images;
   try {
-    images = await window.cardSale.scanImageFolder({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders, excludedPaths: options.force ? [] : [...confirmedPaths] });
+    const signature = JSON.stringify({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders });
+    const index = state.imageFolderIndex;
+    const indexFresh = !options.force && index?.signature === signature && Date.now() - Number(index.scannedAt || 0) < 6 * 60 * 60 * 1000 && Array.isArray(index.images);
+    if (indexFresh) {
+      images = index.images.filter((image) => !confirmedPaths.has(String(image.path || "").toLowerCase()));
+      progressBar.style.width = "60%"; progressText.textContent = `Using saved folder index · ${images.length} images`;
+    } else {
+      images = await window.cardSale.scanImageFolder({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders, excludedPaths: options.force ? [] : [...confirmedPaths] });
+      state.imageFolderIndex = { signature, scannedAt: Date.now(), images: clone(images) }; saveSoon();
+    }
   } catch (error) {
     progress.classList.add("hidden");
     toast(error.message || "Image lookup could not finish.");
@@ -2445,6 +2566,7 @@ async function copyAndHideCard(cardId) {
   card.hiddenAfterCopy = true;
   card.completedBy = "copied";
   card.completedAt = new Date().toISOString();
+  card.postedAt = card.completedAt;
   undoStack.push({ saleId: activeSale().id, cardId });
   saveSoon(); renderListings();
   toast("Listing copied and hidden. Ctrl+Z to undo.");
@@ -2456,6 +2578,7 @@ function restoreCard(cardId, message = "Card restored to the workspace.") {
   delete card.hiddenAfterCopy;
   delete card.completedBy;
   delete card.completedAt;
+  delete card.postedAt;
   saveSoon(); renderListings(); toast(message);
 }
 
@@ -3159,7 +3282,23 @@ function openBulkEdit() {
   if (!selectedListingIds.size) return;
   $("#bulkEditCount").textContent = `${selectedListingIds.size} selected card${selectedListingIds.size === 1 ? "" : "s"}. Blank fields will remain unchanged.`;
   ["#bulkYear", "#bulkBrand", "#bulkSport", "#bulkTeams", "#bulkGrade", "#bulkFlaws", "#bulkPrice", "#bulkPricePercent"].forEach((selector) => $(selector).value = "");
+  updateBulkEditPreview();
   $("#bulkEditDialog").showModal();
+}
+
+function bulkEditedCard(card) {
+  const copy = clone(card); const fields = [["year", "#bulkYear"], ["set", "#bulkBrand"], ["condition", "#bulkGrade"], ["notes", "#bulkFlaws"]];
+  fields.forEach(([field, selector]) => { const value = $(selector).value.trim(); if (value !== "") copy[field] = value; });
+  if (normalizeSport($("#bulkSport").value)) copy.sport = normalizeSport($("#bulkSport").value);
+  const teams = parseTeams($("#bulkTeams").value); if (teams.length) copy.teams = teams;
+  if ($("#bulkPrice").value !== "") copy.price = Math.max(0, Number($("#bulkPrice").value) || 0);
+  else if ($("#bulkPricePercent").value !== "") copy.price = Math.max(0, Math.round(Number(copy.price) * (1 + Number($("#bulkPricePercent").value) / 100) * 100) / 100);
+  return copy;
+}
+
+function updateBulkEditPreview() {
+  const cards = activeSale().cards.filter((card) => selectedListingIds.has(card.id));
+  $("#bulkEditPreview").innerHTML = cards.length ? `<strong>Previewing ${cards.length} card${cards.length === 1 ? "" : "s"}</strong>${cards.slice(0, 3).map((card) => { const after = bulkEditedCard(card); return `<div><span>${escapeHtml(formatLine(card))}</span><b>→</b><span>${escapeHtml(formatLine(after))}</span></div>`; }).join("")}${cards.length > 3 ? `<small>…and ${cards.length - 3} more</small>` : ""}` : "";
 }
 
 function applyBulkEdit() {
@@ -3177,6 +3316,49 @@ function applyBulkEdit() {
   recordAudit("bulk-edit", `Bulk edited ${cards.length} cards`);
   $("#bulkEditDialog").close();
   saveSoon(); render(); toast(`${cards.length} cards updated.`);
+}
+
+function openWorkspaceColumns() {
+  const visible = new Set(workspaceColumns());
+  $("#workspaceColumnChoices").innerHTML = WORKSPACE_COLUMNS.map(([key, label]) => `<label><input type="checkbox" data-workspace-column="${key}" ${visible.has(key) ? "checked" : ""} /> ${escapeHtml(label)}</label>`).join("");
+  $("#workspaceColumnsDialog").showModal();
+}
+
+function saveWorkspaceColumns() {
+  state.preferences.workspaceColumns = $$('[data-workspace-column]:checked').map((input) => input.dataset.workspaceColumn);
+  $("#workspaceColumnsDialog").close(); saveSoon(); renderListings();
+}
+
+function saleReplyValues(card = liveCards()[liveIndex], buyer = state.selectedBuyer || "Buyer") {
+  return { firstName: String(buyer).trim().split(/\s+/)[0] || "there", buyer, card: card ? `${card.year} ${card.set} ${card.name} ${numberLabel(card)}`.replace(/\s+/g, " ").trim() : "this card", price: card ? money(card.claimPrice ?? card.offerPrice ?? card.price) : "$0.00", saleName: activeSale().name };
+}
+
+function fillSaleReply(template) { const values = saleReplyValues(); return String(template || "").replace(/\{(firstName|buyer|card|price|saleName)\}/g, (_all, key) => values[key]); }
+function openSaleReplies() {
+  const replies = ensureSaleReplies();
+  $("#saleReplyFields").innerHTML = SALE_REPLY_FIELDS.map(([key, label]) => `<label>${escapeHtml(label)}<textarea rows="4" data-sale-reply="${key}">${escapeHtml(replies[key])}</textarea><button type="button" class="row-action" data-copy-sale-reply="${key}">Copy reply</button></label>`).join("");
+  if (!$("#saleReplyDialog").open) $("#saleReplyDialog").showModal();
+}
+function saveSaleReplies() { $$('[data-sale-reply]').forEach((input) => ensureSaleReplies()[input.dataset.saleReply] = input.value.trim() || DEFAULT_SALE_REPLIES[input.dataset.saleReply]); saveSoon(); toast("Sale reply library saved."); }
+
+function openBuyerMerge() {
+  const names = allBuyerNames(); if (names.length < 2) return toast("At least two buyer profiles are needed to merge.");
+  const options = names.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  $("#mergeBuyerSource").innerHTML = options; $("#mergeBuyerTarget").innerHTML = options; $("#mergeBuyerTarget").selectedIndex = 1; updateBuyerMergePreview(); $("#mergeBuyerDialog").showModal();
+}
+function updateBuyerMergePreview() { const source = $("#mergeBuyerSource").value; const target = $("#mergeBuyerTarget").value; const count = historicalSales().flatMap((sale) => sale.cards).filter((card) => card.buyer === source).length; $("#mergeBuyerPreview").textContent = source === target ? "Choose two different profiles." : `${count} card record${count === 1 ? "" : "s"}, orders, and saved profile details will move from ${source} to ${target}.`; }
+function mergeBuyerProfiles() {
+  const source = $("#mergeBuyerSource").value; const target = $("#mergeBuyerTarget").value; if (!source || !target || source === target) return toast("Choose two different buyer profiles.");
+  const from = buyerProfile(source); const to = ensureBuyerProfile(target); let moved = 0;
+  historicalSales().forEach((sale) => {
+    sale.cards.forEach((card) => { if (card.buyer === source) { card.buyer = target; moved += 1; } });
+    (sale.bundles || []).forEach((bundle) => { if (bundle.buyer === source) bundle.buyer = target; });
+    if (sale.orders?.[source]) { sale.orders[target] = { ...sale.orders[source], ...(sale.orders[target] || {}) }; delete sale.orders[source]; }
+    (sale.audit || []).forEach((item) => { if (item.buyer === source) item.buyer = target; });
+  });
+  to.aliases = [...new Set([...(to.aliases || []), source, ...(from.aliases || [])])]; to.tags = [...new Set([...(to.tags || []), ...(from.tags || [])])];
+  to.notes = [to.notes, from.notes].filter(Boolean).join("\n"); if (!to.address && from.address) to.address = from.address; to.previousAddresses = [...(to.previousAddresses || []), ...(from.previousAddresses || [])];
+  delete state.buyerProfiles[source]; state.selectedBuyer = target; state.profileBuyer = target; recordAudit("buyer-merge", `Merged ${source} into ${target}`, { buyer: target }); $("#mergeBuyerDialog").close(); saveSoon(); render(); toast(`${source} merged into ${target} across ${moved} card records.`);
 }
 
 function openCarryover() {
@@ -3268,6 +3450,13 @@ function bindEvents() {
   $("#collapseGuideBtn").addEventListener("click", () => $$("#detailedGuideSections details").forEach((section) => section.open = false));
   $("#sendSupportBtn").addEventListener("click", sendSupportEmail);
   $("#saleIntroBtn").addEventListener("click", openSaleIntroduction);
+  $("#contextHelpBtn").addEventListener("click", openContextHelp);
+  $("#saleReplyLibraryBtn").addEventListener("click", openSaleReplies);
+  $("#saleReplyFields").addEventListener("click", (event) => { const key = event.target.dataset.copySaleReply; if (key) copyText(fillSaleReply($(`[data-sale-reply='${CSS.escape(key)}']`).value), "Sale reply copied."); });
+  $("#saveSaleRepliesBtn").addEventListener("click", saveSaleReplies);
+  $("#resetSaleRepliesBtn").addEventListener("click", () => { state.preferences.saleReplies = clone(DEFAULT_SALE_REPLIES); openSaleReplies(); });
+  $("#saveFacebookPostBtn").addEventListener("click", () => { const value = $("#facebookPostUrl").value.trim(); if (value && !/^https:\/\//i.test(value)) return toast("Enter a complete https Facebook link."); activeSale().facebookPostUrl = value; saveSoon(); renderLiveSale(); toast("Facebook post link saved."); });
+  $("#openFacebookPostBtn").addEventListener("click", () => { if (activeSale().facebookPostUrl) window.cardSale.openExternal(activeSale().facebookPostUrl); });
   $("#saleIntroTemplate").addEventListener("input", (event) => { $("#saleIntroPreview").value = saleIntroduction(event.target.value); });
   $("#resetSaleIntroBtn").addEventListener("click", () => { $("#saleIntroTemplate").value = DEFAULT_SALE_INTRO; $("#saleIntroPreview").value = saleIntroduction(DEFAULT_SALE_INTRO); });
   $("#saveSaleIntroBtn").addEventListener("click", () => { state.preferences.saleIntroTemplate = $("#saleIntroTemplate").value.trim() || DEFAULT_SALE_INTRO; saveSoon(); toast("Sale introduction template saved."); });
@@ -3346,26 +3535,35 @@ function bindEvents() {
   $("#createBundleOfferBtn").addEventListener("click", createBundleOffer);
   $("#bulkEditBtn").addEventListener("click", openBulkEdit);
   $("#applyBulkEditBtn").addEventListener("click", applyBulkEdit);
+  $("#bulkEditDialog").addEventListener("input", updateBulkEditPreview);
+  $("#workspaceColumnsBtn").addEventListener("click", openWorkspaceColumns);
+  $("#saveWorkspaceColumnsBtn").addEventListener("click", saveWorkspaceColumns);
+  $("#resetWorkspaceColumnsBtn").addEventListener("click", () => { state.preferences.workspaceColumns = [...DEFAULT_WORKSPACE_COLUMNS]; openWorkspaceColumns(); });
+  $("#selectFilteredListingsBtn").addEventListener("click", () => { filteredListingCards().forEach((card) => selectedListingIds.add(card.id)); renderListings(); saveSoon(); });
+  $("#selectEntireSaleBtn").addEventListener("click", () => { activeSale().cards.forEach((card) => selectedListingIds.add(card.id)); renderListings(); saveSoon(); });
+  $("#clearListingSelectionBtn").addEventListener("click", () => { selectedListingIds.clear(); renderListings(); saveSoon(); });
   $("#carryoverBtn").addEventListener("click", openCarryover);
   $("#applyCarryoverBtn").addEventListener("click", applyCarryover);
   $("#closeSaleBtn").addEventListener("click", openCloseSale);
   $("#closeSaleUnsoldAction").addEventListener("change", (event) => $("#closeSaleNameLabel").classList.toggle("hidden", event.target.value !== "new"));
   $("#finishCloseSaleBtn").addEventListener("click", finishCloseSale);
-  $("#newSaleBtn").addEventListener("click", () => { const single = document.querySelector('input[name="newSaleImageMode"][value="single"]'); if (single) single.checked = true; $("#newSaleDialog").showModal(); });
+  $("#newSaleBtn").addEventListener("click", () => { const single = document.querySelector('input[name="newSaleImageMode"][value="single"]'); if (single) single.checked = true; $("#newSaleFacebookPostUrl").value = ""; $("#newSaleDialog").showModal(); });
   $("#deleteSaleBtn").addEventListener("click", deleteActiveSale);
   $("#archivedSalesBtn").addEventListener("click", () => { renderArchivedSales(); $("#archivedSalesDialog").showModal(); });
   $("#archivedSalesList").addEventListener("click", (event) => { const button = event.target.closest("[data-restore-archived-sale]"); if (button) { restoreArchivedSale(button.dataset.restoreArchivedSale); $("#archivedSalesDialog").close(); } });
   $("#createSaleBtn").addEventListener("click", (event) => {
     event.preventDefault(); const name = $("#newSaleName").value.trim(); if (!name) return;
     const imageMode = document.querySelector('input[name="newSaleImageMode"]:checked')?.value === "front-back" ? "front-back" : "single";
-    const sale = { id: uid(), name, imageMode, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), shippingRules: clone(ensureShippingRules(activeSale())), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [], additionalLookupFolders: [], excludedLookupFolders: [] };
+    const facebookPostUrl = $("#newSaleFacebookPostUrl").value.trim(); if (facebookPostUrl && !/^https:\/\//i.test(facebookPostUrl)) return toast("Enter a complete https Facebook link or leave it blank.");
+    const sale = { id: uid(), name, imageMode, facebookPostUrl, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), shippingRules: clone(ensureShippingRules(activeSale())), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [], additionalLookupFolders: [], excludedLookupFolders: [] };
     state.sales.push(sale); state.activeSaleId = sale.id; state.selectedBuyer = ""; resetListingView(); $("#newSaleDialog").close(); saveSoon(); render(); toast("New sale created.");
   });
   $("#saleSelect").addEventListener("change", (event) => { state.activeSaleId = event.target.value; state.selectedBuyer = ""; resetListingView(); saveSoon(); render(); });
   $("#listingSort").addEventListener("change", (event) => { activeSale().sortMode = event.target.value; renumberCardReferences(activeSale(), { audit: false }); saveSoon(); renderListings(); });
-  $$("[data-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; $$("[data-filter]").forEach((item) => item.classList.toggle("active", item === button)); renderListings(); }));
-  $("#cardSearch").addEventListener("input", (event) => { state.query = event.target.value; renderListings(); });
+  $$("[data-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; saleViewState().filter = state.filter; $$("[data-filter]").forEach((item) => item.classList.toggle("active", item === button)); saveSoon(); renderListings(); }));
+  $("#cardSearch").addEventListener("input", (event) => { state.query = event.target.value; saleViewState().query = state.query; saveSoon(); renderListings(); });
   $("#listingRows").addEventListener("click", (event) => {
+    const detailsId = event.target.closest("[data-card-details]")?.dataset.cardDetails;
     const copyId = event.target.dataset.copyCard;
     const imageId = event.target.dataset.imageCard;
     const rematchId = event.target.dataset.rematchCard;
@@ -3373,6 +3571,7 @@ function bindEvents() {
     const restoreId = event.target.dataset.restoreCard;
     const editId = event.target.dataset.editCard;
     const moveId = event.target.dataset.moveCard;
+    if (detailsId) openQuickEdit(detailsId);
     if (copyId) copyAndHideCard(copyId);
     if (imageId) chooseManualImage(imageId, event.target.dataset.imageSide || "single");
     if (rematchId) forceImageLookupForCard(rematchId);
@@ -3385,7 +3584,7 @@ function bindEvents() {
     const id = event.target.dataset.selectListing;
     if (!id) return;
     if (event.target.checked) selectedListingIds.add(id); else selectedListingIds.delete(id);
-    renderListings();
+    saleViewState().selectedListingIds = [...selectedListingIds]; saveSoon(); renderListings();
   });
   let draggedListingId = "";
   $("#listingRows").addEventListener("dragstart", (event) => { const row = event.target.closest("[data-listing-row]"); if (row && activeSale().sortMode === "custom") draggedListingId = row.dataset.listingRow; });
@@ -3419,7 +3618,7 @@ function bindEvents() {
       saveSoon(); renderImages(); toast("Image dragged and hidden. Ctrl+Z to undo.");
     }
   });
-  $("#claimSearch").addEventListener("input", (event) => { state.claimQuery = event.target.value; renderClaims(); });
+  $("#claimSearch").addEventListener("input", (event) => { state.claimQuery = event.target.value; saleViewState().claimQuery = state.claimQuery; saveSoon(); renderClaims(); });
   $("#claimRows").addEventListener("input", (event) => {
     if (!event.target.matches("[data-claim-offer]")) return;
     const row = event.target.closest("[data-claim-row]");
@@ -3664,6 +3863,10 @@ function bindEvents() {
   $("#saveQuickEditBtn").addEventListener("click", saveQuickEdit);
   $("#quickEditDrawer").addEventListener("input", (event) => { if (event.target.matches("input, textarea")) updateQuickEditPreview(); });
   $("#buyerProfileSearch").addEventListener("input", (event) => { profileQuery = event.target.value; renderBuyerProfiles(); });
+  $("#mergeBuyerProfilesBtn").addEventListener("click", openBuyerMerge);
+  $("#mergeBuyerSource").addEventListener("change", updateBuyerMergePreview);
+  $("#mergeBuyerTarget").addEventListener("change", updateBuyerMergePreview);
+  $("#confirmMergeBuyerBtn").addEventListener("click", mergeBuyerProfiles);
   $("#buyerProfileList").addEventListener("click", (event) => { const button = event.target.closest("[data-profile-buyer]"); if (button) { state.profileBuyer = button.dataset.profileBuyer; renderBuyerProfiles(); } });
   $("#buyerProfileDetail").addEventListener("click", (event) => { if (event.target.id === "saveBuyerProfileBtn") { const profile = ensureBuyerProfile(state.profileBuyer); const nextAddress = $("#profileAddress").value.trim(); if (profile.address && normalizedAddress(profile.address) !== normalizedAddress(nextAddress)) profile.previousAddresses.push({ address: profile.address, changedAt: new Date().toISOString() }); profile.aliases = $("#profileAliases").value.split(",").map((alias) => alias.trim()).filter(Boolean); profile.tags = $("#profileTags").value.split(",").map((tag) => tag.trim()).filter(Boolean); profile.address = nextAddress; profile.notes = $("#profileNotes").value.trim(); profile.manuallySaved = true; saveSoon(); renderBuyerProfiles(); renderOrders(); toast(addressWarnings(state.profileBuyer).length ? "Profile saved with address warnings." : "Buyer profile saved and address checked."); } if (event.target.id === "deleteBuyerProfileBtn") deleteBuyerProfile(state.profileBuyer); if (event.target.dataset.profileCard) { showView("sale"); resetListingView(); state.query = activeSale().cards.find((card) => card.id === event.target.dataset.profileCard)?.name || ""; $("#cardSearch").value = state.query; renderListings(); } });
   $("#setupChooseFolderBtn").addEventListener("click", async () => { const folder = await window.cardSale.chooseLookupFolder(); if (folder) $("#setupImageFolder").value = folder; });
@@ -3676,12 +3879,14 @@ function bindEvents() {
   $("#copyDiagnosticBtn").addEventListener("click", async () => copyText(JSON.stringify(await diagnosticReport(), null, 2), "Anonymous diagnostic report copied."));
   $("#downloadDiagnosticBtn").addEventListener("click", async () => { const result = await window.cardSale.saveDiagnosticReport(await diagnosticReport()); if (result?.success) { $("#diagnosticDialog").close(); toast("Anonymous diagnostic report saved."); } });
   $("#refreshHealthBtn").addEventListener("click", () => { renderHealthCheck(); toast("Health check refreshed."); });
+  $("#repairHealthBtn").addEventListener("click", repairSafeHealthIssues);
   $("#healthIssues").addEventListener("click", (event) => { const item = event.target.closest("[data-health-card], [data-health-buyer]"); if (!item) return; if (item.dataset.healthCard) { showView("sale"); openQuickEdit(item.dataset.healthCard); } if (item.dataset.healthBuyer) { state.selectedBuyer = item.dataset.healthBuyer; showView("orders"); renderOrders(); } });
   $("#fontSmallerBtn").addEventListener("click", () => { state.preferences ||= {}; state.preferences.fontScale = Math.max(.85, Number(state.preferences.fontScale || 1) - .05); applyDisplayPreferences(); saveSoon(); });
   $("#fontLargerBtn").addEventListener("click", () => { state.preferences ||= {}; state.preferences.fontScale = Math.min(1.25, Number(state.preferences.fontScale || 1) + .05); applyDisplayPreferences(); saveSoon(); });
   $("#densityBtn").addEventListener("click", () => { state.preferences ||= {}; state.preferences.compact = !state.preferences.compact; applyDisplayPreferences(); saveSoon(); });
   $("#themeBtn").addEventListener("click", () => { const themes = ["system", "light", "dark", "contrast"]; state.preferences.theme = themes[(themes.indexOf(state.preferences.theme || "system") + 1) % themes.length]; applyDisplayPreferences(); saveSoon(); });
   $("#motionBtn").addEventListener("click", () => { state.preferences.reducedMotion = !state.preferences.reducedMotion; applyDisplayPreferences(); saveSoon(); });
+  $$(".view .table-wrap").forEach((wrap, index) => { const key = `${wrap.closest(".view")?.id || "view"}:${index}`; wrap.dataset.scrollKey = key; wrap.scrollTop = Number(uiState().scroll[key] || 0); wrap.addEventListener("scroll", () => { uiState().scroll[key] = wrap.scrollTop; clearTimeout(wrap._saveTimer); wrap._saveTimer = setTimeout(saveSoon, 400); }, { passive: true }); });
   $("#downloadUpdateBtn").addEventListener("click", async () => {
     if (!availableUpdate || !window.confirm(`Install Card Sale Manager ${availableUpdate.version} now? The app will close automatically when the installer starts.`)) return;
     const button = $("#downloadUpdateBtn");
@@ -3724,6 +3929,7 @@ function bindEvents() {
 }
 
 async function init() {
+  new MutationObserver((mutations) => mutations.forEach((mutation) => mutation.addedNodes.forEach((node) => { if (node.nodeType !== 1) return; if (node.matches?.("img")) node.loading = "lazy"; $$("img", node).forEach((image) => image.loading = "lazy"); }))).observe(document.body, { childList: true, subtree: true });
   window.cardSale.onTeamLookupProgress((details) => {
     if (details.phase === "rate-limited") {
       $("#teamLookupProgressText").textContent = `The team service is busy. Retrying automatically in ${details.retryInSeconds} seconds…`;
@@ -3745,7 +3951,7 @@ async function init() {
     delete saved.__csmDocument;
     delete saved.__csmMissingImages;
     delete saved.__csmAutoRelinked;
-    state = { ...saved, filter: "all", query: "", claimQuery: "", selectedBuyer: "" };
+    state = { ...saved, filter: saved.filter || "all", query: saved.query || "", claimQuery: saved.claimQuery || "", selectedBuyer: saved.selectedBuyer || "" };
     const legacyTemplates = new Set([
       "{ref} - {year} {set} #{number} {name} - {condition} - ${price}",
       "{ref} - {year} {brand} #{number} {player} - {grade} - {flaws} - ${claimPrice}",
@@ -3802,6 +4008,7 @@ async function init() {
         if (!card.teams.length && rememberedTeams?.length) { card.teams = [...rememberedTeams]; card.teamStatus = "confirmed"; card.teamSource = "remembered"; }
         card.sourceOrder ??= index + 1;
         card.customOrder ??= card.sourceOrder;
+        card.number = normalizeCardNumber(card.number);
         card.purchaseDate = normalizePurchaseDate(card.purchaseDate);
         card.backImagePath ||= "";
         if (card.status !== "available") card.claimType ||= card.offerPrice != null ? "offer" : "claim";
@@ -3841,9 +4048,10 @@ async function init() {
   if (firstLaunch) state.preferences.setupCompleted ??= false;
   state.importPresets ||= [];
   if (![...$("#packingPageSize").options].some((option) => option.value === "two-up")) $("#packingPageSize").add(new Option("Two half-slips per letter page", "two-up"));
-  claimWords(); presets(); importPresets(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); bindEvents();
+  claimWords(); presets(); importPresets(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); ensureSaleReplies(); workspaceColumns(); uiState(); bindEvents();
   await refreshLicenseEntitlements(false).catch(() => applyLicenseEntitlements({ configured: true, licensed: false, owner: false, catalogVisible: false }));
   resetListingView(); applyDisplayPreferences(); render();
+  if (uiState().activeView && uiState().activeView !== "command") showView(uiState().activeView);
   const csmInfo = await window.cardSale.csmStatus();
   portableDocument = csmInfo.document;
   recentCsmFiles = csmInfo.recent || [];

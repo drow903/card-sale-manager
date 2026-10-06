@@ -127,7 +127,8 @@
       "paragraphs": [
         "Live Sale Mode is the easiest way to post a large sale one card at a time. It shows the card's single image or its separate front and back images beside one ready-to-paste listing.",
         "Always drag the image into Facebook before clicking Copy listing. Copy listing hides that text and advances CSM to the next card. Dragging the image and copying the text are separate actions, so one does not hide the other.",
-        "Wait until Facebook finishes attaching the image before pasting the listing. That small pause prevents the text from being posted against the wrong image when Facebook is slow."
+        "Wait until Facebook finishes attaching the image before pasting the listing. That small pause prevents the text from being posted against the wrong image when Facebook is slow.",
+        "The progress meter counts copied listings against every card in the sale. You can also save the Facebook group-post link with the sale and keep editable, ready-to-copy replies in the Sale Reply Library."
       ],
       "steps": [
         "Open Live Sale Mode and confirm the correct card is on screen.",
@@ -252,6 +253,7 @@
       "summary": "Keep follow-ups in one place without losing the underlying card or order.",
       "paragraphs": [
         "Notifications collects offers, payment issues, image problems, missing addresses, tracking reminders, and other unfinished work. Opening an item takes you to the relevant screen.",
+        "Related reminders are grouped together and labeled Blocking, Needs Attention, or Informational. Use the action button to jump straight to the correct workflow.",
         "Snooze an item when it is real but cannot be handled today. Dismiss it when it no longer matters. You can restore dismissed notifications later."
       ]
     },
@@ -262,7 +264,8 @@
       "summary": "Manage every listing, image, custom field, order, and bulk change in the active sale.",
       "paragraphs": [
         "Sale Workspace is the main editing screen. Search and filter cards, copy individual listings, change images, select several rows, build bundles, bulk edit, review teams, carry over unsold cards, and close the sale.",
-        "The Post queue follows listing order. Copying listing text hides only the listing. Dragging an image hides only the image. Ctrl+Z restores the most recently hidden item."
+        "The Post queue follows listing order. Copying listing text hides only the listing. Dragging an image hides only the image. Ctrl+Z restores the most recently hidden item.",
+        "Columns lets you simplify the table. Selection buttons can target visible rows, every filtered result, or the entire sale. Clicking a card title opens its detail drawer. Card numbers with letters, dashes, prefixes, and suffixes are kept intact and sorted naturally."
       ],
       "tips": [
         "Use References to renumber cards safely after deletions or reordering.",
@@ -276,7 +279,8 @@
       "summary": "Post one card at a time with fewer distractions.",
       "paragraphs": [
         "Live Sale Mode shows the next available, uncopied listing. Use the arrow buttons or keyboard controls to move through cards.",
-        "Drag the image first. After Facebook attaches it, copy and paste the listing. Copying advances CSM to the next card."
+        "Drag the image first. After Facebook attaches it, copy and paste the listing. Copying advances CSM to the next card.",
+        "The top meter shows how much of the complete sale has been posted. The optional Facebook link opens the saved group post, and Sale replies stores reusable claim, backup, offer, and still-shopping messages."
       ]
     },
     {
@@ -316,7 +320,8 @@
       "summary": "Confirm totals, shipping, addresses, payment, and buyer messages.",
       "paragraphs": [
         "The buyer list scrolls separately and can be filtered by payment, packing, shipping, address, or attention status. The selected order shows images, filenames, accepted prices, totals, notes, and buyer history.",
-        "Open Shipping rules to change the automatic PMWT thresholds. Use full buyer names where possible and save alternate Facebook names as aliases rather than creating duplicate profiles."
+        "Open Shipping rules to change the automatic PMWT thresholds. CSM explains exactly which card-count or value rule caused a PMWT recommendation. You can still override it.",
+        "Use full buyer names where possible and save alternate Facebook names as aliases rather than creating duplicate profiles."
       ]
     },
     {
@@ -347,7 +352,8 @@
       "summary": "Keep addresses, aliases, tags, notes, history, and repeat-buyer interests together.",
       "paragraphs": [
         "Profiles follow the buyer across sales. Add aliases when one person uses different Facebook display names. Tags such as Vintage, Yankees, or Set Builder make the directory easier to search.",
-        "Delete a profile when it was created by mistake, such as a rejected offer from someone who never became a customer. Historical sale records remain protected."
+        "Delete a profile when it was created by mistake, such as a rejected offer from someone who never became a customer. Historical sale records remain protected.",
+        "Use Merge profiles when two names belong to the same buyer. CSM moves their card history, orders, aliases, tags, notes, and address into the profile you keep."
       ]
     },
     {
@@ -357,7 +363,7 @@
       "summary": "Find data problems before they interrupt posting, payment, or shipping.",
       "paragraphs": [
         "Health Check flags missing prices, image conflicts, below-cost sales, incomplete buyer information, and other issues. Open a result to jump to the related card or order.",
-        "Run it before posting, before requesting payment, and again before closing a sale."
+        "Run it before posting, before requesting payment, and again before closing a sale. Repair safe issues only trims extra spacing, clears a literal None flaw, and removes harmless duplicates; judgment calls remain for you."
       ]
     },
     {
