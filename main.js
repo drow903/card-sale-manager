@@ -8,6 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const https = require("https");
+const crypto = require("crypto");
 const { spawn } = require("child_process");
 const QRCode = require("qrcode");
 const XLSX = require("xlsx");
@@ -678,6 +679,7 @@ function createWindow() {
       await new Promise((resolve) => setTimeout(resolve, 1200));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
       const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder"].find((view) => captureName.includes(view)) || "");
+      if (captureView && captureView !== "setup") await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item) => item.close())");
       if (captureView === "match-review") {
         await mainWindow.webContents.executeJavaScript("autoMatchImages()");
         await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -1144,6 +1146,13 @@ app.whenReady().then(() => {
     await fs.promises.copyFile(path.join(__dirname, "assets", "Card-Sale-Manager-Import-Template.xlsx"), result.filePath);
     return true;
   });
+  ipcMain.handle("images:thumbnail", async (_event, filePath) => {
+    const source = String(filePath || ""); if (!source || !path.isAbsolute(source) || !fs.existsSync(source)) return "";
+    const stat = await fs.promises.stat(source); const key = crypto.createHash("sha1").update(`${source}|${stat.mtimeMs}|${stat.size}`).digest("hex");
+    const folder = path.join(app.getPath("userData"), "thumbnail-cache"); const target = path.join(folder, `${key}.jpg`);
+    if (!fs.existsSync(target)) { await fs.promises.mkdir(folder, { recursive: true }); const image = nativeImage.createFromPath(source); if (image.isEmpty()) return ""; await fs.promises.writeFile(target, image.resize({ width: 320, quality: "good" }).toJPEG(82)); }
+    return target;
+  });
   ipcMain.handle("app:download-card-years", async () => {
     const result = await dialog.showSaveDialog(mainWindow, { title: "Save the optional card-image folder starter", defaultPath: "Card Years.zip", filters: [{ name: "ZIP archive", extensions: ["zip"] }] });
     if (result.canceled || !result.filePath) return false;
@@ -1191,6 +1200,11 @@ app.whenReady().then(() => {
     const allowed = ["tools.usps.com", "www.ups.com", "www.fedex.com"];
     if (parsed.protocol !== "https:" || !allowed.includes(parsed.hostname.toLowerCase())) return false;
     await shell.openExternal(value); return true;
+  });
+  ipcMain.handle("app:open-external", async (_event, target) => {
+    let value; try { value = new URL(String(target || "")); } catch { return false; }
+    if (value.protocol !== "https:") return false;
+    await shell.openExternal(value.toString()); return true;
   });
   ipcMain.handle("print:packing-slip", async (_event, payload) => {
     if (!paidAllowed()) return paidDenied();

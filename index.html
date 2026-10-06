@@ -60,6 +60,7 @@
             <p class="brand-tagline">From first claim to final shipment.</p>
           </div>
           <div class="top-actions">
+            <button id="contextHelpBtn" class="secondary">Help for this screen</button>
             <button id="saleIntroBtn" class="secondary">Sale introduction</button>
             <button id="addImagesBtn" class="secondary">Add images</button>
             <button id="addSingleCardBtn" class="secondary">Add single card</button>
@@ -90,11 +91,11 @@
               <div class="toolbar">
                 <label class="search"><span>⌕</span><input id="cardSearch" type="search" placeholder="Search cards, numbers, conditions…" /></label>
                 <label class="inline-control">Order<select id="listingSort"><option value="spreadsheet">Spreadsheet</option><option value="year">Year</option><option value="player">Player</option><option value="price-asc">Price low–high</option><option value="price-desc">Price high–low</option><option value="custom">Custom</option></select></label>
-                <div class="bulk-actions"><label class="select-all"><input id="selectAllListings" type="checkbox" /> Select visible</label><span id="listingSelectionCount">0 selected</span><button id="bundleOfferBtn" class="secondary" disabled>Bundle offer</button><button id="bulkEditBtn" class="secondary" disabled>Bulk edit</button><button id="teamReviewBtn" class="secondary">Teams</button><button id="catalogBuilderBtn" class="secondary hidden" data-owner-catalog>Build catalog</button><button id="customFieldsBtn" class="secondary">Custom fields</button><button id="renumberCardsBtn" class="secondary">References</button><button id="carryoverBtn" class="secondary">Carry over unsold</button><button id="closeSaleBtn" class="secondary">Close sale</button><button id="deleteSelectedCardsBtn" class="secondary danger-button" disabled>Delete selected</button></div>
+                <div class="bulk-actions"><label class="select-all"><input id="selectAllListings" type="checkbox" /> Select visible</label><button id="selectFilteredListingsBtn" class="row-action">All filtered</button><button id="selectEntireSaleBtn" class="row-action">Entire sale</button><button id="clearListingSelectionBtn" class="row-action">Clear</button><span id="listingSelectionCount">0 selected</span><button id="workspaceColumnsBtn" class="secondary">Columns</button><button id="bundleOfferBtn" class="secondary" disabled>Bundle offer</button><button id="bulkEditBtn" class="secondary" disabled>Bulk edit</button><button id="teamReviewBtn" class="secondary">Teams</button><button id="catalogBuilderBtn" class="secondary hidden" data-owner-catalog>Build catalog</button><button id="customFieldsBtn" class="secondary">Custom fields</button><button id="renumberCardsBtn" class="secondary">References</button><button id="carryoverBtn" class="secondary">Carry over unsold</button><button id="closeSaleBtn" class="secondary">Close sale</button><button id="deleteSelectedCardsBtn" class="secondary danger-button" disabled>Delete selected</button></div>
               </div>
               <div class="table-wrap">
                 <table>
-                  <thead><tr><th class="select-column"></th><th>Ref</th><th>Card</th><th>Grade</th><th>Claim price</th><th>Status</th><th></th></tr></thead>
+                  <thead id="listingHead"></thead>
                   <tbody id="listingRows"></tbody>
                 </table>
                 <div id="listingEmpty" class="empty-state hidden">
@@ -216,15 +217,15 @@
         </section>
 
         <section id="liveView" class="view">
-          <div id="liveSaleContent" class="live-sale-card"></div>
+          <section class="panel live-sale-tools"><div class="panel-header compact"><div><h2>Facebook sale post</h2><p>Optional shortcut saved only with this sale.</p></div><div class="live-link-actions"><input id="facebookPostUrl" type="url" placeholder="https://www.facebook.com/groups/..." /><button id="saveFacebookPostBtn" class="secondary">Save link</button><button id="openFacebookPostBtn" class="secondary">Open post</button><button id="saleReplyLibraryBtn" class="secondary">Sale replies</button></div></div></section><div id="liveSaleContent" class="live-sale-card"></div>
         </section>
 
         <section id="buyersView" class="view">
-          <div class="profile-layout"><section class="panel"><div class="panel-header compact"><div><h2>Buyer directory</h2><p>History, tags, preferences and notes.</p></div></div><label class="profile-search search"><span>⌕</span><input id="buyerProfileSearch" type="search" placeholder="Search buyers or tags…" /></label><div id="buyerProfileList" class="buyer-list"></div></section><section id="buyerProfileDetail" class="panel profile-detail"></section></div>
+          <div class="profile-layout"><section class="panel"><div class="panel-header compact"><div><h2>Buyer directory</h2><p>History, tags, preferences and notes.</p></div><button id="mergeBuyerProfilesBtn" class="secondary">Merge profiles</button></div><label class="profile-search search"><span>⌕</span><input id="buyerProfileSearch" type="search" placeholder="Search buyers or tags…" /></label><div id="buyerProfileList" class="buyer-list"></div></section><section id="buyerProfileDetail" class="panel profile-detail"></section></div>
         </section>
 
         <section id="healthView" class="view">
-          <div id="healthSummary" class="stats"></div><section class="panel"><div class="panel-header"><div><h2>Sale health check</h2><p>Review anything that could interrupt posting, claiming, payment or packing.</p></div><button id="refreshHealthBtn" class="secondary">Refresh</button></div><div id="healthIssues" class="health-list"></div></section>
+          <div id="healthSummary" class="stats"></div><section class="panel"><div class="panel-header"><div><h2>Sale health check</h2><p>Review anything that could interrupt posting, claiming, payment or packing.</p></div><div><button id="repairHealthBtn" class="primary">Repair safe issues</button><button id="refreshHealthBtn" class="secondary">Refresh</button></div></div><p id="repairHealthSummary" class="dialog-copy"></p><div id="healthIssues" class="health-list"></div></section>
         </section>
 
         <section id="helpView" class="view">
@@ -274,7 +275,7 @@
         <p id="bulkEditCount" class="dialog-copy"></p>
         <div class="mapping-grid"><label>Year<input id="bulkYear" placeholder="Leave blank to keep" /></label><label>Brand<input id="bulkBrand" placeholder="Leave blank to keep" /></label><label>Sport<select id="bulkSport"><option value="">Leave unchanged</option><option>Baseball</option><option>Basketball</option><option>Football</option><option>Hockey</option><option>Other</option></select></label><label>Team(s)<input id="bulkTeams" placeholder="Leave blank to keep" /></label><label>Grade<input id="bulkGrade" placeholder="Leave blank to keep" /></label><label>Flaw(s)<input id="bulkFlaws" placeholder="Leave blank to keep" /></label></div>
         <div class="two-columns"><label>Set exact claim price<input id="bulkPrice" type="number" min="0" step="0.01" placeholder="Leave blank to keep" /></label><label>Adjust price by percent<input id="bulkPricePercent" type="number" step="0.1" placeholder="Example: -10 or 5" /></label></div>
-        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="applyBulkEditBtn" type="button" class="primary">Apply changes</button></div>
+        <section id="bulkEditPreview" class="bulk-edit-preview"></section><div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="applyBulkEditBtn" type="button" class="primary">Apply changes</button></div>
       </form>
     </dialog>
 
@@ -344,7 +345,7 @@
     <dialog id="newSaleDialog">
       <form method="dialog" class="dialog-card">
         <div class="dialog-header"><div><p class="eyebrow">NEW SALE</p><h2>Start a sale</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
-        <label>Sale name<input id="newSaleName" placeholder="September vintage sale" required /></label>
+        <label>Sale name<input id="newSaleName" placeholder="September vintage sale" required /></label><label>Facebook group post link (optional)<input id="newSaleFacebookPostUrl" type="url" placeholder="https://www.facebook.com/groups/..." /></label>
         <div class="two-columns"><label>PWE shipping<input id="newSalePweShipping" type="number" min="0" step="0.01" value="1.00" /></label><label>PMWT shipping<input id="newSalePmwtShipping" type="number" min="0" step="0.01" value="5.00" /></label></div>
         <fieldset class="image-mode-fieldset"><legend>Images for this sale</legend><div class="image-mode-options">
           <label class="image-mode-option"><input type="radio" name="newSaleImageMode" value="single" checked /><span class="image-mode-copy"><strong>One image per card</strong><small>Use a single combined image, photo, or scan for each listing.</small><span class="image-mode-example single"><img src="assets/help-example-cards.png" alt="Example of one card image" /><em>1 image</em></span></span></label>
@@ -354,6 +355,12 @@
         <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="createSaleBtn" value="default" class="primary">Create sale</button></div>
       </form>
     </dialog>
+
+    <dialog id="workspaceColumnsDialog"><form method="dialog" class="dialog-card"><div class="dialog-header"><div><p class="eyebrow">SALE WORKSPACE</p><h2>Choose visible columns</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><p class="dialog-copy">Keep the table focused on the information you use most. Card and actions always remain visible.</p><div id="workspaceColumnChoices" class="option-grid"></div><div class="dialog-actions"><button id="resetWorkspaceColumnsBtn" type="button" class="secondary">Restore defaults</button><button id="saveWorkspaceColumnsBtn" type="button" class="primary">Save columns</button></div></form></dialog>
+
+    <dialog id="saleReplyDialog"><form method="dialog" class="dialog-card large"><div class="dialog-header"><div><p class="eyebrow">SALE REPLY LIBRARY</p><h2>Ready-to-copy Facebook replies</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><p class="dialog-copy">Edit these once, then copy them while the sale is running. Available fields: <code>{firstName}</code>, <code>{buyer}</code>, <code>{card}</code>, <code>{price}</code>, and <code>{saleName}</code>.</p><div id="saleReplyFields" class="message-template-grid"></div><div class="dialog-actions spread"><button id="resetSaleRepliesBtn" type="button" class="secondary">Restore defaults</button><button id="saveSaleRepliesBtn" type="button" class="primary">Save replies</button></div></form></dialog>
+
+    <dialog id="mergeBuyerDialog"><form method="dialog" class="dialog-card"><div class="dialog-header"><div><p class="eyebrow">BUYER PROFILES</p><h2>Merge duplicate buyers</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><p class="dialog-copy">All cards, orders, aliases, tags, addresses, and notes from the first profile will be moved into the profile you keep.</p><label>Profile to merge<select id="mergeBuyerSource"></select></label><label>Profile to keep<select id="mergeBuyerTarget"></select></label><p id="mergeBuyerPreview" class="setup-note"></p><div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirmMergeBuyerBtn" type="button" class="primary">Merge profiles</button></div></form></dialog>
 
     <dialog id="archivedSalesDialog"><form method="dialog" class="dialog-card large"><div class="dialog-header"><div><p class="eyebrow">PROTECTED HISTORY</p><h2>Archived sale records</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><p class="dialog-copy">Sales removed from the active list remain here so buyer histories, order records, and reporting totals are not lost.</p><div id="archivedSalesList" class="csm-manager-list"></div><div class="dialog-actions"><button value="cancel" class="primary">Done</button></div></form></dialog>
 

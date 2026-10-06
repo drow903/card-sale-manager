@@ -134,6 +134,9 @@ button.full { width: 100%; }
 .search { flex: 1; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 9px; padding: 0 11px; background: #fbfcfd; }
 .search input { border: 0; outline: 0; background: transparent; width: 100%; min-height: 38px; }
 .table-wrap { min-height: 360px; overflow: auto; }
+.table-wrap tbody tr { content-visibility: auto; contain-intrinsic-size: 72px; }
+.card-detail-link { border: 0; background: transparent; color: inherit; padding: 0; text-align: left; width: 100%; cursor: pointer; display: grid; gap: 3px; }
+.card-detail-link:hover .card-title { color: var(--brand-green); text-decoration: underline; }
 table { width: 100%; border-collapse: collapse; }
 th { position: sticky; top: 0; background: #f8fafb; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-size: 11px; text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 td { padding: 12px 14px; border-bottom: 1px solid #edf0f3; vertical-align: middle; }
@@ -427,6 +430,17 @@ dialog:has(.large) { width: min(850px, calc(100% - 32px)); }
 .repeat-alert span { font-size: 12px; }
 .live-sale-card { background: white; border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
 .live-progress { padding: 14px 20px; background: var(--navy); color: white; display: flex; justify-content: space-between; }
+.live-sale-tools { margin-bottom: 14px; }
+.live-link-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.live-link-actions input { min-width: min(380px, 60vw); }
+.live-overall-progress { padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--border); display: grid; grid-template-columns: minmax(220px, 1fr) minmax(240px, 2fr); gap: 18px; align-items: center; }
+.live-overall-progress div { display: flex; justify-content: space-between; gap: 12px; }
+.live-overall-progress progress { width: 100%; height: 14px; accent-color: var(--brand-green); }
+.bulk-edit-preview { margin-top: 14px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); display: grid; gap: 8px; }
+.bulk-edit-preview > div { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; font-size: 12px; align-items: center; }
+.shipping-rule-explanation { display: block; padding: 8px 10px; border-radius: 8px; background: var(--green-soft); color: var(--ink); }
+.health-actions { display: flex; gap: 10px; align-items: center; }
+.notification-item.priority-info > span { background: #e7efff; color: var(--blue); }
 .live-layout { display: grid; grid-template-columns: minmax(320px, .85fr) minmax(420px, 1.15fr); min-height: 560px; }
 .live-image { background: #edf1f4; display: grid; place-items: center; align-content: center; gap: 10px; padding: 24px; }
 .live-image img { max-width: 100%; max-height: 500px; object-fit: contain; border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.16); cursor: grab; }
@@ -631,6 +645,7 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; background: var
 :root[data-theme="contrast"] button.secondary, :root[data-theme="contrast"] input, :root[data-theme="contrast"] select, :root[data-theme="contrast"] textarea, :root[data-theme="contrast"] dialog,
 :root[data-theme="system"] body.dark-system button.secondary { background-color: var(--panel); color: var(--ink); border-color: var(--border); }
 :root[data-theme="dark"] .search, :root[data-theme="dark"] th, :root[data-theme="dark"] .image-card, :root[data-theme="dark"] .folder-item, :root[data-theme="dark"] .health-item, :root[data-theme="dark"] .quick-drawer { background: var(--panel); color: var(--ink); }
+:root[data-theme="dark"] .bulk-edit-preview, :root[data-theme="dark"] .shipping-rule-explanation { background: var(--panel); color: var(--ink); }
 :root[data-theme="dark"] td, :root[data-theme="dark"] .timeline-item { border-color: var(--border); }
 :root[data-theme="dark"] .segmented { background: var(--canvas); }
 :root[data-theme="dark"] .segmented button.active { background: var(--panel); color: var(--ink); }

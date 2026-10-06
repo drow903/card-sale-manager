@@ -22,6 +22,7 @@ const state = { activeSaleId: "sale-a", sales: [{ id: "sale-a", name: "Current",
 const context = vm.createContext({ state, Date, Set, String, Number, Boolean, Array, Object, console, uid: () => "image-id", toast: () => {} });
 [
   "activeSale", "normalizeMatchText", "normalizedCardKey", "duplicateInfo", "normalizePurchaseDate",
+  "saleImageMode", "requiredImageSlots", "imagePathFor", "setImagePathFor", "imageMatchKey", "cardImagePaths", "imageSide",
   "cardLastName", "imageDateCodes", "imageSequenceNumber", "allCardRecords", "scoreImage",
   "proposedImageMatch", "imageOwner", "attachImage"
 ].forEach((name) => vm.runInContext(functionSource(name), context));
