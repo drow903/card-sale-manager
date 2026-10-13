@@ -62,6 +62,7 @@
           <div class="top-actions">
             <button id="contextHelpBtn" class="secondary">Help for this screen</button>
             <button id="saleIntroBtn" class="secondary">Sale introduction</button>
+            <button id="guidedSetupBtn" class="secondary">Guided sale setup</button>
             <button id="addImagesBtn" class="secondary">Add images</button>
             <button id="addSingleCardBtn" class="secondary">Add single card</button>
             <button id="importBtn" class="primary">Import spreadsheet</button>
@@ -70,6 +71,7 @@
 
         <section id="commandView" class="view active">
           <div id="commandStats" class="stats"></div>
+          <section class="panel preparation-panel"><div class="panel-header"><div><h2>Sale preparation</h2><p>CSM gathers incomplete cards into one guided checklist.</p></div><div class="row-actions"><button id="fixNextProblemBtn" class="primary">Fix next problem</button><button id="openFixCenterBtn" class="secondary">Open Fix Center</button></div></div><div id="preparationSummary" class="preparation-summary"></div></section>
           <div class="command-grid"><section class="panel"><div class="panel-header"><div><h2>Needs attention</h2><p>Your prioritized sale checklist.</p></div><button id="refreshCommandBtn" class="secondary">Refresh</button></div><div id="commandAttention" class="command-list"></div></section><section class="panel"><div class="panel-header"><div><h2>Ready for the next step</h2><p>Orders and cards that can move forward now.</p></div></div><div id="commandReady" class="command-list"></div></section><section class="panel command-activity"><div class="panel-header"><div><h2>Latest activity</h2><p>Recent claims, offers, payments and packing changes.</p></div></div><div id="commandActivity" class="timeline"></div></section></div>
         </section>
 
@@ -91,7 +93,7 @@
               <div class="toolbar">
                 <label class="search"><span>⌕</span><input id="cardSearch" type="search" placeholder="Search cards, numbers, conditions…" /></label>
                 <label class="inline-control">Order<select id="listingSort"><option value="spreadsheet">Spreadsheet</option><option value="year">Year</option><option value="player">Player</option><option value="price-asc">Price low–high</option><option value="price-desc">Price high–low</option><option value="custom">Custom</option></select></label>
-                <div class="bulk-actions"><label class="select-all"><input id="selectAllListings" type="checkbox" /> Select visible</label><button id="selectFilteredListingsBtn" class="row-action">All filtered</button><button id="selectEntireSaleBtn" class="row-action">Entire sale</button><button id="clearListingSelectionBtn" class="row-action">Clear</button><span id="listingSelectionCount">0 selected</span><button id="workspaceColumnsBtn" class="secondary">Columns</button><button id="bundleOfferBtn" class="secondary" disabled>Bundle offer</button><button id="bulkEditBtn" class="secondary" disabled>Bulk edit</button><button id="teamReviewBtn" class="secondary">Teams</button><button id="catalogBuilderBtn" class="secondary hidden" data-owner-catalog>Build catalog</button><button id="customFieldsBtn" class="secondary">Custom fields</button><button id="renumberCardsBtn" class="secondary">References</button><button id="carryoverBtn" class="secondary">Carry over unsold</button><button id="closeSaleBtn" class="secondary">Close sale</button><button id="deleteSelectedCardsBtn" class="secondary danger-button" disabled>Delete selected</button></div>
+                <div class="bulk-actions"><label class="select-all"><input id="selectAllListings" type="checkbox" /> Select visible</label><button id="selectRangeListingsBtn" class="row-action">Select range</button><button id="selectFilteredListingsBtn" class="row-action">All filtered</button><button id="selectEntireSaleBtn" class="row-action">Entire sale</button><button id="clearListingSelectionBtn" class="row-action">Clear</button><span id="listingSelectionCount">0 selected</span><button id="attachOrderedImagesBtn" class="secondary" disabled>Attach images in order</button><button id="workspaceColumnsBtn" class="secondary">Columns</button><button id="bundleOfferBtn" class="secondary" disabled>Bundle offer</button><button id="bulkEditBtn" class="secondary" disabled>Bulk edit</button><button id="teamReviewBtn" class="secondary">Teams</button><button id="catalogBuilderBtn" class="secondary hidden" data-owner-catalog>Build catalog</button><button id="customFieldsBtn" class="secondary">Custom fields</button><button id="renumberCardsBtn" class="secondary">References</button><button id="carryoverBtn" class="secondary">Carry over unsold</button><button id="closeSaleBtn" class="secondary">Close sale</button><button id="deleteSelectedCardsBtn" class="secondary danger-button" disabled>Delete selected</button></div>
               </div>
               <div class="table-wrap">
                 <table>
@@ -118,6 +120,7 @@
                 <div id="lookupProgress" class="task-progress hidden"><div class="progress-track"><div id="lookupProgressBar" class="progress-bar"></div></div><small id="lookupProgressText">Starting image lookup…</small></div>
                 <button id="imageFolderSettingsBtn" class="secondary full">Image lookup folders</button>
                 <button id="addFolderBtn" class="secondary full">Add image folder</button>
+                <button id="imageInboxBtn" class="secondary full">Open image inbox</button>
                 <p id="lookupFolderLabel" class="folder-label">No lookup folder selected</p>
               </div>
             </aside>
@@ -230,7 +233,7 @@
 
         <section id="helpView" class="view">
           <section class="help-hero"><div><img class="help-brand-logo" src="assets/brand-logo-dark.svg" alt="Card Sale Manager — Post. Sell. Track." /><p class="eyebrow">GETTING STARTED</p><h2>From first claim to final shipment.</h2><p>Follow the workflow below, reopen the guided walkthrough at any time, or create an anonymous support report if something goes wrong.</p><div class="help-actions"><button id="startWalkthroughBtn" class="primary">Start guided walkthrough</button><button id="openSetupWizardBtn" class="secondary">Open setup wizard</button><button id="openFullGuideBtn" class="secondary">Open full user guide</button><button id="downloadCardYearsBtn" class="secondary">Optional image folders</button><button id="cardStitcherBtn" class="secondary">Combine images with CardStitcher</button><button id="contactSupportBtn" class="secondary">Contact support</button><button id="saveDiagnosticBtn" class="secondary">Save diagnostic report</button></div><p class="setup-note">CSM currently supports one image file per card. Use CardStitcher if you want to combine front, back, and detail photos. The optional folder download contains Baseball, Basketball, Football, and Hockey year folders from 1948 through 2026, but you can use your own folder system instead.</p></div><img src="assets/help-example-cards.png" alt="Three fictional example sports cards" /></section>
-          <div class="help-grid"><article class="panel help-card"><img src="assets/help/workspace.png" alt="Sale workspace screenshot" /><div><span>1</span><h3>Import and prepare</h3><p>Import a spreadsheet, retain extra columns as custom fields, match images, and safely renumber listings.</p><button class="row-action" data-help-view="sale">Open Sale Workspace</button></div></article><article class="panel help-card"><img src="assets/help/offers.png" alt="Offers screen screenshot" /><div><span>2</span><h3>Record claims and offers</h3><p>Assign buyers in Claims Desk, or select multiple available listings to create a bundle offer. Review, counter, accept, or reject offers before they enter an order.</p><button class="row-action" data-help-view="claims">Open Claims Desk</button></div></article><article class="panel help-card"><img src="assets/help/orders.png" alt="Buyer Orders screenshot" /><div><span>3</span><h3>Confirm totals and payment</h3><p>Choose shipping, verify addresses, copy buyer summaries, and mark payments without exposing purchase costs.</p><button class="row-action" data-help-view="orders">Open Buyer Orders</button></div></article><article class="panel help-card"><img src="assets/help/packing.png" alt="Card pulling screenshot" /><div><span>4</span><h3>Pull cards your way</h3><p>Sort and group sold cards by storage location, buyer, or any information imported from your sheet.</p><button class="row-action" data-help-view="pulling">Open Card Pulling</button></div></article><article class="panel help-card"><img src="assets/help/packing.png" alt="Packing screen screenshot" /><div><span>5</span><h3>Pack and ship</h3><p>Verify cards, preview or print packing slips and labels, add tracking, and copy shipment messages.</p><button class="row-action" data-help-view="packing">Open Packing</button></div></article><article class="panel help-card"><img src="assets/help/orders.png" alt="Notification center example" /><div><span>6</span><h3>Stay caught up</h3><p>The Notification Center links directly to offers, payment, images, addresses, tracking, and other unfinished work.</p><button class="row-action" data-help-view="notifications">Open Notifications</button></div></article></div>
+          <div class="help-grid"><article class="panel help-card"><img src="assets/help/workspace.png" alt="Sale workspace screenshot" /><div><span>1</span><h3>Import and prepare</h3><p>Bring the spreadsheet and images into Guided Sale Setup, then let Fix Center walk through anything incomplete.</p><button class="row-action" data-help-view="sale">Open Sale Workspace</button></div></article><article class="panel help-card"><img src="assets/help/offers.png" alt="Offers screen screenshot" /><div><span>2</span><h3>Record claims and offers</h3><p>Assign buyers in Claims Desk, or select multiple available listings to create a bundle offer. Review, counter, accept, or reject offers before they enter an order.</p><button class="row-action" data-help-view="claims">Open Claims Desk</button></div></article><article class="panel help-card"><img src="assets/help/orders.png" alt="Buyer Orders screenshot" /><div><span>3</span><h3>Confirm totals and payment</h3><p>Choose shipping, verify addresses, copy buyer summaries, and mark payments without exposing purchase costs.</p><button class="row-action" data-help-view="orders">Open Buyer Orders</button></div></article><article class="panel help-card"><img src="assets/help/packing.png" alt="Card pulling screenshot" /><div><span>4</span><h3>Pull cards your way</h3><p>Sort and group sold cards by storage location, buyer, or any information imported from your sheet.</p><button class="row-action" data-help-view="pulling">Open Card Pulling</button></div></article><article class="panel help-card"><img src="assets/help/packing.png" alt="Packing screen screenshot" /><div><span>5</span><h3>Pack and ship</h3><p>Verify cards, preview or print packing slips and labels, add tracking, and copy shipment messages.</p><button class="row-action" data-help-view="packing">Open Packing</button></div></article><article class="panel help-card"><img src="assets/help/orders.png" alt="Notification center example" /><div><span>6</span><h3>Stay caught up</h3><p>The Notification Center links directly to offers, payment, images, addresses, tracking, and other unfinished work.</p><button class="row-action" data-help-view="notifications">Open Notifications</button></div></article></div>
           <section class="panel detailed-guide"><div class="panel-header"><div><h2>Complete user guide</h2><p>Search the full workflow or open any section for detailed instructions.</p></div><div class="guide-header-actions"><button id="expandGuideBtn" class="secondary">Open all</button><button id="collapseGuideBtn" class="secondary">Close all</button></div></div><label class="search guide-search"><span>⌕</span><input id="guideSearch" type="search" placeholder="Search setup, images, claims, packing, backups…" /></label><div id="detailedGuideSections" class="guide-sections"><div class="empty-state"><p>Loading guide…</p></div></div></section>
           <section class="panel help-reference"><div class="panel-header"><div><h2>Quick reference</h2><p>Important rules and where your information lives.</p></div></div><div class="help-reference-grid"><div><strong>Local or portable</strong><p>CSM always keeps a local recovery copy. A portable <code>.csm</code> workspace can be stored locally, on a USB or network drive, or with services such as OneDrive, Google Drive, and Dropbox.</p></div><div><strong>Backups are automatic</strong><p>Daily copies rotate, but update archives never do. Before installing an update, CSM permanently preserves the local workspace and any open portable file.</p></div><div><strong>Buyer profiles stay</strong><p>Updates and startup cleanup never remove buyer profiles. A profile is deleted only when you deliberately use Delete profile.</p></div><div><strong>Sale history stays</strong><p>Removing a sale hides it from the active-sale list, but preserves its card, buyer, order, and audit records for profiles and reporting.</p></div><div><strong>Image rechecks</strong><p>Re-run one card and its shared suggestions from the card row, or recheck every current and past active sale from the Post queue. One image can be reused in a later sale, but never attached to two listings within the same sale.</p></div><div><strong>Moved image folders</strong><p>CSM relinks moved image folders automatically when possible, regardless of storage provider. If paths differ, choose the image folder once from the CSM file screen.</p></div><div><strong>Avoid conflicts</strong><p>Do not edit one CSM file on two computers at once. CSM opens locked files read-only and warns before replacing a newer cloud copy.</p></div><div><strong>Publish a catalog</strong><p>Use Catalog to review public details and images. Save a Cloudflare Pages API token once, then choose Publish. The encrypted token stays on this computer and never enters a sale file.</p></div><div><strong>Customer privacy</strong><p>Published catalogs never include purchase data, buyers, addresses, private notes, or a listing-copy button. They are browsing previews only.</p></div><div><strong>Shipping rules</strong><p>Choose card-count and order-value limits from Buyer Orders. Either enabled limit can select PMWT automatically, and every order can still be overridden manually.</p></div><div><strong>Need support?</strong><p>The diagnostic report contains app health and counts only—never buyer names, addresses, card names, or image paths.</p></div></div></section>
         </section>
@@ -251,8 +254,92 @@
           <small>Available fields: {ref}, {year}, {brand}, {player}, {number}, {flaws}, {grade}, {claimPrice}, plus any custom field key shown in Custom fields.</small>
         </label>
         <div id="importPreview" class="format-preview"></div>
+        <div id="importMemoryNotice" class="import-memory-notice hidden"></div>
         <div id="importReview" class="import-review"></div>
         <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirmImportBtn" value="default" class="primary">Import cards</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="guidedSetupDialog">
+      <form method="dialog" class="dialog-card large guided-setup-card">
+        <div class="dialog-header"><div><p class="eyebrow">GUIDED SALE SETUP</p><h2>Bring the card list and images together</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <p class="dialog-copy">Drop a spreadsheet, image files, or an entire image folder below. CSM identifies each item and carries everything into one review.</p>
+        <div id="guidedSetupDropZone" class="setup-drop-zone"><strong>Drop spreadsheet and images here</strong><span>Excel, CSV, TSV, JPG, PNG, WebP, GIF, BMP, or TIFF</span></div>
+        <div class="setup-picker-actions"><button id="setupChooseSpreadsheetBtn" type="button" class="secondary">Choose spreadsheet</button><button id="setupChooseImagesBtn" type="button" class="secondary">Choose images</button><button id="setupChooseImageFolderBtn" type="button" class="secondary">Choose image folder</button></div>
+        <div class="setup-file-summary"><article><span>Spreadsheet</span><strong id="setupSpreadsheetStatus">Not selected</strong></article><article><span>Images</span><strong id="setupImagesStatus">None selected</strong></article></div>
+        <div id="guidedSetupWarnings" class="guided-setup-warnings"></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="continueGuidedSetupBtn" type="button" class="primary" disabled>Review sale setup</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="fixCenterDialog">
+      <form method="dialog" class="dialog-card large fix-center-card">
+        <div class="dialog-header"><div><p class="eyebrow">FIX CENTER</p><h2>Finish preparing this sale</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <p class="dialog-copy">Problems are grouped by type. Fix one item and CSM will take you directly to the next.</p>
+        <div id="fixCenterSummary" class="preparation-summary"></div>
+        <div id="fixCenterList" class="fix-center-list"></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Close</button><button id="fixCenterNextBtn" type="button" class="primary">Fix next problem</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="imageInboxDialog">
+      <form method="dialog" class="dialog-card large image-inbox-card">
+        <div class="dialog-header"><div><p class="eyebrow">IMAGE INBOX</p><h2>Review images that are not attached yet</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <div class="panel-header compact"><div><p>Use filenames when helpful, or assign images manually without renaming anything.</p></div><div class="row-actions"><button id="imageInboxAddBtn" type="button" class="secondary">Add images</button><button id="imageInboxOrderedBtn" type="button" class="primary">Pair selected cards in order</button></div></div>
+        <div id="imageInboxList" class="image-inbox-list"></div>
+        <div class="dialog-actions"><button value="cancel" class="primary">Done</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="safeDeleteDialog">
+      <form method="dialog" class="dialog-card safe-delete-card">
+        <div class="dialog-header"><div><p class="eyebrow">PLEASE REVIEW</p><h2 id="safeDeleteTitle">Remove item?</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <p id="safeDeleteMessage" class="dialog-copy"></p>
+        <div id="safeDeletePreserved" class="safe-delete-preserved"></div>
+        <div class="dialog-actions"><button id="cancelSafeDeleteBtn" type="button" class="secondary">Keep it</button><button id="confirmSafeDeleteBtn" type="button" class="danger-button">Remove</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="imageWorkflowDialog">
+      <form method="dialog" class="dialog-card large image-workflow-card">
+        <div class="dialog-header"><div><p class="eyebrow">ADD CARD IMAGES</p><h2>How are your images organized?</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <p class="dialog-copy">Choose the easiest option for this batch. CSM will show a review before ordered images are attached.</p>
+        <div class="image-workflow-options">
+          <button id="workflowAutoMatchBtn" type="button" class="workflow-option"><span class="workflow-icon">⌕</span><strong>Automatically match my card folders</strong><small>Best when images have player names, card numbers, years, or purchase dates in their filenames.</small></button>
+          <button id="workflowOrderedBtn" type="button" class="workflow-option recommended"><span class="workflow-icon">1→2</span><strong>Attach images in sale order</strong><small>No special filenames required. Photograph and upload cards in the exact order they appear in the sale.</small><b>Recommended for simple setup</b></button>
+          <button id="workflowManualBtn" type="button" class="workflow-option"><span class="workflow-icon">⇩</span><strong>Drop images onto individual cards</strong><small>Close this window, then drag a photo from your computer directly onto its card row. Drop two files together for a front-and-back card.</small></button>
+          <button id="workflowChooseFilesBtn" type="button" class="workflow-option"><span class="workflow-icon">＋</span><strong>Add images without matching yet</strong><small>Add a group of files to the Post Queue, then attach or match them later.</small></button>
+        </div>
+        <details class="advanced-image-settings"><summary>Advanced image folders</summary><p>Change the main card folder, additional search locations, or folders CSM should ignore.</p><button id="workflowFolderSettingsBtn" type="button" class="secondary">Open folder settings</button></details>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="selectRangeDialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-header"><div><p class="eyebrow">SELECT A RANGE</p><h2>Choose the first and last card</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <p class="dialog-copy">CSM will select every card between these two positions in the current sale order.</p>
+        <div class="two-columns"><label>First card<select id="rangeStartCard"></select></label><label>Last card<select id="rangeEndCard"></select></label></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="applyRangeSelectionBtn" type="button" class="primary">Select this range</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="orderedImagesDialog">
+      <form method="dialog" class="dialog-card large ordered-images-card">
+        <div class="dialog-header"><div><p class="eyebrow">ATTACH IN SALE ORDER</p><h2>Pair images without renaming files</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <div class="order-warning"><strong>Photograph and upload cards in the exact order they are listed.</strong><span>CSM pairs image 1 with card 1, image 2 with card 2, and so on. Nothing is attached until you review and confirm.</span></div>
+        <div class="ordered-image-controls">
+          <div><strong id="orderedCardCount">0 cards selected</strong><small id="orderedImageRequirement"></small></div>
+          <button id="chooseOrderedImagesBtn" type="button" class="primary">Choose images</button>
+          <label>Image order<select id="orderedImageSort"><option value="selected">Order received from computer</option><option value="filename">Filename</option><option value="created">Date created</option><option value="modified">Date modified</option></select></label>
+          <label id="frontBackOrderLabel" class="hidden">Front/back arrangement<select id="frontBackOrder"><option value="paired">Front, back, then next card</option><option value="fronts-backs">All fronts, then all backs</option></select></label>
+        </div>
+        <div id="orderedImageDropZone" class="ordered-image-drop-zone" tabindex="0"><strong>Drop images here</strong><span>or use “Choose images” above</span></div>
+        <div id="orderedImageCountWarning" class="ordered-count-status">No images selected yet.</div>
+        <label id="orderedPartialLabel" class="check-label hidden"><input id="orderedAllowPartial" type="checkbox" /> Attach the available images and leave the remaining cards unmatched</label>
+        <label class="check-label order-confirmation"><input id="orderedSequenceConfirmed" type="checkbox" /> I photographed these cards in sale order and reviewed the pairings below.</label>
+        <div id="orderedPairingList" class="ordered-pairing-list"></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="applyOrderedImagesBtn" type="button" class="primary" disabled>Attach reviewed images</button></div>
       </form>
     </dialog>
 

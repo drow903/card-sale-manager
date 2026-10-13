@@ -11,14 +11,21 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Adds a dedicated Catalog workspace for editing public details, teams, and images, exporting an offline folder, or publishing directly to a connected Cloudflare Pages project.
 - Creates a preview-only customer catalog with mobile-friendly paging, search, Player/Year/Team filters, year-first sorting, and low-to-high or high-to-low secondary card-number sorting; purchase data, buyers, and listing-copy controls are excluded.
 - Saves reusable import-column presets for spreadsheets whose headings differ from the standard template.
+- Adds a single Guided Sale Setup drop zone that accepts a spreadsheet, image files, or a complete image folder and carries them into one review workflow.
+- Remembers successful spreadsheet layouts automatically, including column mapping, custom-column choices, and listing format.
+- Groups missing values, invalid prices, questionable dates, duplicates, and unusual prices in an import Fix Center with bulk corrections for repeated problems.
 - Opens with a Sale Command Center that prioritizes pending offers, address problems, unpaid orders, missing images, and ready-to-ship work.
+- Adds sale-preparation badges, grouped Fix Center review, and a Fix next problem action for incomplete card data, images, and optional teams.
 - Uses a complete Card Sale Manager identity across the Windows icon, sidebar, light and dark themes, onboarding, walkthrough, Help guide, and default packing-slip design.
 - Formats each card into a copy-ready sale listing.
 - Matches local images using year folders, player names, card numbers, five- to eight-digit purchase-date codes (including `MMDDYY` such as `091326`), and duplicate sequence numbers.
 - Auto-confirms a purchase-date filename match when that date identifies only one copy of the card; duplicate same-date copies still require review.
 - Re-runs lookup for one card together with every card that shared its suggested image, or deliberately rechecks confirmed images across every current and past sale.
 - Prevents one image file from being attached to multiple listings within the same sale while allowing that image to be reused in a later sale.
-- Supports manual image attachment and native drag-out to Facebook.
+- Provides a guided Add Images screen for automatic folder matching, filename-free sale-order attachment, direct card-by-card drop, or ordinary manual selection.
+- Attaches a selected range of images in exact sale order with a numbered pairing review, count safeguards, reordering controls, and separate paired or all-fronts-then-all-backs modes.
+- Supports direct image drop onto an individual card and native drag-out to Facebook; correctly named files are helpful but never required.
+- Keeps unattached files in an Image Inbox where they can be assigned manually, removed from CSM without deleting the source file, or paired to selected cards in order.
 - Adds a dedicated Offers desk after Claims Desk, with list price, private purchase price, offer status, and buyer details in one place.
 - Keeps offers out of buyer orders and sales totals until accepted; rejected offers return cards to the open pool.
 - Supports accepted, rejected, and countered offers with editable copy-ready counter messages.
@@ -44,9 +51,10 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Restores verified portable-file recovery copies without leaving the app.
 - Protects cloud edits with automatic conflict copies and a takeover screen showing the other device, activity time, and revisions.
 - Pins, reveals, removes, and clearly marks unavailable entries in the recent CSM file list.
-- Includes Live Sale Mode, a Facebook claim-comment parser, and an unrecognized-comment review queue.
+- Includes Live Sale Mode with posted-card progress, an optional saved Facebook post link, and an editable Sale Reply Library.
 - Provides sale closing, carryover, health-check, version restore, and undo workflows.
 - Preserves removed sales in an archived-records area so card, buyer, order, and audit history remain available and the sale can be restored later.
+- Explains the exact effect of card, buyer-profile, image-inbox, and sale removal before confirming destructive actions.
 - Tracks private profit and inventory aging information with sortable profit columns.
 - Stores buyer profiles, tags, notes, purchase patterns, and repeat-buyer alerts.
 - Keeps buyer profiles until the user explicitly deletes them; updates and startup cleanup never remove profiles automatically.

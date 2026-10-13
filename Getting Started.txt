@@ -41,25 +41,44 @@ Take over only after the other computer has closed the file.
 
 1. Double-click Card Sale Manager.exe.
 2. Choose New sale and give the sale a name.
-3. Choose Add single card for manual entry, or choose Import spreadsheet and
-   select an Excel, CSV, or TSV file.
+3. Choose Guided sale setup when you have both a spreadsheet and images. Drop
+   the spreadsheet, individual images, or an image folder onto the same screen.
+   CSM identifies each item and carries everything into one review. You can
+   still choose Add single card or Import spreadsheet separately.
 4. Use these spreadsheet columns: Year, Brand, Player, Number, Flaw(s),
    Grade, Claim Price, Purchase Price, and Purchase Date. Purchase fields are
    kept private. Purchase Price warns when an offer is below cost, while a
    Purchase Date in MMDDYYYY format helps match duplicate-card filenames. Confirm the
-   detected columns and edit the listing format if desired. Sale reference
-   numbers are generated automatically.
-5. Choose Image lookup folders to set the primary folder containing your year
-   folders. Add or exclude multiple folders at once. These settings carry over
-   to every sale.
-6. Choose Auto-match card images. Unique 100% matches are attached automatically;
-   genuinely ambiguous matches appear in the review screen with the card's flaws.
-   A purchase-date code is also auto-confirmed when only one copy of that card
-   has that purchase date. Same-card duplicates with the same date stay in review.
-   Confirm cards one at a time; each confirmed
-   row hides so you can move steadily down the list. Confirmed matches remain
-   available through the Confirmed filter.
-7. Use Add image on any card to attach or replace its image manually.
+   detected columns and edit the listing format if desired. The import Fix
+   Center groups missing information, invalid prices, questionable dates,
+   duplicates, and unusual prices. Use Fix together for repeated values. After
+   a successful import, CSM remembers that spreadsheet layout and applies the
+   same mapping automatically next time. Sale reference numbers are generated
+   automatically.
+5. Choose Add images to open the guided image screen. You can use automatic
+   folder matching, attach a group of images in exact sale order, drop images
+   directly onto individual cards, or select ordinary image files manually.
+   Correctly named files help automatic matching, but filenames are not required.
+6. For automatic matching, open Advanced image folders and set the primary
+   folder containing your year folders. Add or exclude multiple folders at once.
+   These settings carry over to every sale. Unique 100% matches are attached
+   automatically; genuinely ambiguous matches appear in Image Review with the
+   card's flaws. A purchase-date code is also auto-confirmed when only one copy
+   of that card has that purchase date. Same-card duplicates with the same date
+   remain in review.
+7. For filename-free batch attachment, select cards with their checkboxes. Use
+   Shift-click or Select range when the cards are continuous, then choose Attach
+   images in order. Select the image files in the same order the cards appear in
+   the sale. CSM shows a numbered card-to-image preview before anything changes.
+   Check every pairing, reorder or remove images if needed, and confirm that the
+   photos were taken or selected in sale order. A count mismatch is blocked unless
+   you deliberately allow a partial batch. In front/back sales, choose whether
+   files alternate front/back or contain all fronts followed by all backs.
+   To attach one card at a time, drag an image onto that card's row or use its
+   Add image button. CSM will not reuse the same file on multiple listings.
+   Image inbox shows files that have been added but are not attached yet. Assign
+   one directly to a card, add more images, or send selected cards to ordered
+   pairing.
 8. Copy a single listing line from the sale workspace. That card row is hidden
    after copying so the next card moves up. Use the Copied filter to restore it,
    or press Ctrl+Z immediately to undo the hide.
@@ -92,6 +111,10 @@ Take over only after the other computer has closed the file.
     installs the Windows setup file automatically.
 15. Use Live Sale Mode for a keyboard-first posting workflow. Press ? inside
     the app to see all available shortcuts.
+    Command Center also shows Sale preparation counts. Open Fix Center to group
+    missing card information, prices, images, and optional teams, or choose Fix
+    next problem to work through the list one card at a time. Preparation badges
+    appear beside each listing in Sale Workspace.
 16. Extra spreadsheet columns can be retained as Custom Fields. Use Custom
     fields in Sale Workspace to control whether each field stays private,
     appears in copied listings, or prints on packing slips. These fields are
@@ -107,24 +130,18 @@ Take over only after the other computer has closed the file.
     addresses, unmatched images, below-cost sales, pulling/packing work,
     missing tracking, and portable-file warnings. Open an item to jump directly
     to it, or snooze/dismiss it.
-20. Shipping Batches group multiple orders for one mailing trip. A batch can
-    print combined slips and PWE labels, assign tracking from pasted lines,
-    copy every buyer's shipping message, and mark all included orders shipped.
-16. The Facebook claim parser recognizes configurable words such as claim,
-    claimed, take, taken, mine, and sold. Lines it cannot match remain in the
-    unrecognized-comment queue for review.
-17. Buyer Profiles stores tags, notes, addresses, purchase history, and likely
+20. Buyer Profiles stores tags, notes, addresses, purchase history, and likely
     repeat-buyer matches. Profit Dashboard includes private inventory aging.
-18. Before finishing a sale, use Health Check and the Sale Closing Assistant to
+21. Before finishing a sale, use Health Check and the Sale Closing Assistant to
     review missing images, incomplete orders, unpaid buyers, and unsold cards.
-19. Sale Presets saves reusable shipping prices, listing formats, and claim words.
+22. Sale Presets saves reusable shipping prices and listing formats.
     Use Edit beside any listing for the quick-edit drawer, or Move to enter an
     exact card position without dragging.
-20. In Packing, choose Customize slips to open the Packing Slip Studio. Add a
+23. In Packing, choose Customize slips to open the Packing Slip Studio. Add a
     logo, brand name, colors, messages, links, and a QR destination; choose the
     fields to show; drag sections into a preferred order; preview the result;
     and save reusable designs. QR codes are generated locally.
-21. Choose Print all slips to filter orders by payment, packing, shipping, or
+24. Choose Print all slips to filter orders by payment, packing, shipping, or
     prior print status. Select any buyers, then print them in one job or save a
     combined PDF. Successful output is recorded in Print history, and reprints
     are clearly labeled. Available formats include letter, half-sheet, two-up,
@@ -134,7 +151,7 @@ Take over only after the other computer has closed the file.
     designer with portrait and landscape layouts, font, alignment, padding,
     color, and optional-section controls. The live preview matches the saved
     orientation used for individual and batch printing.
-22. The Theme button cycles between System, Light, Dark, and High Contrast. The Motion button
+25. The Theme button cycles between System, Light, Dark, and High Contrast. The Motion button
     reduces animation. These preferences are remembered, but printed packing
     slips always use a clean white background.
 

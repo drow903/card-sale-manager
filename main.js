@@ -676,11 +676,19 @@ function createWindow() {
   });
   if (process.env.CARD_SALE_CAPTURE_PATH) {
     mainWindow.webContents.once("did-finish-load", async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => setTimeout(resolve, 2400));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
-      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder"].find((view) => captureName.includes(view)) || "");
+      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder", "image-workflow"].find((view) => captureName.includes(view)) || "");
       if (captureView && captureView !== "setup") await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item) => item.close())");
-      if (captureView === "match-review") {
+      if (captureView === "image-workflow") {
+        await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; currentLicense={configured:false,licensed:true,owner:false,catalogVisible:false}; applyLicenseEntitlements(currentLicense); document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); document.querySelector('#imageWorkflowDialog').showModal()");
+      } else if (captureView === "guided-setup") {
+        await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; currentLicense={configured:false,licensed:true,owner:false,catalogVisible:false}; applyLicenseEntitlements(currentLicense); openGuidedSetup()");
+      } else if (captureView === "fix-center") {
+        await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; openFixCenter()");
+      } else if (captureView === "image-inbox") {
+        await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; currentLicense={configured:false,licensed:true,owner:false,catalogVisible:false}; applyLicenseEntitlements(currentLicense); openImageInbox()");
+      } else if (captureView === "match-review") {
         await mainWindow.webContents.executeJavaScript("autoMatchImages()");
         await new Promise((resolve) => setTimeout(resolve, 2500));
       } else if (captureView === "claims") {
@@ -713,6 +721,9 @@ function createWindow() {
         await mainWindow.webContents.executeJavaScript("state.preferences.theme='light'; applyDisplayPreferences(); showView('command')");
       } else if (captureView === "help-light") {
         await mainWindow.webContents.executeJavaScript("state.preferences.theme='light'; applyDisplayPreferences(); showView('help')");
+      } else if (["live-light", "live-dark", "live-contrast", "live-system"].includes(captureView)) {
+        const theme = captureView.replace("live-", "");
+        await mainWindow.webContents.executeJavaScript(`state.preferences ||= {}; state.preferences.setupCompleted=true; currentLicense={configured:true,licensed:true,owner:false,catalogVisible:false}; applyLicenseEntitlements(currentLicense); state.preferences.theme=${JSON.stringify(theme)}; applyDisplayPreferences(); document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); showView('live'); renderLiveSale()`);
       } else if (captureView === "pwe-label") {
         await mainWindow.webContents.executeJavaScript("showView('packing'); openPweLabelDesigner()");
         if (captureName.includes("landscape")) await mainWindow.webContents.executeJavaScript("document.querySelector('#pweLabelOrientation').value='landscape'; updatePweLabelPreview()");
@@ -729,6 +740,10 @@ function createWindow() {
         await mainWindow.webContents.executeJavaScript(`showView(${JSON.stringify(captureView)})`);
       }
       await new Promise((resolve) => setTimeout(resolve, 150));
+      if (["live-light", "live-dark", "live-contrast", "live-system"].includes(captureView)) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await mainWindow.webContents.executeJavaScript("state.preferences.setupCompleted=true; document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); showView('live'); renderLiveSale()");
+      }
       const image = await mainWindow.webContents.capturePage();
       await fs.promises.writeFile(process.env.CARD_SALE_CAPTURE_PATH, image.toPNG());
       app.quit();
@@ -1008,6 +1023,29 @@ app.whenReady().then(() => {
     }
   });
 
+  ipcMain.handle("setup:inspect-paths", async (_event, filePaths) => {
+    if (!paidAllowed()) return { spreadsheetPath: "", imagePaths: [], skipped: 0 };
+    const spreadsheet = /\.(?:xlsx?|csv|tsv)$/i;
+    const image = /\.(?:jpe?g|png|webp|gif|bmp|tiff?)$/i;
+    const queue = [...new Set((Array.isArray(filePaths) ? filePaths : []).map((value) => String(value || "")).filter(Boolean))];
+    const imagePaths = [];
+    let spreadsheetPath = "";
+    let skipped = 0;
+    while (queue.length && imagePaths.length < 5000) {
+      const itemPath = queue.shift();
+      try {
+        const stat = await fs.promises.stat(itemPath);
+        if (stat.isDirectory()) {
+          const entries = await fs.promises.readdir(itemPath, { withFileTypes: true });
+          entries.forEach((entry) => queue.push(path.join(itemPath, entry.name)));
+        } else if (!spreadsheetPath && spreadsheet.test(itemPath)) spreadsheetPath = itemPath;
+        else if (image.test(itemPath)) imagePaths.push(itemPath);
+        else skipped += 1;
+      } catch { skipped += 1; }
+    }
+    return { spreadsheetPath, imagePaths: [...new Set(imagePaths)], skipped, capped: queue.length > 0 };
+  });
+
   ipcMain.handle("dialog:images", async () => {
     if (!paidAllowed()) return [];
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -1018,6 +1056,23 @@ app.whenReady().then(() => {
       ]
     });
     return result.canceled ? [] : result.filePaths;
+  });
+
+  ipcMain.handle("images:file-details", async (_event, filePaths) => {
+    if (!paidAllowed()) return [];
+    const allowed = /\.(?:jpe?g|png|webp|gif|bmp|tiff?)$/i;
+    const unique = [...new Set((Array.isArray(filePaths) ? filePaths : []).map((value) => String(value || "")).filter(Boolean))].slice(0, 5000);
+    const details = [];
+    for (let index = 0; index < unique.length; index += 1) {
+      const filePath = unique[index];
+      if (!allowed.test(filePath)) continue;
+      try {
+        const stat = await fs.promises.stat(filePath);
+        if (!stat.isFile()) continue;
+        details.push({ path: filePath, name: path.basename(filePath), selectedOrder: index, createdAt: stat.birthtimeMs || stat.ctimeMs || 0, modifiedAt: stat.mtimeMs || 0 });
+      } catch {}
+    }
+    return details;
   });
 
   ipcMain.handle("dialog:image-folder", async () => {

@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("cardSale", {
   load: () => ipcRenderer.invoke("data:load"),
@@ -19,7 +19,12 @@ contextBridge.exposeInMainWorld("cardSale", {
   saveDiagnosticReport: (report) => ipcRenderer.invoke("diagnostic:save", report),
   chooseSpreadsheet: () => ipcRenderer.invoke("dialog:spreadsheet"),
   parseSpreadsheet: (filePath) => ipcRenderer.invoke("spreadsheet:parse", filePath),
+  inspectSetupPaths: (filePaths) => ipcRenderer.invoke("setup:inspect-paths", filePaths),
   chooseImages: () => ipcRenderer.invoke("dialog:images"),
+  imageFileDetails: (filePaths) => ipcRenderer.invoke("images:file-details", filePaths),
+  droppedFilePath: (file) => {
+    try { return webUtils.getPathForFile(file); } catch { return ""; }
+  },
   chooseImageFolder: () => ipcRenderer.invoke("dialog:image-folder"),
   chooseLookupFolder: () => ipcRenderer.invoke("dialog:lookup-folder"),
   chooseLookupFolders: (title) => ipcRenderer.invoke("dialog:lookup-folders", title),

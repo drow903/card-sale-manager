@@ -67,9 +67,14 @@ const starterSale = {
 let state = { sales: [starterSale], archivedSales: [], activeSaleId: starterSale.id, selectedBuyer: "Mike R", filter: "all", query: "", claimQuery: "", lookupSettings: { primaryFolder: "", additionalFolders: [], excludedFolders: [] } };
 let pendingSheet = null;
 let pendingMatches = null;
+let pendingOrderedImages = null;
+let pendingGuidedSetup = { spreadsheetPath: "", imagePaths: [], skipped: 0 };
+let pendingSetupImages = [];
+let safeDeleteResolver = null;
 let saveTimer = null;
 let undoStack = [];
 let selectedListingIds = new Set();
+let listingSelectionAnchor = "";
 let selectedMatchIds = new Set();
 let availableUpdate = null;
 let liveIndex = 0;
@@ -283,6 +288,11 @@ function importPresets() {
   return state.importPresets;
 }
 
+function importMemories() {
+  state.importMemories ||= {};
+  return state.importMemories;
+}
+
 function offerDeskSettings() {
   state.preferences ||= {};
   state.preferences.offerDesk ||= { query: "", status: "all", buyer: "all", margin: "all", sortKey: "card", sortDirection: "asc" };
@@ -429,6 +439,92 @@ function cardHasRequiredImages(card, sale = activeSale()) { return requiredImage
 function imageMatchKey(card, slot = "single") { return `${card.id}::${slot}`; }
 function imageSlotLabel(slot) { return slot === "front" ? "Front" : slot === "back" ? "Back" : "Image"; }
 function cardImagePaths(card) { return [card?.imagePath, card?.backImagePath].filter(Boolean); }
+
+function cardPreparationIssues(card, sale = activeSale()) {
+  const issues = [];
+  const missingFields = [["year", "year"], ["set", "brand"], ["name", "player"]].filter(([field]) => !String(card?.[field] || "").trim()).map(([, label]) => label);
+  if (missingFields.length) issues.push({ type: "information", label: `Missing ${missingFields.join(", ")}`, detail: "Add the required card information.", card, priority: 1 });
+  if (!Number.isFinite(Number(card?.price)) || Number(card?.price) <= 0) issues.push({ type: "price", label: "Price needs review", detail: "Enter a valid claim price greater than zero.", card, priority: 1 });
+  if (!cardHasRequiredImages(card, sale)) {
+    const review = Boolean(card?.lastSuggestedImagePath);
+    issues.push({ type: review ? "image-review" : "image", label: review ? "Image needs review" : (saleImageMode(sale) === "front-back" ? "Missing front or back scan" : "Missing image"), detail: review ? "A possible image was found but still needs a decision." : "Attach an image before posting.", card, priority: 2 });
+  }
+  if (String(card?.sport || "").trim() && !parseTeams(card?.teams).length) issues.push({ type: "team", label: "Team not set", detail: "Optional: add or look up the team for this card.", card, priority: 3 });
+  return issues;
+}
+
+function salePreparationIssues(sale = activeSale()) {
+  return sortedSaleCards(sale).flatMap((card) => cardPreparationIssues(card, sale)).sort((a, b) => a.priority - b.priority || Number(a.card.sourceOrder ?? a.card.ref) - Number(b.card.sourceOrder ?? b.card.ref));
+}
+
+function cardPreparationStatus(card, sale = activeSale()) {
+  const issues = cardPreparationIssues(card, sale);
+  if (!issues.length) return { label: "Ready", className: "ready" };
+  const first = issues[0];
+  return { label: first.label, className: first.priority === 1 ? "blocked" : first.type === "team" ? "optional" : "attention", count: issues.length };
+}
+
+function preparationCounts(sale = activeSale()) {
+  const issues = salePreparationIssues(sale);
+  return {
+    issues,
+    information: issues.filter((item) => ["information", "price"].includes(item.type)).length,
+    images: issues.filter((item) => ["image", "image-review"].includes(item.type)).length,
+    teams: issues.filter((item) => item.type === "team").length,
+    ready: sale.cards.filter((card) => !cardPreparationIssues(card, sale).length).length
+  };
+}
+
+function preparationSummaryHtml(sale = activeSale()) {
+  const counts = preparationCounts(sale);
+  return [["Ready", counts.ready, "ready"], ["Card information", counts.information, counts.information ? "blocked" : "ready"], ["Images", counts.images, counts.images ? "attention" : "ready"], ["Optional teams", counts.teams, counts.teams ? "optional" : "ready"]].map(([label, count, className]) => `<article class="prep-stat ${className}"><strong>${count}</strong><span>${label}</span></article>`).join("");
+}
+
+function openFixCenter() {
+  renderFixCenter();
+  $("#fixCenterDialog").showModal();
+}
+
+function renderFixCenter() {
+  const sale = activeSale();
+  const issues = salePreparationIssues(sale);
+  $("#fixCenterSummary").innerHTML = preparationSummaryHtml(sale);
+  $("#fixCenterNextBtn").disabled = !issues.length;
+  const grouped = [["information", "Card information and prices"], ["images", "Images"], ["team", "Optional team details"]].map(([group, title]) => {
+    const items = issues.filter((item) => group === "information" ? ["information", "price"].includes(item.type) : group === "images" ? ["image", "image-review"].includes(item.type) : item.type === "team");
+    if (!items.length) return "";
+    return `<section class="fix-group"><div class="panel-header compact"><div><h3>${title}</h3><p>${items.length} item${items.length === 1 ? "" : "s"} need attention</p></div><button type="button" class="secondary" data-fix-group="${group}">Fix first</button></div>${items.slice(0, 12).map((item) => `<button type="button" class="fix-item" data-fix-card="${item.card.id}" data-fix-type="${item.type}"><span>⚑</span><div><strong>${escapeHtml(item.card.ref)} · ${escapeHtml(item.card.year)} ${escapeHtml(item.card.set)} ${escapeHtml(item.card.name || "Unnamed card")}</strong><small>${escapeHtml(item.label)} · ${escapeHtml(item.detail)}</small></div><b>›</b></button>`).join("")}${items.length > 12 ? `<p class="muted">And ${items.length - 12} more…</p>` : ""}</section>`;
+  }).join("");
+  $("#fixCenterList").innerHTML = grouped || `<div class="empty-state"><div class="empty-icon">✓</div><h3>Every card is ready</h3><p>No incomplete card information, missing images, or optional team details remain.</p><button type="button" class="primary" data-empty-action="live">Open Live Sale Mode</button></div>`;
+}
+
+function openPreparationIssue(issue = salePreparationIssues()[0]) {
+  if (!issue) return toast("Every card in this sale is ready.");
+  if ($("#fixCenterDialog")?.open) $("#fixCenterDialog").close();
+  showView("sale");
+  resetListingView();
+  state.filter = "all";
+  state.query = issue.card.name || issue.card.ref;
+  $("#cardSearch").value = state.query;
+  if (["information", "price"].includes(issue.type)) openQuickEdit(issue.card.id);
+  else if (issue.type === "team") openTeamReview(issue.card.id);
+  else {
+    renderListings();
+    const row = $(`[data-listing-row="${CSS.escape(issue.card.id)}"]`);
+    row?.scrollIntoView({ behavior: "smooth", block: "center" });
+    toast(issue.type === "image-review" ? "Review or replace the suggested image for this card." : "Add or drop the missing image onto this card.");
+  }
+}
+
+function confirmDestructive({ title, message, preserved = [], confirmLabel = "Remove" }) {
+  if (safeDeleteResolver) safeDeleteResolver(false);
+  $("#safeDeleteTitle").textContent = title;
+  $("#safeDeleteMessage").textContent = message;
+  $("#safeDeletePreserved").innerHTML = preserved.length ? `<strong>What happens:</strong><ul>${preserved.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : "";
+  $("#confirmSafeDeleteBtn").textContent = confirmLabel;
+  $("#safeDeleteDialog").showModal();
+  return new Promise((resolve) => { safeDeleteResolver = resolve; });
+}
 
 function ensureShippingRules(sale = activeSale()) {
   sale.shippingRules ||= {};
@@ -670,7 +766,7 @@ function applyLicenseEntitlements(status = {}) {
   $$('[data-owner-catalog]').forEach((element) => element.classList.toggle("hidden", !showCatalog));
   $$(".help-reference-grid > div").filter((element) => /Publish a catalog|Customer privacy/.test(element.textContent)).forEach((element) => element.classList.toggle("hidden", !showCatalog));
   if (!showCatalog && $("#catalogView")?.classList.contains("active")) showView("sale");
-  ["#importBtn", "#addImagesBtn", "#addSingleCardBtn", "#confirmImportBtn", "#confirmAddCardBtn", "#addFolderBtn", "#autoMatchBtn", "#forceAllImageLookupBtn", "#choosePrimaryFolderBtn", "#addLookupFolderBtn", "#addExcludedFolderBtn", "#setupChooseFolderBtn"].forEach((selector) => {
+  ["#importBtn", "#guidedSetupBtn", "#setupChooseSpreadsheetBtn", "#setupChooseImagesBtn", "#setupChooseImageFolderBtn", "#continueGuidedSetupBtn", "#addImagesBtn", "#imageInboxBtn", "#imageInboxAddBtn", "#imageInboxOrderedBtn", "#addSingleCardBtn", "#confirmImportBtn", "#confirmAddCardBtn", "#addFolderBtn", "#autoMatchBtn", "#forceAllImageLookupBtn", "#choosePrimaryFolderBtn", "#addLookupFolderBtn", "#addExcludedFolderBtn", "#setupChooseFolderBtn", "#workflowAutoMatchBtn", "#workflowOrderedBtn", "#workflowManualBtn", "#workflowChooseFilesBtn", "#attachOrderedImagesBtn", "#chooseOrderedImagesBtn", "#applyOrderedImagesBtn"].forEach((selector) => {
     const button = $(selector);
     if (!button) return;
     button.disabled = !importsAllowed;
@@ -784,6 +880,8 @@ function render() {
 
 function renderCommandCenter() {
   const sale = activeSale();
+  $("#preparationSummary").innerHTML = preparationSummaryHtml(sale);
+  $("#fixNextProblemBtn").disabled = salePreparationIssues(sale).length === 0;
   const pendingOffers = [
     ...sale.cards.filter((card) => !card.bundleId && card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus || "pending")),
     ...(sale.bundles || []).filter((bundle) => ["pending", "countered"].includes(bundle.status || "pending"))
@@ -922,17 +1020,22 @@ function renderListings() {
   $("#listingHead").innerHTML = `<tr><th class="select-column"></th>${columns.has("ref") ? "<th>Ref</th>" : ""}<th>Card</th>${columns.has("grade") ? "<th>Grade</th>" : ""}${columns.has("price") ? "<th>Claim price</th>" : ""}${columns.has("status") ? "<th>Status</th>" : ""}<th></th></tr>`;
   $("#listingRows").innerHTML = cards.map((card) => {
     const statusLabel = card.status === "available" ? "Available" : card.status === "offered" ? `Offer · ${card.buyer || "Pending"}` : card.buyer || "Claimed";
+    const prep = cardPreparationStatus(card, sale);
     return `<tr data-listing-row="${card.id}" draggable="${sale.sortMode === "custom"}">
       <td class="select-column"><input type="checkbox" data-select-listing="${card.id}" ${selectedListingIds.has(card.id) ? "checked" : ""} aria-label="Select ${escapeHtml(card.name)}" /></td>
       ${columns.has("ref") ? `<td class="ref">${escapeHtml(card.ref)}</td>` : ""}
-      <td><button class="card-detail-link" data-card-details="${card.id}"><span class="card-title">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</span><span class="card-line">${escapeHtml(formatLine(card))}</span></button></td>
+      <td><button class="card-detail-link" data-card-details="${card.id}"><span class="card-title">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</span><span class="card-line">${escapeHtml(formatLine(card))}</span><span class="prep-badge ${prep.className}">${escapeHtml(prep.label)}${prep.count > 1 ? ` +${prep.count - 1}` : ""}</span></button></td>
       ${columns.has("grade") ? `<td>${escapeHtml(card.condition || "—")}</td>` : ""}
       ${columns.has("price") ? `<td><strong class="money">${money(card.price)}</strong><small class="cost-note">Cost ${card.purchasePrice !== "" && card.purchasePrice != null ? money(card.purchasePrice) : "—"}</small><small class="cost-note">Purchased ${displayPurchaseDate(card.purchaseDate)}</small></td>` : ""}
       ${columns.has("status") ? `<td><span class="status ${card.status === "available" ? "available" : card.status === "offered" ? "offered" : "claimed"}">${escapeHtml(statusLabel)}</span></td>` : ""}
       <td><div class="row-actions">${card.hiddenAfterCopy ? `<button class="row-action" data-restore-card="${card.id}">Restore</button>` : `${saleImageMode(sale) === "front-back" ? `<button class="row-action" data-image-card="${card.id}" data-image-side="front">${card.imagePath ? "Change front" : "Add front"}</button><button class="row-action" data-image-card="${card.id}" data-image-side="back">${card.backImagePath ? "Change back" : "Add back"}</button>` : `<button class="row-action" data-image-card="${card.id}" data-image-side="single">${card.imagePath ? "Change image" : "Add image"}</button>`}<button class="row-action" data-rematch-card="${card.id}">Re-run lookup</button><button class="row-action" data-copy-card="${card.id}">Copy</button>`}<button class="row-action" data-edit-card="${card.id}">Edit</button><button class="row-action" data-move-card="${card.id}">Move</button><button class="row-action danger-link" data-delete-card="${card.id}">Delete</button></div></td>
     </tr>`;
   }).join("");
-  $("#listingEmpty").classList.toggle("hidden", sale.cards.length !== 0);
+  const empty = $("#listingEmpty");
+  empty.classList.toggle("hidden", cards.length !== 0);
+  if (!cards.length) empty.innerHTML = sale.cards.length
+    ? `<div class="empty-icon">⌕</div><h3>No cards match this view</h3><p>Clear the search or switch listing filters to see the rest of the sale.</p><div class="empty-actions"><button type="button" class="primary" data-clear-listing-view>Show all cards</button></div>`
+    : `<div class="empty-icon">▤</div><h3>Build your first card list</h3><p>Use Guided Sale Setup to bring in a spreadsheet and images together, or add cards another way.</p><div class="empty-actions"><button type="button" class="secondary" data-empty-action="add-card">Add single card</button><button type="button" class="secondary" data-empty-action="import">Choose spreadsheet</button><button type="button" class="primary" data-empty-action="guided-setup">Guided sale setup</button></div>`;
   const view = saleViewState(sale); view.filter = state.filter; view.query = state.query; view.selectedListingIds = [...selectedListingIds];
   updateListingBulkControls(cards);
 }
@@ -961,6 +1064,7 @@ function updateListingBulkControls(visibleCards = []) {
   $("#listingSelectionCount").textContent = `${selectedListingIds.size} selected`;
   $("#deleteSelectedCardsBtn").disabled = selectedListingIds.size === 0;
   $("#bulkEditBtn").disabled = selectedListingIds.size === 0;
+  $("#attachOrderedImagesBtn").disabled = selectedListingIds.size === 0 || (currentLicense.configured && !currentLicense.licensed);
   const selectedCards = activeSale().cards.filter((card) => selectedListingIds.has(card.id));
   $("#bundleOfferBtn").disabled = selectedCards.length < 2 || selectedCards.some((card) => card.status !== "available" || card.buyer || card.bundleId);
   $("#selectAllListings").checked = visibleIds.length > 0 && checked === visibleIds.length;
@@ -996,8 +1100,47 @@ function renderImages() {
   $("#imageQueue").innerHTML = visibleImages.length ? visibleImages.map((image, index) => `<article class="image-card" draggable="true" data-image-id="${image.id}" data-image-path="${escapeHtml(image.path)}">
     <img loading="lazy" data-thumb-path="${escapeHtml(image.path)}" src="${fileUrl(image.path)}" alt="${escapeHtml(image.name)}" />
     <div><strong>${escapeHtml(image.name)}</strong><span>Post image ${index + 1}</span><span class="drag-hint">Drag to Facebook ↗</span></div>
-  </article>`).join("") : `<div class="empty-state"><div class="empty-icon">▧</div><h3>No sale images yet</h3><p>Add individual images or an entire folder.</p></div>`;
+  </article>`).join("") : `<div class="empty-state"><div class="empty-icon">▧</div><h3>No sale images yet</h3><p>Add images automatically, in sale order, or one card at a time.</p><button type="button" class="primary" data-empty-action="images">Add images</button></div>`;
+  const unattached = unattachedSaleImages(sale).length;
+  $("#imageInboxBtn").textContent = `Open image inbox${unattached ? ` (${unattached})` : ""}`;
   hydrateThumbnails($("#imageQueue"));
+}
+
+function unattachedSaleImages(sale = activeSale()) {
+  const used = new Set(sale.cards.flatMap(cardImagePaths).map((value) => value.toLowerCase()));
+  return orderedSaleImages(sale).filter((image) => !used.has(String(image.path || "").toLowerCase()));
+}
+
+function imageInboxTargetOptions(sale = activeSale()) {
+  return sortedSaleCards(sale).flatMap((card) => requiredImageSlots(sale).map((slot) => ({ card, slot })).filter(({ card, slot }) => !imagePathFor(card, slot))).map(({ card, slot }) => `<option value="${card.id}::${slot}">${escapeHtml(card.ref)} · ${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)}${saleImageMode(sale) === "front-back" ? ` · ${imageSlotLabel(slot)}` : ""}</option>`).join("");
+}
+
+function renderImageInbox() {
+  const sale = activeSale();
+  const images = unattachedSaleImages(sale);
+  const options = imageInboxTargetOptions(sale);
+  $("#imageInboxList").innerHTML = images.length ? images.map((image) => `<article class="image-inbox-item" data-inbox-image="${escapeHtml(image.path)}"><img data-thumb-path="${escapeHtml(image.path)}" src="${fileUrl(image.path)}" alt="${escapeHtml(image.name)}" /><div><strong>${escapeHtml(image.name)}</strong><small>Not attached to a card</small></div><label>Attach to<select data-inbox-target><option value="">Choose a card…</option>${options}</select></label><button type="button" class="primary" data-inbox-attach>Attach</button><button type="button" class="row-action danger-link" data-inbox-remove>Remove from inbox</button></article>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>The image inbox is clear</h3><p>Every imported image is attached, or no images have been added yet.</p><button type="button" class="primary" data-empty-action="images">Add images</button></div>`;
+  hydrateThumbnails($("#imageInboxList"));
+}
+
+function openImageInbox() {
+  if (!requireImportLicense()) return;
+  renderImageInbox();
+  $("#imageInboxDialog").showModal();
+}
+
+function attachInboxImage(row) {
+  if (!requireImportLicense()) return;
+  const value = $("[data-inbox-target]", row)?.value || "";
+  const [cardId, slot = "single"] = value.split("::");
+  if (!cardId) return toast("Choose the card this image belongs to.");
+  const card = activeSale().cards.find((item) => item.id === cardId);
+  const imagePath = row.dataset.inboxImage;
+  if (!card || !imagePath) return;
+  if (!attachImage(card, imagePath, true, activeSale(), slot)) return;
+  state.manualMatchMemory ||= {};
+  state.manualMatchMemory[`${normalizedCardKey(card)}::${slot}`] = imagePath;
+  saveSoon(); render(); renderImageInbox(); toast(`${imageSlotLabel(slot)} attached to ${card.name}.`);
 }
 
 async function hydrateThumbnails(root = document) {
@@ -1012,12 +1155,12 @@ function renderClaims() {
   $("#buyerNames").innerHTML = allBuyerNames().flatMap((buyer) => [buyer, ...buyerProfile(buyer).aliases]).map((buyer) => `<option value="${escapeHtml(buyer)}"></option>`).join("");
   const query = String(state.claimQuery || "").toLowerCase();
   const cards = sale.cards.filter((card) => [...Object.values(card).filter((value) => typeof value !== "object"), ...Object.values(card.customFields || {})].join(" ").toLowerCase().includes(query));
-  $("#claimRows").innerHTML = cards.map((card) => {
+  $("#claimRows").innerHTML = cards.length ? cards.map((card) => {
     const effectivePrice = Number(card.offerPrice ?? card.claimPrice ?? card.price);
     const belowCost = Number(card.purchasePrice) > 0 && effectivePrice < Number(card.purchasePrice);
     const claimType = card.claimType || (card.offerPrice != null ? "offer" : "claim");
     return `<tr data-claim-row="${card.id}"><td class="ref">${escapeHtml(card.ref)}</td><td><div class="card-title">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</div><div class="card-line">${escapeHtml(card.condition || "No grade")}${card.notes && !/^none$/i.test(card.notes) ? ` · ${escapeHtml(card.notes)}` : ""}</div></td><td><strong class="money">${money(card.price)}</strong><small class="cost-note">Cost ${card.purchasePrice !== "" && card.purchasePrice != null ? money(card.purchasePrice) : "—"}</small><small class="cost-note">Purchased ${displayPurchaseDate(card.purchaseDate)}</small></td><td><input type="checkbox" data-claim-type="claim" ${claimType === "claim" ? "checked" : ""} aria-label="Claim" /></td><td><input type="checkbox" data-claim-type="offer" ${claimType === "offer" ? "checked" : ""} aria-label="Offer" /></td><td><input class="offer-input ${belowCost ? "below-cost" : ""}" data-claim-offer type="number" min="0" step="0.01" value="${card.offerPrice ?? ""}" placeholder="${Number(card.price || 0).toFixed(2)}" ${claimType === "claim" ? "disabled" : ""} />${belowCost ? `<small class="cost-warning">Below cost</small>` : ""}</td><td><input class="buyer-assignment" data-claim-buyer value="${escapeHtml(card.buyer || "")}" list="buyerNames" placeholder="Buyer name" /><input class="claim-note-input" data-claim-note value="${escapeHtml(card.claimNote || "")}" placeholder="Claim note" /></td><td><div class="row-actions"><button class="row-action" data-assign-card="${card.id}">${card.buyer ? "Save / move" : "Assign"}</button>${card.buyer ? `<button class="row-action danger-link" data-clear-claim="${card.id}">Clear</button>` : ""}</div></td></tr>`;
-  }).join("");
+  }).join("") : `<tr><td colspan="8"><div class="empty-state"><h3>No cards are ready for claims</h3><p>Import or add cards in Sale Workspace first.</p><button type="button" class="primary" data-empty-action="sale">Open Sale Workspace</button></div></td></tr>`;
   $("#claimTimeline").innerHTML = claims.length ? claims.map((item) => `<button type="button" class="timeline-item timeline-link" ${item.cardId ? `data-timeline-card="${item.cardId}"` : ""}><strong>${escapeHtml(item.message)}</strong><p>${escapeHtml(item.buyer || item.type || "Activity")} · ${new Date(item.at).toLocaleString()}</p></button>`).join("") : `<div class="empty-state"><h3>No activity recorded</h3><p>Claims, offers and changes will appear here.</p></div>`;
 }
 
@@ -1112,7 +1255,7 @@ function renderOrders() {
     const flags = orderFlags(buyer);
     const visualStatus = ["paid", "packed", "shipped"].includes(order.status) ? order.status : "unpaid";
     return `<button class="buyer-button order-${visualStatus} ${flags.length ? "has-warning" : ""} ${buyer === state.selectedBuyer ? "active" : ""}" data-buyer="${escapeHtml(buyer)}"><strong>${escapeHtml(buyer)}</strong><span class="buyer-total">${money(total + shippingAmount(order) - Number(order.discount))}</span><small>${cards.length} cards · ${escapeHtml(order.shippingMethod || "Shipping needed")} · ${escapeHtml(order.status)}${flags.length ? ` · ⚑ ${flags.length}` : ""}</small><span class="order-state-badge">${escapeHtml(flags.length ? "Needs attention" : visualStatus)}</span></button>`;
-  }).join("") : `<div class="empty-state"><p>${allNames.length ? "No orders match these filters." : "Orders appear as soon as you record a claim."}</p></div>`;
+  }).join("") : `<div class="empty-state"><h3>${allNames.length ? "No orders match these filters" : "No buyer orders yet"}</h3><p>${allNames.length ? "Clear or change the order filters." : "Assign a full-price claim or accept an offer to create the first order."}</p>${allNames.length ? "" : '<button type="button" class="primary" data-empty-action="claims">Open Claims Desk</button>'}</div>`;
   renderOrderDetail();
 }
 
@@ -1262,7 +1405,7 @@ function renderPacking() {
   const buyer = select.value || names[0];
   if (!buyer) {
     $("#packingWarnings").innerHTML = "";
-    $("#packingContent").innerHTML = `<div class="panel empty-state"><h3>No orders to pack</h3><p>Paid and unpaid orders will appear here.</p></div>`;
+    $("#packingContent").innerHTML = `<div class="panel empty-state"><h3>No orders to pack</h3><p>Assign claims first, then confirm payment and shipping in Buyer Orders.</p><button type="button" class="primary" data-empty-action="claims">Open Claims Desk</button></div>`;
     return;
   }
   const cards = cardsForBuyer(buyer);
@@ -1340,12 +1483,12 @@ function renderBuyerProfiles() {
   if (!filtered.includes(state.profileBuyer)) state.profileBuyer = filtered[0] || names[0] || "";
   $("#buyerProfileList").innerHTML = filtered.length ? filtered.map((name) => { const history = buyerHistory(name); const profile = buyerProfile(name); const warnings = addressWarnings(name); return `<button class="buyer-button ${warnings.length ? "has-warning" : ""} ${name === state.profileBuyer ? "active" : ""}" data-profile-buyer="${escapeHtml(name)}"><strong>${escapeHtml(name)}</strong><span class="buyer-total">${money(history.spent)}</span><small>${history.cards.length} purchases${profile.tags.length ? ` · ${escapeHtml(profile.tags.join(", "))}` : ""}</small>${warnings.length ? `<span class="order-state-badge">Address review</span>` : ""}</button>`; }).join("") : `<div class="empty-state"><p>No matching buyers.</p></div>`;
   const buyer = state.profileBuyer;
-  if (!buyer) { $("#buyerProfileDetail").innerHTML = `<div class="empty-state"><h3>No buyer history yet</h3><p>Profiles are created when a card is assigned.</p></div>`; return; }
+  if (!buyer) { $("#buyerProfileDetail").innerHTML = `<div class="empty-state"><h3>No buyer history yet</h3><p>Profiles are created when a card is claimed or an offer is accepted.</p><button type="button" class="primary" data-empty-action="claims">Open Claims Desk</button></div>`; return; }
   const history = buyerHistory(buyer); const profile = buyerProfile(buyer); const matches = repeatBuyerMatches(buyer); const warnings = addressWarnings(buyer);
   $("#buyerProfileDetail").innerHTML = `<div class="panel-header"><div><h2>${escapeHtml(buyer)}</h2><p>${history.cards.length} lifetime cards · ${money(history.spent)} spent</p></div><span class="status ${warnings.length ? "offered" : "available"}">${warnings.length ? `${warnings.length} address warning${warnings.length === 1 ? "" : "s"}` : "Address ready"}</span></div><div class="profile-content"><div class="profile-stats"><article><span>Favorite player</span><strong>${escapeHtml(history.player || "—")}</strong></article><article><span>Favorite brand</span><strong>${escapeHtml(history.brand || "—")}</strong></article><article><span>Favorite year</span><strong>${escapeHtml(history.year || "—")}</strong></article></div>${warnings.length ? `<div class="address-warnings">${warnings.map((warning) => `<span>⚑ ${escapeHtml(warning)}</span>`).join("")}</div>` : ""}<label>Facebook names / aliases<input id="profileAliases" value="${escapeHtml(profile.aliases.join(", "))}" placeholder="Alex Smith, Alex S." /><small>Claims under these names will be assigned to this buyer.</small></label><label>Buyer tags<input id="profileTags" value="${escapeHtml(profile.tags.join(", "))}" placeholder="Vintage, Yankees, set builder" /></label><label>Mailing address<textarea id="profileAddress" rows="4">${escapeHtml(profile.address || "")}</textarea></label><label>Notes<textarea id="profileNotes" rows="4">${escapeHtml(profile.notes || "")}</textarea></label><div class="profile-save-actions"><button id="saveBuyerProfileBtn" class="primary">Save and validate profile</button><button id="deleteBuyerProfileBtn" type="button" class="secondary danger-button">Delete buyer profile</button></div>${profile.previousAddresses.length ? `<details class="address-history"><summary>Previous addresses (${profile.previousAddresses.length})</summary>${profile.previousAddresses.slice().reverse().map((item) => `<div><span>${escapeHtml(item.address).replace(/\n/g, "<br>")}</span><small>${new Date(item.changedAt).toLocaleDateString()}</small></div>`).join("")}</details>` : ""}${matches.length ? `<section class="profile-alert"><h3>Available cards this buyer may like</h3>${matches.map((card) => `<button data-profile-card="${card.id}"><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</strong><span>${money(card.price)}</span></button>`).join("")}</section>` : ""}<section><h3>Purchase history</h3><div class="profile-history">${history.cards.slice().reverse().map((card) => `<article><span>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</span><strong>${money(card.claimPrice ?? card.price)}</strong></article>`).join("") || "No purchases recorded."}</div></section></div>`;
 }
 
-function deleteBuyerProfile(name) {
+async function deleteBuyerProfile(name) {
   const references = [];
   historicalSales().forEach((sale) => {
     const cards = sale.cards.filter((card) => card.buyer === name);
@@ -1353,7 +1496,7 @@ function deleteBuyerProfile(name) {
     if (sale.orders?.[name]) references.push(`an order in ${sale.name}`);
   });
   if (references.length) return toast(`Move or remove this buyer’s ${references[0]} before deleting the profile.`);
-  if (!window.confirm(`Delete the buyer profile for ${name}? Saved aliases, address, tags and notes will be removed.`)) return;
+  if (!await confirmDestructive({ title: `Delete ${name}’s buyer profile?`, message: "Saved aliases, address, tags, and private notes will be removed.", preserved: ["Past sale records are not changed.", "Card and order history remains in archived sales.", "This cannot remove a buyer who is still assigned to a card or order."], confirmLabel: "Delete profile" })) return;
   delete state.buyerProfiles[name];
   state.profileBuyer = "";
   saveSoon();
@@ -1622,22 +1765,32 @@ function renderCustomImportColumns() {
   $("#customImportColumns").innerHTML = headers.map((header) => `<label><input type="checkbox" data-custom-import="${escapeHtml(header)}" ${pendingSheet.customSelections[header] === false ? "" : "checked"} />${escapeHtml(header)}</label>`).join("") || `<span class="muted">Every column is already mapped.</span>`;
 }
 
-async function importSpreadsheet() {
-  if (!requireImportLicense()) return;
-  const path = await window.cardSale.chooseSpreadsheet();
-  if (!path) return;
+function importHeaderSignature(headers) { return headers.map((header) => String(header).trim().toLowerCase()).sort().join("|"); }
+
+async function loadSpreadsheetForImport(path) {
   const parsed = await window.cardSale.parseSpreadsheet(path);
   if (!parsed?.success) return toast(parsed?.message || "That spreadsheet could not be imported.");
   if (!parsed.rows.length) return toast("That sheet has no card rows.");
   const headers = Object.keys(parsed.rows[0]);
-  pendingSheet = { ...parsed, path, headers, mapping: autoMap(headers) };
+  const signature = importHeaderSignature(headers);
+  const memory = importMemories()[signature];
+  const mapping = memory ? Object.fromEntries(Object.entries(memory.mapping || {}).map(([field, header]) => [field, headers.includes(header) ? header : ""])) : autoMap(headers);
+  pendingSheet = { ...parsed, path, headers, signature, mapping, customSelections: clone(memory?.customSelections || {}), memoryApplied: Boolean(memory) };
   const fields = [["year", "Year"], ["set", "Brand"], ["name", "Player"], ["number", "Number"], ["sport", "Sport"], ["teams", "Team(s)"], ["notes", "Flaw(s)"], ["condition", "Grade"], ["price", "Claim Price"], ["purchasePrice", "Purchase Price"], ["purchaseDate", "Purchase Date"]];
   $("#mappingGrid").innerHTML = fields.map(([field, label]) => `<label>${label}<select data-map="${field}"><option value="">Not included</option>${headers.map((header) => `<option value="${escapeHtml(header)}" ${pendingSheet.mapping[field] === header ? "selected" : ""}>${escapeHtml(header)}</option>`).join("")}</select></label>`).join("");
   renderCustomImportColumns();
   renderImportPresetOptions();
-  $("#listingTemplate").value = activeSale().template;
+  $("#listingTemplate").value = memory?.template || activeSale().template;
+  $("#importMemoryNotice").classList.toggle("hidden", !memory);
+  $("#importMemoryNotice").textContent = memory ? "CSM recognized this spreadsheet layout and applied your previous column choices automatically." : "";
   updateImportPreview();
   $("#importDialog").showModal();
+}
+
+async function importSpreadsheet() {
+  if (!requireImportLicense()) return;
+  const path = await window.cardSale.chooseSpreadsheet();
+  if (path) await loadSpreadsheetForImport(path);
 }
 
 function updateImportPreview() {
@@ -1654,21 +1807,54 @@ function updateImportReview() {
   const mapping = {};
   $$("[data-map]").forEach((select) => mapping[select.dataset.map] = select.value);
   const keys = new Map();
-  const issues = [];
+  const groups = { required: [], price: [], date: [], duplicate: [], unusual: [] };
   pendingSheet.rows.forEach((row, index) => {
     const value = (field) => mapping[field] ? String(row[mapping[field]] ?? "").trim() : "";
     const missing = ["year", "set", "name"].filter((field) => !value(field));
-    if (missing.length) issues.push(`Row ${index + 2}: missing ${missing.join(", ")}`);
+    if (missing.length) groups.required.push({ index, message: `Row ${index + 2}: missing ${missing.join(", ")}`, fields: missing });
     const price = Number(value("price").replace(/[$,]/g, ""));
-    if (!value("price") || !Number.isFinite(price) || price < 0) issues.push(`Row ${index + 2}: invalid claim price`);
+    if (!value("price") || !Number.isFinite(price) || price <= 0) groups.price.push({ index, message: `Row ${index + 2}: invalid claim price` });
+    else if (price >= 10000) groups.unusual.push({ index, message: `Row ${index + 2}: unusually high ${money(price)} claim price` });
+    const date = value("purchaseDate");
+    if (date && !/^\d{8}$/.test(normalizePurchaseDate(date))) groups.date.push({ index, message: `Row ${index + 2}: purchase date could not be normalized` });
     const key = [value("year"), value("set"), value("name"), value("number"), value("purchaseDate")].join("|").toLowerCase();
-    if (keys.has(key)) issues.push(`Rows ${keys.get(key) + 2} and ${index + 2}: possible duplicate`); else keys.set(key, index);
+    if (keys.has(key)) groups.duplicate.push({ index, message: `Rows ${keys.get(key) + 2} and ${index + 2}: possible duplicate` }); else keys.set(key, index);
   });
-  pendingSheet.validation = issues;
-  $("#importReview").innerHTML = `<strong>${pendingSheet.rows.length} rows found</strong><span>${issues.length ? `${issues.length} warning${issues.length === 1 ? "" : "s"} to review` : "All required values look ready"}</span>${issues.length ? `<details><summary>Show warnings</summary><ul>${issues.slice(0, 40).map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}${issues.length > 40 ? `<li>…and ${issues.length - 40} more</li>` : ""}</ul></details>` : ""}`;
+  const definitions = [["required", "Missing required information"], ["price", "Invalid or blank prices"], ["date", "Dates needing review"], ["duplicate", "Possible duplicate cards"], ["unusual", "Unusual prices"]];
+  const total = Object.values(groups).reduce((sum, items) => sum + items.length, 0);
+  pendingSheet.validation = groups;
+  $("#importReview").innerHTML = `<div class="import-fix-heading"><div><strong>${pendingSheet.rows.length} rows found</strong><span>${total ? `${total} warning${total === 1 ? "" : "s"} grouped below` : "Everything looks ready to import"}</span></div><b>${total ? "Fix Center" : "Ready"}</b></div>${definitions.filter(([key]) => groups[key].length).map(([key, title]) => `<section class="import-fix-group"><div><strong>${escapeHtml(title)}</strong><span>${groups[key].length} row${groups[key].length === 1 ? "" : "s"}</span></div>${["required", "price", "date"].includes(key) ? `<button type="button" class="secondary" data-import-fix="${key}">Fix together</button>` : ""}<details><summary>Show rows</summary><ul>${groups[key].slice(0, 30).map((issue) => `<li>${escapeHtml(issue.message)}</li>`).join("")}${groups[key].length > 30 ? `<li>…and ${groups[key].length - 30} more</li>` : ""}</ul></details></section>`).join("")}`;
 }
 
-function confirmImport(event) {
+function bulkFixImportGroup(group) {
+  if (!pendingSheet) return;
+  const mapping = currentImportMapping();
+  if (group === "price") {
+    if (!mapping.price) return toast("Map a Claim Price column first.");
+    const entered = window.prompt("Claim price to use for every blank or invalid price:", "1.00");
+    const amount = Number(String(entered ?? "").replace(/[$,]/g, ""));
+    if (entered == null || !Number.isFinite(amount) || amount <= 0) return;
+    pendingSheet.validation.price.forEach(({ index }) => { pendingSheet.rows[index][mapping.price] = amount.toFixed(2); });
+  } else if (group === "date") {
+    if (!mapping.purchaseDate) return;
+    const entered = window.prompt("Enter one MMDDYYYY purchase date for these rows, or leave blank to clear the invalid dates:", "");
+    if (entered == null) return;
+    const normalized = entered.trim() ? normalizePurchaseDate(entered) : "";
+    if (entered.trim() && !/^\d{8}$/.test(normalized)) return toast("Enter the date as MMDDYYYY.");
+    pendingSheet.validation.date.forEach(({ index }) => { pendingSheet.rows[index][mapping.purchaseDate] = normalized; });
+  } else if (group === "required") {
+    const fields = [...new Set(pendingSheet.validation.required.flatMap((item) => item.fields))];
+    fields.forEach((field) => {
+      if (!mapping[field]) return;
+      const entered = window.prompt(`Value to use for rows missing ${field === "set" ? "brand" : field}:`, "");
+      if (!entered?.trim()) return;
+      pendingSheet.validation.required.filter((item) => item.fields.includes(field)).forEach(({ index }) => { pendingSheet.rows[index][mapping[field]] = entered.trim(); });
+    });
+  }
+  updateImportPreview();
+}
+
+async function confirmImport(event) {
   event.preventDefault();
   if (!requireImportLicense()) return;
   if (!pendingSheet) return;
@@ -1697,6 +1883,7 @@ function confirmImport(event) {
     return card;
   });
   sale.cards.push(...imported);
+  importMemories()[pendingSheet.signature] = { mapping: clone(mapping), customSelections: Object.fromEntries(pendingSheet.headers.map((header) => [header, customHeaders.includes(header)])), template: $("#listingTemplate").value, updatedAt: new Date().toISOString() };
   renumberCardReferences(sale, { audit: false });
   imported.forEach((card) => {
     const remembered = card.rememberedImagePath;
@@ -1711,7 +1898,22 @@ function confirmImport(event) {
   pendingSheet = null;
   resetListingView();
   showView("sale");
-  saveSoon(); render(); toast(`Imported ${imported.length} cards.`);
+  const setupImages = [...pendingSetupImages];
+  pendingSetupImages = [];
+  if (setupImages.length) {
+    const known = new Set(sale.images.map((image) => image.path.toLowerCase()));
+    setupImages.filter((path) => !known.has(path.toLowerCase())).forEach((path) => { sale.images.push({ id: uid(), path, name: path.split(/[\\/]/).pop() }); known.add(path.toLowerCase()); });
+  }
+  saveSoon(); render(); toast(`Imported ${imported.length} cards${setupImages.length ? ` and ${setupImages.length} images` : ""}.`);
+  if (setupImages.length) {
+    const expected = imported.length * requiredImageSlots(sale).length;
+    if (setupImages.length === expected) {
+      selectedListingIds = new Set(imported.map((card) => card.id));
+      renderListings();
+      openOrderedImageWorkflow({ useMissingIfEmpty: false });
+      await addOrderedImagePaths(setupImages);
+    } else openImageInbox();
+  } else if (salePreparationIssues(sale).length) openFixCenter();
 }
 
 async function addImages(mode = "files") {
@@ -1722,6 +1924,272 @@ async function addImages(mode = "files") {
   const known = new Set(sale.images.map((image) => image.path.toLowerCase()));
   paths.filter((path) => !known.has(path.toLowerCase())).forEach((path) => sale.images.push({ id: uid(), path, name: path.split(/[\\/]/).pop() }));
   saveSoon(); renderImages(); toast(`Added ${paths.length} image${paths.length === 1 ? "" : "s"}.`);
+}
+
+function renderGuidedSetup() {
+  const sheetName = pendingGuidedSetup.spreadsheetPath ? pendingGuidedSetup.spreadsheetPath.split(/[\\/]/).pop() : "Not selected";
+  $("#setupSpreadsheetStatus").textContent = sheetName;
+  $("#setupImagesStatus").textContent = pendingGuidedSetup.imagePaths.length ? `${pendingGuidedSetup.imagePaths.length} image${pendingGuidedSetup.imagePaths.length === 1 ? "" : "s"} ready` : "None selected";
+  const warnings = [];
+  if (pendingGuidedSetup.skipped) warnings.push(`${pendingGuidedSetup.skipped} unsupported item${pendingGuidedSetup.skipped === 1 ? " was" : "s were"} ignored.`);
+  if (pendingGuidedSetup.capped) warnings.push("The folder contained more than 5,000 images. Only the first 5,000 were prepared.");
+  $("#guidedSetupWarnings").innerHTML = warnings.map((warning) => `<p>⚑ ${escapeHtml(warning)}</p>`).join("");
+  $("#continueGuidedSetupBtn").disabled = !pendingGuidedSetup.spreadsheetPath && !pendingGuidedSetup.imagePaths.length;
+}
+
+function openGuidedSetup() {
+  if (!requireImportLicense()) return;
+  pendingGuidedSetup = { spreadsheetPath: "", imagePaths: [], skipped: 0, capped: false };
+  renderGuidedSetup();
+  $("#guidedSetupDialog").showModal();
+}
+
+async function addGuidedSetupPaths(paths) {
+  if (!paths.length) return;
+  $("#guidedSetupDropZone").classList.add("working");
+  $("#guidedSetupDropZone").querySelector("strong").textContent = "Reading dropped items…";
+  const result = await window.cardSale.inspectSetupPaths(paths);
+  if (result.spreadsheetPath) pendingGuidedSetup.spreadsheetPath = result.spreadsheetPath;
+  const known = new Set(pendingGuidedSetup.imagePaths.map((path) => path.toLowerCase()));
+  (result.imagePaths || []).filter((path) => !known.has(path.toLowerCase())).forEach((path) => { pendingGuidedSetup.imagePaths.push(path); known.add(path.toLowerCase()); });
+  pendingGuidedSetup.skipped += Number(result.skipped || 0);
+  pendingGuidedSetup.capped ||= Boolean(result.capped);
+  $("#guidedSetupDropZone").classList.remove("working");
+  $("#guidedSetupDropZone").querySelector("strong").textContent = "Drop spreadsheet and images here";
+  renderGuidedSetup();
+}
+
+async function continueGuidedSetup() {
+  const setup = { ...pendingGuidedSetup, imagePaths: [...pendingGuidedSetup.imagePaths] };
+  $("#guidedSetupDialog").close();
+  if (!setup.spreadsheetPath) {
+    const sale = activeSale(); const known = new Set(sale.images.map((image) => image.path.toLowerCase()));
+    setup.imagePaths.filter((path) => !known.has(path.toLowerCase())).forEach((path) => { sale.images.push({ id: uid(), path, name: path.split(/[\\/]/).pop() }); known.add(path.toLowerCase()); });
+    saveSoon(); render(); openImageInbox(); return;
+  }
+  pendingSetupImages = setup.imagePaths;
+  await loadSpreadsheetForImport(setup.spreadsheetPath);
+}
+
+function openImageWorkflow() {
+  if (!requireImportLicense()) return;
+  $("#imageWorkflowDialog").showModal();
+}
+
+function selectedCardsInSaleOrder() {
+  return sortedSaleCards(activeSale()).filter((card) => selectedListingIds.has(card.id));
+}
+
+function openRangeSelection() {
+  const cards = sortedSaleCards(activeSale());
+  if (!cards.length) return toast("Add or import cards before selecting a range.");
+  const options = cards.map((card) => '<option value="' + escapeHtml(card.id) + '">' + escapeHtml(card.ref + " · " + card.year + " " + card.set + " " + card.name) + "</option>").join("");
+  $("#rangeStartCard").innerHTML = options;
+  $("#rangeEndCard").innerHTML = options;
+  $("#rangeEndCard").value = cards[cards.length - 1].id;
+  $("#selectRangeDialog").showModal();
+}
+
+function applyRangeSelection() {
+  const cards = sortedSaleCards(activeSale());
+  const start = cards.findIndex((card) => card.id === $("#rangeStartCard").value);
+  const end = cards.findIndex((card) => card.id === $("#rangeEndCard").value);
+  if (start < 0 || end < 0) return;
+  const low = Math.min(start, end);
+  const high = Math.max(start, end);
+  cards.slice(low, high + 1).forEach((card) => selectedListingIds.add(card.id));
+  listingSelectionAnchor = cards[end].id;
+  saleViewState().selectedListingIds = [...selectedListingIds];
+  $("#selectRangeDialog").close();
+  saveSoon();
+  renderListings();
+  toast((high - low + 1) + " cards selected in sale order.");
+}
+
+function orderedImageTargets(cards = selectedCardsInSaleOrder()) {
+  const slots = requiredImageSlots(activeSale());
+  if (slots.length === 1) return cards.map((card) => ({ card, slot: "single" }));
+  if ($("#frontBackOrder").value === "fronts-backs") {
+    return ["front", "back"].flatMap((slot) => cards.map((card) => ({ card, slot })));
+  }
+  return cards.flatMap((card) => [{ card, slot: "front" }, { card, slot: "back" }]);
+}
+
+function sortOrderedImageFiles(files, mode = $("#orderedImageSort").value) {
+  const result = files.slice();
+  if (mode === "filename") result.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  if (mode === "created") result.sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  if (mode === "modified") result.sort((a, b) => Number(a.modifiedAt || 0) - Number(b.modifiedAt || 0) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  if (mode === "selected") result.sort((a, b) => Number(a.selectedOrder || 0) - Number(b.selectedOrder || 0));
+  return result;
+}
+
+async function addOrderedImagePaths(paths) {
+  if (!pendingOrderedImages || !paths.length) return;
+  const details = await window.cardSale.imageFileDetails(paths);
+  const known = new Set(pendingOrderedImages.files.map((file) => file.path.toLowerCase()));
+  details.filter((file) => !known.has(file.path.toLowerCase())).forEach((file) => {
+    file.selectedOrder = pendingOrderedImages.files.length;
+    pendingOrderedImages.files.push(file);
+    known.add(file.path.toLowerCase());
+  });
+  pendingOrderedImages.files = sortOrderedImageFiles(pendingOrderedImages.files);
+  renderOrderedImageReview();
+}
+
+function openOrderedImageWorkflow(options = {}) {
+  if (!requireImportLicense()) return;
+  if (!selectedListingIds.size && options.useMissingIfEmpty !== false) {
+    const visible = filteredListingCards();
+    const missing = visible.filter((card) => !cardHasRequiredImages(card));
+    (missing.length ? missing : visible).forEach((card) => selectedListingIds.add(card.id));
+    renderListings();
+  }
+  const cards = selectedCardsInSaleOrder();
+  if (!cards.length) {
+    $("#imageWorkflowDialog").close();
+    return toast("Select the cards you want to pair with images first.");
+  }
+  pendingOrderedImages = { cardIds: cards.map((card) => card.id), files: [] };
+  $("#orderedImageSort").value = "selected";
+  $("#frontBackOrder").value = "paired";
+  $("#orderedSequenceConfirmed").checked = false;
+  $("#orderedAllowPartial").checked = false;
+  $("#frontBackOrderLabel").classList.toggle("hidden", saleImageMode(activeSale()) !== "front-back");
+  $("#imageWorkflowDialog").close();
+  renderOrderedImageReview();
+  $("#orderedImagesDialog").showModal();
+}
+
+function renderOrderedImageReview() {
+  if (!pendingOrderedImages) return;
+  const sale = activeSale();
+  const cards = sortedSaleCards(sale).filter((card) => pendingOrderedImages.cardIds.includes(card.id));
+  const files = sortOrderedImageFiles(pendingOrderedImages.files);
+  pendingOrderedImages.files = files;
+  const targets = orderedImageTargets(cards);
+  const expected = targets.length;
+  const actual = files.length;
+  const allowPartial = $("#orderedAllowPartial").checked && actual > 0 && actual < expected;
+  const exact = actual === expected;
+  $("#orderedCardCount").textContent = cards.length + " selected card" + (cards.length === 1 ? "" : "s");
+  $("#orderedImageRequirement").textContent = saleImageMode(sale) === "front-back"
+    ? expected + " images required — one front and one back per card"
+    : expected + " image" + (expected === 1 ? "" : "s") + " required";
+  const countNode = $("#orderedImageCountWarning");
+  countNode.className = "ordered-count-status " + (exact ? "ready" : actual ? "warning" : "");
+  countNode.textContent = exact
+    ? "Counts match: " + actual + " images for " + expected + " positions."
+    : actual < expected
+      ? actual + " of " + expected + " required images selected. Add " + (expected - actual) + " more."
+      : actual + " images selected for " + expected + " positions. Remove " + (actual - expected) + " before continuing.";
+  $("#orderedPartialLabel").classList.toggle("hidden", !(actual > 0 && actual < expected));
+  const pairCount = Math.max(expected, actual);
+  const rows = [];
+  for (let index = 0; index < pairCount; index += 1) {
+    const target = targets[index];
+    const file = files[index];
+    const cardText = target
+      ? target.card.ref + " · " + target.card.year + " " + target.card.set + " " + numberLabel(target.card) + " " + target.card.name
+      : "No card position";
+    const sideText = target && saleImageMode(sale) === "front-back" ? imageSlotLabel(target.slot) + " scan" : "Card image";
+    rows.push('<article class="ordered-pair-row">' +
+      '<span class="ordered-pair-position">' + (index + 1) + "</span>" +
+      '<div class="ordered-pair-card"><strong>' + escapeHtml(cardText) + '</strong><small>' + escapeHtml(sideText) + "</small></div>" +
+      (file ? '<img class="ordered-pair-thumb" src="' + fileUrl(file.path) + '" alt="Image ' + (index + 1) + '" />' : '<span class="ordered-pair-empty">Missing</span>') +
+      '<div class="ordered-pair-file"><strong>' + escapeHtml(file?.name || "No image selected") + '</strong><small>' + escapeHtml(file ? "Image " + (index + 1) : "This position will remain unmatched") + "</small></div>" +
+      (file ? '<div class="ordered-pair-actions"><button type="button" class="row-action" data-ordered-move="' + index + '" data-direction="-1" aria-label="Move image up">↑</button><button type="button" class="row-action" data-ordered-move="' + index + '" data-direction="1" aria-label="Move image down">↓</button><button type="button" class="row-action danger-link" data-ordered-remove="' + index + '">Remove</button></div>' : "<span></span>") +
+      "</article>");
+  }
+  $("#orderedPairingList").innerHTML = rows.join("");
+  $("#applyOrderedImagesBtn").disabled = !(cards.length && (exact || allowPartial) && $("#orderedSequenceConfirmed").checked && actual <= expected);
+}
+
+function moveOrderedImage(index, direction) {
+  if (!pendingOrderedImages) return;
+  const target = index + direction;
+  if (target < 0 || target >= pendingOrderedImages.files.length) return;
+  const files = pendingOrderedImages.files;
+  [files[index], files[target]] = [files[target], files[index]];
+  $("#orderedImageSort").value = "selected";
+  files.forEach((file, fileIndex) => { file.selectedOrder = fileIndex; });
+  renderOrderedImageReview();
+}
+
+function applyOrderedImages() {
+  if (!pendingOrderedImages) return;
+  const sale = activeSale();
+  const cards = sortedSaleCards(sale).filter((card) => pendingOrderedImages.cardIds.includes(card.id));
+  const targets = orderedImageTargets(cards);
+  const files = pendingOrderedImages.files;
+  const allowPartial = $("#orderedAllowPartial").checked && files.length > 0 && files.length < targets.length;
+  if (!$("#orderedSequenceConfirmed").checked) return toast("Confirm that the cards were photographed in sale order.");
+  if (!(files.length === targets.length || allowPartial) || files.length > targets.length) return toast("The card and image counts must match before continuing.");
+  const duplicate = files.find((file, index) => files.findIndex((item) => item.path.toLowerCase() === file.path.toLowerCase()) !== index);
+  if (duplicate) return toast("The same image cannot be attached more than once.");
+  const conflict = files.map((file, index) => ({ file, target: targets[index], owner: imageOwner(file.path, targets[index]?.card.id, sale, targets[index]?.slot) })).find((item) => item.owner);
+  if (conflict) return toast("An image is already attached to another listing: " + conflict.file.name + ".");
+  snapshotSale("Before attaching images in sale order");
+  const replaced = [];
+  files.forEach((file, index) => {
+    const target = targets[index];
+    if (!target) return;
+    const previous = imagePathFor(target.card, target.slot);
+    if (previous && previous.toLowerCase() !== file.path.toLowerCase()) replaced.push(previous);
+    attachImage(target.card, file.path, true, sale, target.slot);
+    state.manualMatchMemory ||= {};
+    state.manualMatchMemory[normalizedCardKey(target.card) + "::" + target.slot] = file.path;
+  });
+  replaced.forEach((imagePath) => {
+    if (!sale.cards.some((card) => cardImagePaths(card).some((path) => path.toLowerCase() === imagePath.toLowerCase()))) {
+      sale.images = sale.images.filter((image) => image.path.toLowerCase() !== imagePath.toLowerCase());
+    }
+  });
+  recordAudit("images", "Attached " + files.length + " images in sale order");
+  pendingOrderedImages = null;
+  $("#orderedImagesDialog").close();
+  selectedListingIds.clear();
+  saveSoon();
+  render();
+  toast(files.length + " images attached in reviewed sale order.");
+}
+
+async function droppedImagePaths(dataTransfer) {
+  const files = [...(dataTransfer?.files || [])];
+  return files.map((file) => window.cardSale.droppedFilePath(file)).filter(Boolean);
+}
+
+async function attachDroppedImagesToCard(cardId, paths, slotHint = "") {
+  if (!requireImportLicense() || !paths.length) return;
+  const sale = activeSale();
+  const card = sale.cards.find((item) => item.id === cardId);
+  if (!card) return;
+  const details = await window.cardSale.imageFileDetails(paths);
+  if (!details.length) return toast("Drop a JPG, PNG, WebP, GIF, BMP, or TIFF image.");
+  const assignments = [];
+  if (saleImageMode(sale) === "front-back") {
+    if (details.length >= 2) assignments.push({ file: details[0], slot: "front" }, { file: details[1], slot: "back" });
+    else {
+      const slot = slotHint || (!card.imagePath ? "front" : !card.backImagePath ? "back" : "");
+      if (!slot) return toast("Both scans already exist. Drop the file directly onto Change front or Change back.");
+      assignments.push({ file: details[0], slot });
+    }
+  } else assignments.push({ file: details[0], slot: "single" });
+  const conflict = assignments.find(({ file, slot }) => imageOwner(file.path, card.id, sale, slot));
+  if (conflict) return toast("That file is already attached to another listing.");
+  snapshotSale("Before attaching dropped image");
+  assignments.forEach(({ file, slot }) => {
+    const previous = imagePathFor(card, slot);
+    attachImage(card, file.path, true, sale, slot);
+    state.manualMatchMemory ||= {};
+    state.manualMatchMemory[normalizedCardKey(card) + "::" + slot] = file.path;
+    if (previous && previous.toLowerCase() !== file.path.toLowerCase() && !sale.cards.some((item) => cardImagePaths(item).some((path) => path.toLowerCase() === previous.toLowerCase()))) {
+      sale.images = sale.images.filter((image) => image.path.toLowerCase() !== previous.toLowerCase());
+    }
+  });
+  saveSoon();
+  render();
+  toast(assignments.length + " image" + (assignments.length === 1 ? "" : "s") + " attached to " + card.name + ".");
 }
 
 function normalizeMatchText(value) {
@@ -2104,11 +2572,12 @@ function confirmPerfectMatches() {
   confirmSelectedMatches(perfect);
 }
 
-function deleteSelectedMatches() {
+async function deleteSelectedMatches() {
   const cardIds = new Set(pendingMatches.review.filter((match) => selectedMatchIds.has(match.key)).map((match) => match.card.id));
   const count = cardIds.size;
-  if (!count || !window.confirm(`Delete ${count} selected card${count === 1 ? "" : "s"} from this sale?`)) return;
+  if (!count || !await confirmDestructive({ title: `Remove ${count} card${count === 1 ? "" : "s"}?`, message: "These cards will be removed from the active sale and image-review list.", preserved: ["The image files on your computer will not be deleted.", "A sale snapshot is retained for Undo and version restore."], confirmLabel: "Remove cards" })) return;
   const ids = cardIds;
+  state.sales.filter((sale) => sale.cards.some((card) => ids.has(card.id))).forEach((sale) => snapshotSale(`Before deleting ${count} cards from image review`, sale));
   state.sales.forEach((sale) => {
     const removed = sale.cards.filter((card) => ids.has(card.id));
     sale.cards = sale.cards.filter((card) => !ids.has(card.id));
@@ -2152,11 +2621,11 @@ async function chooseManualImage(cardId, slot = "single") {
   saveSoon(); render(); toast(`${imageSlotLabel(slot)} attached to ${card.name}.`);
 }
 
-function deleteCard(cardId) {
+async function deleteCard(cardId) {
   const sale = activeSale();
   const card = sale.cards.find((item) => item.id === cardId);
   if (unresolvedBundleForCard(card, sale)) return toast("Accept or reject the bundle offer before deleting one of its cards.");
-  if (!card || !window.confirm(`Remove ${card.year} ${card.set} #${card.number} ${card.name} from this sale?`)) return;
+  if (!card || !await confirmDestructive({ title: `Remove ${card.name || "this card"}?`, message: `${card.year} ${card.set} ${numberLabel(card)} will be removed from this sale.`, preserved: ["The original image file stays on your computer.", "A sale snapshot is created first, so the card can be recovered through Undo or version restore.", card.buyer ? `Its existing buyer assignment to ${card.buyer} will be removed with the card.` : "Buyer profiles are not affected."], confirmLabel: "Remove card" })) return;
   snapshotSale(`Before deleting ${card.ref} · ${card.name}`);
   sale.cards = sale.cards.filter((item) => item.id !== cardId);
   renumberCardReferences(sale, { audit: false });
@@ -2165,10 +2634,10 @@ function deleteCard(cardId) {
   saveSoon(); renderStats(); renderListings(); renderImages(); toast("Card removed from the sale.");
 }
 
-function deleteSelectedCards() {
+async function deleteSelectedCards() {
   const count = selectedListingIds.size;
   if (activeSale().cards.some((card) => selectedListingIds.has(card.id) && unresolvedBundleForCard(card))) return toast("Accept or reject bundle offers before deleting their cards.");
-  if (!count || !window.confirm(`Remove ${count} selected card${count === 1 ? "" : "s"} from this sale?`)) return;
+  if (!count || !await confirmDestructive({ title: `Remove ${count} selected card${count === 1 ? "" : "s"}?`, message: "The selected listings and their sale assignments will be removed.", preserved: ["Original image files remain on your computer.", "Buyer profiles remain available.", "A sale snapshot is created before removal."], confirmLabel: "Remove selected cards" })) return;
   const sale = activeSale();
   snapshotSale(`Before deleting ${count} cards`);
   const removed = sale.cards.filter((card) => selectedListingIds.has(card.id));
@@ -2261,11 +2730,11 @@ function createBundleOffer() {
   saveSoon(); render(); toast(`Bundle offer sent to Offers for ${buyer}.`);
 }
 
-function deleteActiveSale() {
+async function deleteActiveSale() {
   const sale = activeSale();
   if (!sale) return;
   const historyNote = sale.closedAt ? "Its buyer, order, and card history will remain in your records." : "A protected historical copy will be kept for buyer and sales records.";
-  if (!window.confirm(`Remove the sale “${sale.name}” and all ${sale.cards.length} card${sale.cards.length === 1 ? "" : "s"} from the active sale list? ${historyNote}`)) return;
+  if (!await confirmDestructive({ title: `Remove “${sale.name}” from active sales?`, message: `${sale.cards.length} card${sale.cards.length === 1 ? "" : "s"} will disappear from the active-sale list.`, preserved: [historyNote, "Buyer profiles and lifetime buyer history remain available.", "Image files on your computer are never deleted.", "The complete sale can be restored from Archived Sale Records."], confirmLabel: "Archive and remove" })) return;
   const deletedIndex = state.sales.findIndex((item) => item.id === sale.id);
   state.archivedSales ||= [];
   const archivedSale = { ...clone(sale), archivedAt: new Date().toISOString(), archivedFromIndex: deletedIndex, archiveReason: "deleted" };
@@ -3035,7 +3504,7 @@ async function outputPweLabels(names, action = "print") {
 
 const WALKTHROUGH_STEPS = [
   { title: "Welcome to Card Sale Manager", body: "Post. Sell. Track. The Command Center is your daily checklist from first claim to final shipment.", tips: ["Green actions move work forward", "Amber and red are reserved for items needing attention"], image: "assets/brand-logo-dark.svg", view: "command" },
-  { title: "Import and prepare listings", body: "Choose one image or separate front and back scans when you create the sale, then import your spreadsheet, review warnings, and match the files.", tips: ["Front/back filenames can use F, B, Front, or Back", "Purchase data stays private", "Copying text and dragging an image are separate actions"], image: "assets/help/workspace.png", view: "sale" },
+  { title: "Import and prepare listings", body: "Choose one image or separate front and back scans when you create the sale. Guided Sale Setup can take the spreadsheet and images together, while Fix Center walks through anything incomplete.", tips: ["Repeated spreadsheet layouts are remembered automatically", "Match organized filenames or attach a photographed batch in exact sale order", "Use Image Inbox for files that are not attached yet"], image: "assets/help/workspace.png", view: "sale" },
   { title: "Preview and publish your catalog", body: "Open Catalog to edit the public title, introduction, teams, card details, and images. Export an offline folder or connect Cloudflare once and publish the latest preview directly.", tips: ["Catalogs filter by player, year, and every attached team", "Year is always the primary sort and card number is the secondary sort", "Purchase data, buyer data, and listing-copy controls are never published"], image: "assets/help/workspace.png", view: "catalog" },
   { title: "Record claims and offers", body: "Claims Desk contains every sale card. Assign buyers, record claims or offers, and select several available listings to build one bundle offer.", tips: ["Accepted bundles split the final price proportionally across every card", "Accepted offers become orders", "Audit timestamps preserve what happened"], image: "assets/help/offers.png", view: "claims" },
   { title: "Confirm buyer orders", body: "Choose shipping, validate the mailing address, record payment, and copy the buyer summary.", tips: ["PWE or PMWT can be overridden", "Costs never appear in customer messages"], image: "assets/help/orders.png", view: "orders" },
@@ -3426,6 +3895,24 @@ function bindEvents() {
   $("#renumberNowBtn").addEventListener("click", () => saveReferenceSettings(true));
   $("#commandView").addEventListener("click", (event) => { const view = event.target.closest("[data-command-view]")?.dataset.commandView; if (view) showView(view); });
   $("#refreshCommandBtn").addEventListener("click", renderCommandCenter);
+  $("#openFixCenterBtn").addEventListener("click", openFixCenter);
+  $("#fixNextProblemBtn").addEventListener("click", () => openPreparationIssue());
+  $("#fixCenterNextBtn").addEventListener("click", () => openPreparationIssue());
+  $("#fixCenterList").addEventListener("click", (event) => {
+    const cardId = event.target.closest("[data-fix-card]")?.dataset.fixCard;
+    const group = event.target.closest("[data-fix-group]")?.dataset.fixGroup;
+    const issues = salePreparationIssues();
+    const issue = cardId ? issues.find((item) => item.card.id === cardId) : group === "information" ? issues.find((item) => ["information", "price"].includes(item.type)) : group === "images" ? issues.find((item) => ["image", "image-review"].includes(item.type)) : issues.find((item) => item.type === "team");
+    if (issue) openPreparationIssue(issue);
+  });
+  $("#guidedSetupBtn").addEventListener("click", openGuidedSetup);
+  $("#setupChooseSpreadsheetBtn").addEventListener("click", async () => { const path = await window.cardSale.chooseSpreadsheet(); if (path) await addGuidedSetupPaths([path]); });
+  $("#setupChooseImagesBtn").addEventListener("click", async () => addGuidedSetupPaths(await window.cardSale.chooseImages()));
+  $("#setupChooseImageFolderBtn").addEventListener("click", async () => { const folder = await window.cardSale.chooseLookupFolder(); if (folder) await addGuidedSetupPaths([folder]); });
+  $("#continueGuidedSetupBtn").addEventListener("click", continueGuidedSetup);
+  ["dragenter", "dragover"].forEach((type) => $("#guidedSetupDropZone").addEventListener(type, (event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; $("#guidedSetupDropZone").classList.add("drag-over"); }));
+  ["dragleave", "drop"].forEach((type) => $("#guidedSetupDropZone").addEventListener(type, () => $("#guidedSetupDropZone").classList.remove("drag-over")));
+  $("#guidedSetupDropZone").addEventListener("drop", async (event) => { event.preventDefault(); await addGuidedSetupPaths(await droppedImagePaths(event.dataTransfer)); });
   [["#pullingBuyerFilter", "buyer"], ["#pullingPrimarySort", "primary"], ["#pullingSecondarySort", "secondary"], ["#pullingGroupBy", "group"]].forEach(([selector, key]) => $(selector).addEventListener("change", (event) => { pullingSettings()[key] = event.target.value; saveSoon(); renderPulling(); }));
   $("#pullingSearch").addEventListener("input", (event) => { pullingSettings().query = event.target.value; renderPulling(); });
   $("#pullingHidePulled").addEventListener("change", (event) => { pullingSettings().hidePulled = event.target.checked; saveSoon(); renderPulling(); });
@@ -3523,10 +4010,49 @@ function bindEvents() {
   $("#catalogCardSearch").addEventListener("input", renderCatalog); $("#catalogCardFilter").addEventListener("change", renderCatalog);
   $("#catalogCardRows").addEventListener("click", (event) => { const editId = event.target.dataset.catalogEdit; const imageId = event.target.dataset.catalogImage; if (editId) openQuickEdit(editId); if (imageId) chooseManualImage(imageId); });
   $("#importPresetSelect").addEventListener("change", (event) => { $("#deleteImportPresetBtn").disabled = !event.target.value; if (event.target.value) applyImportPreset(event.target.value); });
+  $("#importReview").addEventListener("click", (event) => { const group = event.target.closest("[data-import-fix]")?.dataset.importFix; if (group) bulkFixImportGroup(group); });
+  $("#importDialog").addEventListener("close", () => { if (pendingSheet) { pendingSheet = null; pendingSetupImages = []; } });
   $("#saveImportPresetBtn").addEventListener("click", () => { if (!pendingSheet) return; const name = window.prompt("Name this column preset:", pendingSheet.name || "My spreadsheet"); if (!name?.trim()) return; const preset = { id: uid(), name: name.trim(), mapping: currentImportMapping(), template: $("#listingTemplate").value }; state.importPresets.push(preset); renderImportPresetOptions(preset.id); saveSoon(); toast("Import-column preset saved."); });
   $("#deleteImportPresetBtn").addEventListener("click", () => { const id = $("#importPresetSelect").value; if (!id || !window.confirm("Delete this import-column preset?")) return; state.importPresets = importPresets().filter((preset) => preset.id !== id); renderImportPresetOptions(); saveSoon(); toast("Import preset deleted."); });
   $("#addCardDialog").addEventListener("input", (event) => { if (event.target.matches("input")) updateAddCardPreview(); });
-  $("#addImagesBtn").addEventListener("click", () => addImages("files"));
+  $("#addImagesBtn").addEventListener("click", openImageWorkflow);
+  $("#imageInboxBtn").addEventListener("click", openImageInbox);
+  $("#imageInboxAddBtn").addEventListener("click", async () => { await addImages("files"); renderImageInbox(); });
+  $("#imageInboxOrderedBtn").addEventListener("click", () => { $("#imageInboxDialog").close(); openOrderedImageWorkflow(); });
+  $("#imageInboxList").addEventListener("click", async (event) => {
+    const row = event.target.closest("[data-inbox-image]");
+    if (!row) return;
+    if (event.target.closest("[data-inbox-attach]")) attachInboxImage(row);
+    if (event.target.closest("[data-inbox-remove]")) {
+      const approved = await confirmDestructive({ title: "Remove this image from CSM?", message: row.dataset.inboxImage.split(/[\\/]/).pop(), preserved: ["The actual image file remains untouched on your computer.", "You can add it to CSM again later."], confirmLabel: "Remove from inbox" });
+      if (!approved) return;
+      activeSale().images = activeSale().images.filter((image) => image.path.toLowerCase() !== row.dataset.inboxImage.toLowerCase());
+      saveSoon(); render(); renderImageInbox();
+    }
+  });
+  $("#workflowAutoMatchBtn").addEventListener("click", () => { $("#imageWorkflowDialog").close(); autoMatchImages(); });
+  $("#workflowOrderedBtn").addEventListener("click", () => openOrderedImageWorkflow());
+  $("#workflowManualBtn").addEventListener("click", () => { $("#imageWorkflowDialog").close(); showView("sale"); state.filter = "missing-image"; $$("[data-filter]").forEach((button) => button.classList.toggle("active", button.dataset.filter === "missing-image")); renderListings(); toast("Drag an image file from your computer onto the matching card row."); });
+  $("#workflowChooseFilesBtn").addEventListener("click", () => { $("#imageWorkflowDialog").close(); addImages("files"); });
+  $("#workflowFolderSettingsBtn").addEventListener("click", () => { $("#imageWorkflowDialog").close(); renderFolderSettings(); $("#folderSettingsDialog").showModal(); });
+  $("#selectRangeListingsBtn").addEventListener("click", openRangeSelection);
+  $("#applyRangeSelectionBtn").addEventListener("click", applyRangeSelection);
+  $("#attachOrderedImagesBtn").addEventListener("click", () => openOrderedImageWorkflow({ useMissingIfEmpty: false }));
+  $("#chooseOrderedImagesBtn").addEventListener("click", async () => addOrderedImagePaths(await window.cardSale.chooseImages()));
+  $("#orderedImageSort").addEventListener("change", () => { if (!pendingOrderedImages) return; pendingOrderedImages.files = sortOrderedImageFiles(pendingOrderedImages.files); pendingOrderedImages.files.forEach((file, index) => { file.selectedOrder = index; }); renderOrderedImageReview(); });
+  $("#frontBackOrder").addEventListener("change", renderOrderedImageReview);
+  $("#orderedAllowPartial").addEventListener("change", renderOrderedImageReview);
+  $("#orderedSequenceConfirmed").addEventListener("change", renderOrderedImageReview);
+  $("#applyOrderedImagesBtn").addEventListener("click", applyOrderedImages);
+  $("#orderedPairingList").addEventListener("click", (event) => {
+    const move = event.target.closest("[data-ordered-move]");
+    const remove = event.target.closest("[data-ordered-remove]");
+    if (move) moveOrderedImage(Number(move.dataset.orderedMove), Number(move.dataset.direction));
+    if (remove && pendingOrderedImages) { pendingOrderedImages.files.splice(Number(remove.dataset.orderedRemove), 1); pendingOrderedImages.files.forEach((file, index) => { file.selectedOrder = index; }); renderOrderedImageReview(); }
+  });
+  ["dragenter", "dragover"].forEach((type) => $("#orderedImageDropZone").addEventListener(type, (event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; $("#orderedImageDropZone").classList.add("drag-over"); }));
+  ["dragleave", "drop"].forEach((type) => $("#orderedImageDropZone").addEventListener(type, () => $("#orderedImageDropZone").classList.remove("drag-over")));
+  $("#orderedImageDropZone").addEventListener("drop", async (event) => { event.preventDefault(); await addOrderedImagePaths(await droppedImagePaths(event.dataTransfer)); });
   $("#addFolderBtn").addEventListener("click", () => addImages("folder"));
   $("#autoMatchBtn").addEventListener("click", autoMatchImages);
   $("#forceAllImageLookupBtn").addEventListener("click", forceAllImageLookup);
@@ -3563,6 +4089,21 @@ function bindEvents() {
   $$("[data-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; saleViewState().filter = state.filter; $$("[data-filter]").forEach((item) => item.classList.toggle("active", item === button)); saveSoon(); renderListings(); }));
   $("#cardSearch").addEventListener("input", (event) => { state.query = event.target.value; saleViewState().query = state.query; saveSoon(); renderListings(); });
   $("#listingRows").addEventListener("click", (event) => {
+    const checkbox = event.target.closest("[data-select-listing]");
+    if (!checkbox) return;
+    const cards = filteredListingCards();
+    const currentIndex = cards.findIndex((card) => card.id === checkbox.dataset.selectListing);
+    const anchorIndex = cards.findIndex((card) => card.id === listingSelectionAnchor);
+    if (event.shiftKey && anchorIndex >= 0 && currentIndex >= 0) {
+      const shouldSelect = checkbox.checked;
+      cards.slice(Math.min(anchorIndex, currentIndex), Math.max(anchorIndex, currentIndex) + 1).forEach((card) => {
+        if (shouldSelect) selectedListingIds.add(card.id);
+        else selectedListingIds.delete(card.id);
+      });
+    }
+    listingSelectionAnchor = checkbox.dataset.selectListing;
+  });
+  $("#listingRows").addEventListener("click", (event) => {
     const detailsId = event.target.closest("[data-card-details]")?.dataset.cardDetails;
     const copyId = event.target.dataset.copyCard;
     const imageId = event.target.dataset.imageCard;
@@ -3598,6 +4139,29 @@ function bindEvents() {
     const [moved] = ordered.splice(from, 1); ordered.splice(to, 0, moved); ordered.forEach((card, index) => card.customOrder = index + 1);
     renumberCardReferences(activeSale(), { audit: false });
     draggedListingId = ""; saveSoon(); renderListings();
+  });
+  ["dragenter", "dragover"].forEach((type) => $("#listingRows").addEventListener(type, (event) => {
+    if (![...(event.dataTransfer?.types || [])].includes("Files")) return;
+    const row = event.target.closest("[data-listing-row]");
+    if (!row) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    $$(".listing-drop-ready", $("#listingRows")).forEach((item) => item.classList.remove("listing-drop-ready"));
+    row.classList.add("listing-drop-ready");
+  }));
+  $("#listingRows").addEventListener("dragleave", (event) => {
+    const row = event.target.closest("[data-listing-row]");
+    if (row && !row.contains(event.relatedTarget)) row.classList.remove("listing-drop-ready");
+  });
+  $("#listingRows").addEventListener("drop", async (event) => {
+    if (![...(event.dataTransfer?.types || [])].includes("Files")) return;
+    const row = event.target.closest("[data-listing-row]");
+    if (!row) return;
+    event.preventDefault();
+    event.stopPropagation();
+    row.classList.remove("listing-drop-ready");
+    const sideButton = event.target.closest("[data-image-side]");
+    await attachDroppedImagesToCard(row.dataset.listingRow, await droppedImagePaths(event.dataTransfer), sideButton?.dataset.imageSide || "");
   });
   $("#selectAllListings").addEventListener("change", (event) => {
     $$('[data-select-listing]').forEach((checkbox) => { if (event.target.checked) selectedListingIds.add(checkbox.dataset.selectListing); else selectedListingIds.delete(checkbox.dataset.selectListing); });
@@ -3912,6 +4476,19 @@ function bindEvents() {
       $("#updateMessage").textContent = result.message || "Please try again.";
     }
   });
+  $("#confirmSafeDeleteBtn").addEventListener("click", () => { const resolve = safeDeleteResolver; safeDeleteResolver = null; $("#safeDeleteDialog").close(); resolve?.(true); });
+  $("#cancelSafeDeleteBtn").addEventListener("click", () => { const resolve = safeDeleteResolver; safeDeleteResolver = null; $("#safeDeleteDialog").close(); resolve?.(false); });
+  $("#safeDeleteDialog").addEventListener("close", () => { if (!safeDeleteResolver) return; const resolve = safeDeleteResolver; safeDeleteResolver = null; resolve(false); });
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("[data-clear-listing-view]")) { state.filter = "all"; state.query = ""; $("#cardSearch").value = ""; $$("[data-filter]").forEach((button) => button.classList.toggle("active", button.dataset.filter === "all")); renderListings(); return; }
+    const action = event.target.closest("[data-empty-action]")?.dataset.emptyAction;
+    if (!action) return;
+    if (action === "images") { if ($("#imageInboxDialog")?.open) $("#imageInboxDialog").close(); openImageWorkflow(); }
+    else if (action === "guided-setup") openGuidedSetup();
+    else if (action === "import") importSpreadsheet();
+    else if (action === "add-card") openAddCard();
+    else showView(action);
+  });
   document.addEventListener("keydown", (event) => {
     const editing = event.target.matches("input, textarea, select, [contenteditable='true']");
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !editing) { event.preventDefault(); undoLastCompletion(); }
@@ -3977,6 +4554,7 @@ async function init() {
     state.preferences.claimWords ||= [...DEFAULT_CLAIM_WORDS];
     state.salePresets ||= [];
     state.importPresets ||= [];
+    state.importMemories ||= {};
     state.preferences.setupCompleted ??= true;
     historicalSales().forEach((sale) => {
       if (!sale.template || legacyTemplates.has(sale.template)) sale.template = DEFAULT_TEMPLATE;
@@ -4047,8 +4625,9 @@ async function init() {
   state.teamLookupCache ||= {};
   if (firstLaunch) state.preferences.setupCompleted ??= false;
   state.importPresets ||= [];
+  state.importMemories ||= {};
   if (![...$("#packingPageSize").options].some((option) => option.value === "two-up")) $("#packingPageSize").add(new Option("Two half-slips per letter page", "two-up"));
-  claimWords(); presets(); importPresets(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); ensureSaleReplies(); workspaceColumns(); uiState(); bindEvents();
+  claimWords(); presets(); importPresets(); importMemories(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); ensureSaleReplies(); workspaceColumns(); uiState(); bindEvents();
   await refreshLicenseEntitlements(false).catch(() => applyLicenseEntitlements({ configured: true, licensed: false, owner: false, catalogVisible: false }));
   resetListingView(); applyDisplayPreferences(); render();
   if (uiState().activeView && uiState().activeView !== "command") showView(uiState().activeView);

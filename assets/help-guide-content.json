@@ -28,11 +28,11 @@
       "id": "organize-images",
       "group": "Getting started",
       "title": "Organize card images",
-      "summary": "Use year folders and descriptive filenames so automatic matching has enough information.",
+      "summary": "Use automatic matching when your files are organized, or attach images in sale order without renaming anything.",
       "paragraphs": [
         "CSM works with your existing folders. The optional Card Years download is only a starter. If you use it, extract it somewhere permanent, such as Documents\\Card Images, instead of leaving it in Downloads.",
         "A sport folder is helpful when you sell several sports, but it is not required. The recommended setup is Main Image Folder, then Sport, then Year. CSM can also work with year folders directly under the main folder.",
-        "Spaces, hyphens, and underscores in filenames are fine. Matching improves when the filename includes the card number, player name, and purchase date.",
+        "Spaces, hyphens, and underscores in filenames are fine. Matching improves when the filename includes the card number, player name, and purchase date. File naming is optional: Attach images in sale order can pair a photographed batch with selected cards without using filenames.",
         "Each sale can use one image per card or separate front and back scans. Choose the image style when you create the sale. Single-image mode is useful for one photo or a combined image; front-and-back mode keeps two separate files attached to each card.",
         "CardStitcher is still useful when you want to combine more than two photos, close-up details, or a designed collage into one finished image before adding it to CSM."
       ],
@@ -42,7 +42,8 @@
         "Create year folders inside them, such as Baseball\\1961.",
         "Name an image like 20 Robin Roberts 09132026.jpg when the sheet lists 1961, Robin Roberts, card 20, and a purchase date of 09/13/2026.",
         "For exact duplicate cards bought on the same date, add a final sequence number: 20 Robin Roberts 09132026 1.jpg and 20 Robin Roberts 09132026 2.jpg.",
-        "For a front-and-back sale, add a separate F, B, Front, or Back key: 20 Robin Roberts 09132026 Front.jpg and 20 Robin Roberts 09132026 Back.jpg. A standalone F or B works too."
+        "For a front-and-back sale, add a separate F, B, Front, or Back key: 20 Robin Roberts 09132026 Front.jpg and 20 Robin Roberts 09132026 Back.jpg. A standalone F or B works too.",
+        "If you do not want to rename files, photograph the cards in the exact order they appear in the sale. Select the same range in Sale Workspace, choose Attach images in order, and review every numbered pairing before applying it."
       ],
       "tips": [
         "The date code in a filename can be MMDDYYYY or MDDYYYY. CSM compares it with the purchase date from the spreadsheet.",
@@ -70,7 +71,7 @@
       ],
       "tips": [
         "Purchase price and purchase date stay private. They appear in your workspace and profit tools, never in copied listings or buyer messages.",
-        "Save a column preset after your first import if you plan to reuse the same spreadsheet layout."
+        "CSM remembers a successfully imported layout automatically. Named column presets are still useful when you intentionally keep several different mappings."
       ]
     },
     {
@@ -81,14 +82,16 @@
       "image": "assets/help/workspace.png",
       "paragraphs": [
         "Create a new sale before importing. Give it a name you will recognize later, such as October Vintage Sale. CSM keeps each sale separate while preserving buyer history across sales.",
-        "The import window guesses which spreadsheet column belongs to each CSM field. Check the mapping rather than assuming every guess is correct. The review screen catches missing names, years, prices, and other problems before they enter the sale.",
+        "Guided Sale Setup can accept the spreadsheet and images together. Drop both onto one screen, or choose them separately, and CSM carries them into the appropriate review without requiring the user to understand folders or column mapping first.",
+        "The import window guesses which spreadsheet column belongs to each CSM field. Its Fix Center groups missing information, invalid prices, questionable dates, duplicates, and unusual prices. Repeated problems can be fixed together before the cards enter the sale.",
+        "After a successful import, CSM remembers the spreadsheet headings, column choices, custom fields, and listing format. The same layout is mapped automatically in later sales and still remains editable.",
         "The listing preview shows exactly what will be copied to Facebook. Blank grades, numbers, and flaws are cleaned up automatically so the final line does not contain awkward spaces or empty punctuation."
       ],
       "steps": [
         "Choose New sale, enter the sale name and shipping prices, and choose either one image per card or separate front and back scans. The choice stays with that sale.",
-        "Choose Import spreadsheet and select the workbook.",
+        "Choose Guided sale setup to drop the workbook and images together, or choose Import spreadsheet when you only need the workbook.",
         "Check every mapped column. Mark useful extra columns as custom fields.",
-        "Review warnings and correct the source sheet or mapping when needed.",
+        "Review each warning group. Use Fix together for repeated missing values, prices, or dates, and manually inspect possible duplicates or unusual prices.",
         "Check the listing preview, then finish the import."
       ],
       "tips": [
@@ -110,12 +113,16 @@
         "Open Sale Workspace and choose Auto-match card images.",
         "Watch the progress count while CSM scans the folders.",
         "Confirm uncertain matches individually or select several review rows at once.",
-        "Use Add image to assign a file manually. Front-and-back sales provide separate Add front and Add back controls.",
+        "Use Add images to choose automatic matching, ordered attachment, or adding files to the Post Queue without matching them yet.",
+        "Open Image inbox to see only files that are not attached to a card. Choose a destination card from the row, add more files, or send selected cards to ordered pairing without renaming anything.",
+        "For ordered attachment, photograph cards in sale order, select the same cards, and review the numbered card-to-image list. Files can be ordered by the order received from the computer, filename, creation date, or modified date.",
+        "Use Add image to assign a file manually, or drag a file directly onto the card row. Front-and-back sales provide separate Add front and Add back controls.",
         "Use Re-run lookup on one card when its suggestion is wrong. Use the full recheck only when you want CSM to reconsider current and past matches."
       ],
       "tips": [
         "A 100 percent match should not need manual approval unless the file conflicts with another listing.",
-        "Manual matches are remembered when the same card is carried into another sale."
+        "Manual matches are remembered when the same card is carried into another sale.",
+        "Ordered attachment blocks an oversized batch and warns when the card and image counts do not match. Nothing is applied until you check the confirmation and approve the preview."
       ]
     },
     {
@@ -242,6 +249,7 @@
       "summary": "See what needs attention and what can move forward next.",
       "paragraphs": [
         "Command Center is the best place to start a work session. It summarizes the active sale, puts urgent problems first, and links directly to cards or orders that need action.",
+        "Sale preparation counts cards that are ready, missing required information, missing images, or missing optional team details. Open Fix Center to see the grouped list, or choose Fix next problem to work through it one card at a time.",
         "Use Needs attention for problems such as unresolved images, pending offers, unpaid orders, or incomplete packing. Ready for the next step shows work that can move forward without another decision."
       ],
       "tips": ["Refresh after a large batch of edits if you want to rebuild the checklist immediately."]
@@ -265,7 +273,9 @@
       "paragraphs": [
         "Sale Workspace is the main editing screen. Search and filter cards, copy individual listings, change images, select several rows, build bundles, bulk edit, review teams, carry over unsold cards, and close the sale.",
         "The Post queue follows listing order. Copying listing text hides only the listing. Dragging an image hides only the image. Ctrl+Z restores the most recently hidden item.",
-        "Columns lets you simplify the table. Selection buttons can target visible rows, every filtered result, or the entire sale. Clicking a card title opens its detail drawer. Card numbers with letters, dashes, prefixes, and suffixes are kept intact and sorted naturally."
+        "Each listing shows a preparation badge such as Ready, Missing image, Image needs review, Price needs review, or Team not set. These badges use the same checklist as Command Center and Fix Center.",
+        "Columns lets you simplify the table. Selection buttons can target a continuous range, visible rows, every filtered result, or the entire sale. Shift-clicking card checkboxes also selects a continuous range. Clicking a card title opens its detail drawer. Card numbers with letters, dashes, prefixes, and suffixes are kept intact and sorted naturally.",
+        "Attach images in order is designed for sellers who do not want to rename files. Photograph selected cards in listing order, add the same number of images, inspect the preview, and confirm. CSM will not silently reuse one file or apply an oversized batch."
       ],
       "tips": [
         "Use References to renumber cards safely after deletions or reordering.",
@@ -373,6 +383,7 @@
       "summary": "Remove clutter without erasing buyer and order history.",
       "paragraphs": [
         "Removing a sale moves its protected record here. Buyer profiles, purchase history, card details, and reporting totals continue to use the archived data.",
+        "Before removing a sale or card, CSM explains exactly what will disappear and what will remain. Removing something from CSM never deletes the original image file from the computer.",
         "Restore a sale when you need it back in the active-sale menu."
       ]
     },
