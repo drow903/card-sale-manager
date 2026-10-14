@@ -41,6 +41,7 @@
           <button id="salePresetsBtn" class="sidebar-link full">Sale presets</button>
           <button id="csmFileBtn" class="sidebar-link full">Portable CSM file</button>
           <button id="shortcutsBtn" class="sidebar-link full">Keyboard shortcuts</button>
+          <button id="experienceModeBtn" class="sidebar-link full">Mode: Beginner</button>
           <button id="downloadTemplateBtn" class="sidebar-link full">Download import template</button>
           <button id="openDataFolderBtn" class="sidebar-link full">Open data folder</button>
           <button id="openImageFolderBtn" class="sidebar-link full">Open image folder</button>
@@ -68,6 +69,8 @@
             <button id="importBtn" class="primary">Import spreadsheet</button>
           </div>
         </header>
+
+        <section id="beginnerCoach" class="beginner-coach hidden" aria-live="polite"></section>
 
         <section id="commandView" class="view active">
           <div id="commandStats" class="stats"></div>
@@ -116,6 +119,7 @@
               <div id="imageQueue" class="image-queue"></div>
               <div class="queue-actions">
                 <button id="autoMatchBtn" class="primary full">Auto-match card images</button>
+                <button id="missingImagesBtn" class="secondary full">Open Missing Images Workspace</button>
                 <button id="forceAllImageLookupBtn" class="secondary full">Re-run lookup for every sale</button>
                 <div id="lookupProgress" class="task-progress hidden"><div class="progress-track"><div id="lookupProgressBar" class="progress-bar"></div></div><small id="lookupProgressText">Starting image lookup…</small></div>
                 <button id="imageFolderSettingsBtn" class="secondary full">Image lookup folders</button>
@@ -462,6 +466,50 @@
       </form>
     </dialog>
 
+    <dialog id="pickImageDialog">
+      <form method="dialog" class="dialog-card large pick-image-card">
+        <div class="dialog-header"><div><p class="eyebrow">PICK ONE</p><h2 id="pickImageTitle">Compare image choices</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <p id="pickImageExplanation" class="dialog-copy"></p>
+        <div id="pickImageChoices" class="pick-image-choices"></div>
+        <div class="dialog-actions"><button id="pickImageLeaveUnmatchedBtn" type="button" class="secondary">Leave unmatched</button><button value="cancel" class="primary">Done</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="missingImagesDialog">
+      <form method="dialog" class="dialog-card large missing-images-card">
+        <div class="dialog-header"><div><p class="eyebrow">MISSING IMAGES</p><h2>Finish every card in one place</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <div id="missingImagesSummary" class="match-summary"></div>
+        <div class="missing-images-toolbar"><label class="search"><span>⌕</span><input id="missingImagesSearch" type="search" placeholder="Find a card…" /></label><button id="missingImagesPreflightBtn" type="button" class="secondary">Check image folders</button><button id="missingImagesLookupBtn" type="button" class="primary">Run lookup for missing cards</button></div>
+        <div id="missingImagesList" class="missing-images-list"></div>
+        <div class="dialog-actions"><button value="cancel" class="primary">Done</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="imagePreflightDialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-header"><div><p class="eyebrow">IMAGE-FOLDER CHECK</p><h2>Make sure lookup is ready</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <div id="imagePreflightResults" class="readiness-list"></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Close</button><button id="preflightChooseFolderBtn" type="button" class="secondary">Choose folder</button><button id="preflightRunLookupBtn" type="button" class="primary">Run image lookup</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="saleReadinessDialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-header"><div><p class="eyebrow">READY TO GO LIVE?</p><h2>One last sale check</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <div id="saleReadinessResults" class="readiness-list"></div>
+        <p id="saleReadinessNote" class="setup-note"></p>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Keep preparing</button><button id="openLiveAfterReadinessBtn" type="button" class="primary">Open Live Sale Mode</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="buyerConflictDialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-header"><div><p class="eyebrow">BUYER CHECK</p><h2>This card already has activity</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
+        <div id="buyerConflictDetails" class="readiness-list"></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirmBuyerConflictBtn" type="button" class="primary">Confirm change</button></div>
+      </form>
+    </dialog>
+
     <dialog id="folderSettingsDialog">
       <form method="dialog" class="dialog-card large">
         <div class="dialog-header"><div><p class="eyebrow">IMAGE LOOKUP</p><h2>Choose where images are searched</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div>
@@ -476,7 +524,7 @@
 
     <dialog id="pweLabelDialog"><form method="dialog" class="dialog-card label-designer-card"><div class="dialog-header"><div><p class="eyebrow">4 × 6 PWE LABEL</p><h2>Customize envelope labels</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><div class="label-designer-layout"><section class="label-controls"><label>Label heading<input id="pweLabelHeading" placeholder="Please deliver to" /></label><label>Return name<input id="pweReturnName" /></label><label>Return address<textarea id="pweReturnAddress" rows="3"></textarea></label><label>Bottom note<input id="pweLabelFooter" placeholder="Thank you! Please do not bend." /></label><div class="two-columns"><label>Orientation<select id="pweLabelOrientation"><option value="portrait">Portrait (4 × 6)</option><option value="landscape">Landscape (6 × 4)</option></select></label><label>Text size<select id="pweLabelSize"><option value="compact">Compact</option><option value="standard">Standard</option><option value="large">Large</option></select></label><label>Font<select id="pweLabelFont"><option value="modern">Modern</option><option value="classic">Classic</option><option value="typewriter">Typewriter</option></select></label><label>Recipient alignment<select id="pweLabelAlignment"><option value="left">Left</option><option value="center">Centered</option></select></label><label>Page padding<select id="pweLabelPadding"><option value="tight">Tight</option><option value="standard">Standard</option><option value="roomy">Roomy</option></select></label><label>Accent color<input id="pweLabelAccent" type="color" value="#172333" /></label></div><div class="label-section-options"><label class="check-label"><input id="pweShowReturn" type="checkbox" /> Return address</label><label class="check-label"><input id="pweShowHeading" type="checkbox" /> Label heading</label><label class="check-label"><input id="pweShowOrder" type="checkbox" /> Order number and card count</label><label class="check-label"><input id="pweShowFooter" type="checkbox" /> Bottom note</label></div><p class="dialog-copy">The saved mailing address is always used for the selected buyer. Design and orientation settings apply to PDF preview, single printing, and batch printing.</p></section><section class="label-preview-panel"><div class="preview-heading"><strong>Thermal-label preview</strong><span id="pwePreviewBuyer"></span></div><div id="pweLabelPreview" class="pwe-label-preview"></div></section></div><div class="dialog-actions spread"><button id="savePweLabelBtn" type="button" class="secondary">Save design</button><div><button id="previewPweLabelBtn" type="button" class="secondary">Preview PDF</button><button id="printAllPweLabelsBtn" type="button" class="secondary">Print all PWE</button><button id="printPweLabelBtn" type="button" class="primary">Print selected label</button></div></div></form></dialog>
 
-    <dialog id="setupWizardDialog"><form method="dialog" class="dialog-card setup-card"><div class="setup-progress"><span id="setupStepLabel">Step 1 of 3</span><progress id="setupProgress" max="3" value="1"></progress></div><section class="setup-step" data-setup-step="0"><img class="setup-brand-logo" src="assets/brand-logo-dark.svg" alt="Card Sale Manager — Post. Sell. Track." /><p class="eyebrow">WELCOME</p><h2>From first claim to final shipment.</h2><p>Sales, buyer addresses, images, and backups stay on this computer. This short setup chooses your defaults and can create a safe sample sale for practice.</p><img src="assets/help-example-cards.png" alt="Fictional sports-card examples" /></section><section class="setup-step hidden" data-setup-step="1"><p class="eyebrow">YOUR DEFAULTS</p><h2>How do you normally sell?</h2><label>Seller or store name<input id="setupSellerName" placeholder="Dillon's Card Sales" /></label><div class="two-columns"><label>PWE shipping<input id="setupPwePrice" type="number" min="0" step="0.01" value="1.00" /></label><label>PMWT shipping<input id="setupPmwtPrice" type="number" min="0" step="0.01" value="5.00" /></label></div><label>Primary image folder<div class="input-button-row"><input id="setupImageFolder" readonly placeholder="Choose later if you prefer" /><button id="setupChooseFolderBtn" type="button" class="secondary">Choose folder</button></div></label></section><section class="setup-step hidden" data-setup-step="2"><p class="eyebrow">READY TO BEGIN</p><h2>Choose your starting point</h2><label class="setup-choice"><input id="setupUseSample" type="checkbox" checked /><span><strong>Keep the sample sale</strong><small>Practice with three fictional cards, a claim, an offer, and an order.</small></span></label><label class="setup-choice"><input id="setupStartGuide" type="checkbox" checked /><span><strong>Start the guided walkthrough</strong><small>See the complete workflow after setup.</small></span></label><p class="setup-note">You can reopen both setup and the walkthrough from Help &amp; Guide.</p></section><div class="dialog-actions spread"><button id="setupBackBtn" type="button" class="secondary" disabled>Back</button><div><button id="setupSkipBtn" type="button" class="secondary">Skip for now</button><button id="setupNextBtn" type="button" class="primary">Next</button></div></div></form></dialog>
+    <dialog id="setupWizardDialog"><form method="dialog" class="dialog-card setup-card"><div class="setup-progress"><span id="setupStepLabel">Step 1 of 4</span><progress id="setupProgress" max="4" value="1"></progress></div><section class="setup-step" data-setup-step="0"><img class="setup-brand-logo" src="assets/brand-logo-dark.svg" alt="Card Sale Manager — Post. Sell. Track." /><p class="eyebrow">WELCOME</p><h2>From first claim to final shipment.</h2><p>Sales, buyer addresses, images, and backups stay on this computer. This short setup chooses your defaults and can create a safe sample sale for practice.</p><img src="assets/help-example-cards.png" alt="Fictional sports-card examples" /></section><section class="setup-step hidden" data-setup-step="1"><p class="eyebrow">CHOOSE YOUR EXPERIENCE</p><h2>How much guidance would you like?</h2><label class="setup-choice recommended-choice"><input type="radio" name="setupExperienceMode" value="beginner" checked /><span><strong>Beginner mode <b>Highly recommended for first-time users</b></strong><small>Step-by-step coaching, clearer error recovery, automatic folder checks, and a final readiness check before your sale.</small></span></label><label class="setup-choice"><input type="radio" name="setupExperienceMode" value="standard" /><span><strong>Standard mode</strong><small>Best after you already understand CSM’s workflow. The complete workspace stays available with less coaching, and all safety protections remain active.</small></span></label><p class="setup-note">This changes how CSM explains the workflow—not your sale data or available features. You can switch modes from the sidebar anytime.</p></section><section class="setup-step hidden" data-setup-step="2"><p class="eyebrow">YOUR DEFAULTS</p><h2>How do you normally sell?</h2><label>Seller or store name<input id="setupSellerName" placeholder="Dillon's Card Sales" /></label><div class="two-columns"><label>PWE shipping<input id="setupPwePrice" type="number" min="0" step="0.01" value="1.00" /></label><label>PMWT shipping<input id="setupPmwtPrice" type="number" min="0" step="0.01" value="5.00" /></label></div><label>Primary image folder<div class="input-button-row"><input id="setupImageFolder" readonly placeholder="Choose later if you prefer" /><button id="setupChooseFolderBtn" type="button" class="secondary">Choose folder</button></div></label></section><section class="setup-step hidden" data-setup-step="3"><p class="eyebrow">READY TO BEGIN</p><h2>Choose your starting point</h2><label class="setup-choice"><input id="setupUseSample" type="checkbox" checked /><span><strong>Keep the sample sale</strong><small>Practice with three fictional cards, a claim, an offer, and an order.</small></span></label><label class="setup-choice"><input id="setupStartGuide" type="checkbox" checked /><span><strong>Start the guided walkthrough</strong><small>See the complete workflow after setup.</small></span></label><p class="setup-note">You can reopen both setup and the walkthrough from Help &amp; Guide.</p></section><div class="dialog-actions spread"><button id="setupBackBtn" type="button" class="secondary" disabled>Back</button><div><button id="setupSkipBtn" type="button" class="secondary">Skip for now</button><button id="setupNextBtn" type="button" class="primary">Next</button></div></div></form></dialog>
 
     <dialog id="walkthroughDialog"><form method="dialog" class="dialog-card walkthrough-card"><div class="dialog-header"><div><p class="eyebrow">GUIDED WALKTHROUGH</p><h2 id="walkthroughTitle">Welcome</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><div class="walkthrough-layout"><img id="walkthroughImage" src="assets/help-example-cards.png" alt="Feature example" /><div><span id="walkthroughCounter" class="count-pill">1 of 6</span><p id="walkthroughBody"></p><ul id="walkthroughTips"></ul><button id="walkthroughOpenBtn" type="button" class="secondary">Open this feature</button></div></div><div class="dialog-actions spread"><button id="walkthroughBackBtn" type="button" class="secondary">Back</button><div><button value="cancel" class="secondary">Close</button><button id="walkthroughNextBtn" type="button" class="primary">Next</button></div></div></form></dialog>
 

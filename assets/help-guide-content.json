@@ -25,6 +25,27 @@
       ]
     },
     {
+      "id": "beginner-mode",
+      "group": "Getting started",
+      "title": "Choose Beginner or Standard mode",
+      "summary": "Use the same CSM features with as much or as little coaching as you want.",
+      "paragraphs": [
+        "Beginner Mode is highly recommended for every first-time user. It adds short instructions to each screen, plain-English recovery tips, an image-folder preflight, a guided first real sale, and a final readiness check before Live Sale Mode. It does not create a separate kind of sale or limit what you can do.",
+        "Standard Mode keeps the full workspace but removes most repeated coaching. Important protections—such as blocking duplicate image assignments and warning before replacing existing buyer activity—remain active in both modes.",
+        "Use the Mode button in the sidebar to switch at any time. Your sales, images, buyers, and settings are unchanged when you switch."
+      ],
+      "steps": [
+        "Choose Beginner or Standard during first-run setup.",
+        "In Beginner Mode, follow the blue-green coaching bar near the top of each screen.",
+        "Hover over an unavailable button to see what must happen before it can be used.",
+        "Switch modes from the sidebar whenever you no longer need—or want more—guidance."
+      ],
+      "tips": [
+        "Beginner Mode checks readiness before the first Live Sale opening after sale details change. Orange items are optional warnings; red items must be fixed.",
+        "The buyer-conflict check appears in both modes because it protects claims and orders, not just beginners."
+      ]
+    },
+    {
       "id": "organize-images",
       "group": "Getting started",
       "title": "Organize card images",
@@ -49,6 +70,7 @@
         "The date code in a filename can be MMDDYYYY or MDDYYYY. CSM compares it with the purchase date from the spreadsheet.",
         "Front and back keys are not case-sensitive. Put the key on its own, separated by a space, hyphen, or underscore, so CSM does not confuse a letter inside a player name with an image side.",
         "One image may be used again in a later sale, but CSM will not attach the same file to two image slots or listings in the same sale.",
+        "Missing Images Workspace gathers every incomplete image slot in one screen. Image Match Review explains why each file was suggested, why approval is required, and lets you compare competing images side by side.",
         "CardStitcher is available at https://rowdysportscards.lemonsqueezy.com/checkout/buy/ce687056-a2c0-4515-9a00-7ad45e2c9358."
       ]
     },

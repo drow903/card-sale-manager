@@ -12,6 +12,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Creates a preview-only customer catalog with mobile-friendly paging, search, Player/Year/Team filters, year-first sorting, and low-to-high or high-to-low secondary card-number sorting; purchase data, buyers, and listing-copy controls are excluded.
 - Saves reusable import-column presets for spreadsheets whose headings differ from the standard template.
 - Adds a single Guided Sale Setup drop zone that accepts a spreadsheet, image files, or a complete image folder and carries them into one review workflow.
+- Adds a saved Beginner Mode with screen-by-screen coaching, plain-English recovery help, automatic image-folder preflight, guided first-sale steps, and a Live Sale readiness check; Standard Mode keeps the workspace compact while retaining critical safeguards.
 - Remembers successful spreadsheet layouts automatically, including column mapping, custom-column choices, and listing format.
 - Groups missing values, invalid prices, questionable dates, duplicates, and unusual prices in an import Fix Center with bulk corrections for repeated problems.
 - Opens with a Sale Command Center that prioritizes pending offers, address problems, unpaid orders, missing images, and ready-to-ship work.
@@ -23,6 +24,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Re-runs lookup for one card together with every card that shared its suggested image, or deliberately rechecks confirmed images across every current and past sale.
 - Prevents one image file from being attached to multiple listings within the same sale while allowing that image to be reused in a later sale.
 - Provides a guided Add Images screen for automatic folder matching, filename-free sale-order attachment, direct card-by-card drop, or ordinary manual selection.
+- Adds a dedicated Missing Images Workspace and a side-by-side Pick One review for competing matches, with clear explanations of why a file was suggested and why manual approval is needed.
 - Attaches a selected range of images in exact sale order with a numbered pairing review, count safeguards, reordering controls, and separate paired or all-fronts-then-all-backs modes.
 - Supports direct image drop onto an individual card and native drag-out to Facebook; correctly named files are helpful but never required.
 - Keeps unattached files in an Image Inbox where they can be assigned manually, removed from CSM without deleting the source file, or paired to selected cards in order.

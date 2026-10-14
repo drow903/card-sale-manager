@@ -4,7 +4,7 @@ From first claim to final shipment.
 
 FIRST RUN
 
-The setup wizard chooses your shipping defaults, primary image folder, and
+The setup wizard chooses Beginner or Standard mode, your shipping defaults, primary image folder, and
 optional seller name. Keep the fictional sample sale to follow the built-in
 guided walkthrough without using real customer information. You can reopen
 Setup and the walkthrough from Help & Guide at any time.
@@ -63,6 +63,9 @@ Take over only after the other computer has closed the file.
    folder containing your year folders. Add or exclude multiple folders at once.
    These settings carry over to every sale. Unique 100% matches are attached
    automatically; genuinely ambiguous matches appear in Image Review with the
+   reason they were suggested and the reason approval is required. Use Compare
+   images to inspect competing files side by side. Missing Images Workspace
+   gathers every card that still needs a front, back, or single image.
    card's flaws. A purchase-date code is also auto-confirmed when only one copy
    of that card has that purchase date. Same-card duplicates with the same date
    remain in review.

@@ -90,6 +90,9 @@ let portableDocument = { active: false, path: "", name: "Local workspace", readO
 let recentCsmFiles = [];
 let csmBackups = [];
 let pendingCsmConflict = null;
+let pendingBuyerConflict = null;
+let pickImageMatchKey = "";
+let bypassReadinessOnce = false;
 let catalogCloudflareConnection = { connected: false, available: true };
 // The distributed build is licensed. Start closed until the main process reports
 // the saved entitlement so startup timing can never briefly expose imports.
@@ -332,12 +335,57 @@ function applyDisplayPreferences() {
   document.documentElement.dataset.theme = state.preferences.theme;
   document.documentElement.dataset.reducedMotion = String(Boolean(state.preferences.reducedMotion));
   document.body.classList.toggle("compact-mode", Boolean(state.preferences.compact));
+  document.body.classList.toggle("beginner-mode", isBeginnerMode());
   const density = $("#densityBtn");
   if (density) density.textContent = state.preferences.compact ? "Comfortable" : "Compact";
   const theme = $("#themeBtn");
   if (theme) theme.textContent = `Theme: ${state.preferences.theme[0].toUpperCase()}${state.preferences.theme.slice(1)}`;
   const motion = $("#motionBtn");
   if (motion) motion.textContent = state.preferences.reducedMotion ? "Motion: Reduced" : "Motion: On";
+  const mode = $("#experienceModeBtn");
+  if (mode) mode.textContent = `Mode: ${isBeginnerMode() ? "Beginner" : "Standard"}`;
+  renderBeginnerCoach();
+}
+
+function isBeginnerMode() {
+  state.preferences ||= {};
+  state.preferences.experienceMode ||= "beginner";
+  return state.preferences.experienceMode === "beginner";
+}
+
+const BEGINNER_COACHING = {
+  command: ["Start here", "Use Fix next problem until the sale-preparation cards are green, then open Live Sale Mode."],
+  sale: ["Build your sale", "Import cards, attach images, and fix anything marked missing. Advanced tools are still available when you need them."],
+  live: ["Post in this order", "Drag the image into Facebook first. Then copy the listing; CSM will advance to the next card."],
+  claims: ["Record the buyer", "Choose Claim for full price or Offer when the buyer proposed a different price. CSM protects existing activity before replacing it."],
+  offers: ["Decide each offer", "Accept adds the card to the order, reject returns it to the open pool, and counter creates a ready-to-copy reply."],
+  pulling: ["Pull before packing", "Sort cards the same way they are stored, then mark each card pulled as you find it."],
+  orders: ["Finish the order", "Confirm the buyer is done shopping, choose shipping, confirm the address, and record payment."],
+  packing: ["Pack, check, ship", "Check each card as it goes into the package. Add tracking when needed, then mark the order shipped."],
+  health: ["Nothing is changed automatically", "Health Check points out possible problems. Review each item before using a repair action."],
+  help: ["You can always come back", "Search the guide by the name of a screen or task, or contact support with an anonymous diagnostic."],
+  notifications: ["Your short to-do list", "Open the most important warnings first. Snooze something only when you intentionally plan to return later."],
+  buyers: ["Reusable buyer details", "Profiles keep addresses, notes, and purchase history across sales. Deleting a sale does not delete these profiles."],
+  dashboard: ["Private seller numbers", "Purchase prices, profit, and aging stay inside CSM and never appear in customer-facing listings."],
+  catalog: ["Preview before publishing", "Only public card details and images are included. Buyer, cost, and purchase information remain private."]
+};
+
+function renderBeginnerCoach(view = uiState().activeView || "command") {
+  const coach = $("#beginnerCoach");
+  if (!coach) return;
+  let content = BEGINNER_COACHING[view];
+  const sale = activeSale();
+  if (sale?.beginnerJourney && !sale.beginnerJourney.completedAt) {
+    const missing = sale.cards.filter((card) => !cardHasRequiredImages(card, sale)).length;
+    if (!sale.cards.length) content = ["Your first step: add the cards", "Use Guided sale setup to import a spreadsheet, or Add single card if you want to start small."];
+    else if (missing) content = ["Next step: finish the images", `${missing} card${missing === 1 ? " is" : "s are"} missing an image. Open Missing Images Workspace to attach or look them up.`];
+    else if (salePreparationIssues(sale).length) content = ["Next step: clear the checklist", "Use Fix next problem in Command Center until every required sale detail is ready."];
+    else content = ["Your first sale is ready", "Open Live Sale Mode and complete the final readiness check. CSM will then guide you through posting one card at a time."];
+  }
+  coach.classList.toggle("hidden", !isBeginnerMode() || !content);
+  if (!isBeginnerMode() || !content) return;
+  coach.innerHTML = `<span>i</span><div><strong>${escapeHtml(content[0])}</strong><small>${escapeHtml(content[1])}</small></div><button type="button" class="row-action" data-dismiss-coach>Hide</button>`;
+  if (state.preferences?.hiddenCoachViews?.includes(view)) coach.classList.add("hidden");
 }
 
 function ensurePackingSettings() {
@@ -743,10 +791,20 @@ async function packageCsmWorkspace() {
 
 function toast(message) {
   const node = $("#toast");
-  node.textContent = message;
+  const text = String(message || "Something needs attention.");
+  const beginnerHelp = [
+    [/choose a primary image folder first|no primary folder/i, "Open Image lookup folders and choose the folder that contains your card images."],
+    [/already linked|already attached|already in use/i, "One image can belong to only one listing in a sale. Choose a different file for this card."],
+    [/valid price|below 0/i, "Enter a number such as 7 or 7.50. Prices cannot be negative."],
+    [/buyer name/i, "Type the buyer’s name in the Buyer field, then try again."],
+    [/license/i, "Open License in the sidebar and activate CSM before adding cards or images."],
+    [/could not load|could not finish|could not be opened/i, "Try the action once more. If it happens again, open Help & Guide and create an anonymous diagnostic report."],
+    [/select at least|no cards were selected/i, "Check the boxes beside the cards you want, then try the action again."]
+  ].find(([pattern]) => pattern.test(text));
+  node.innerHTML = `${escapeHtml(text)}${isBeginnerMode() && beginnerHelp ? `<div class="plain-error">What to do: ${escapeHtml(beginnerHelp[1])}</div>` : ""}`;
   node.classList.add("show");
   clearTimeout(node._timer);
-  node._timer = setTimeout(() => node.classList.remove("show"), 2200);
+  node._timer = setTimeout(() => node.classList.remove("show"), isBeginnerMode() && beginnerHelp ? 5200 : 2600);
 }
 
 function renumberSidebar() {
@@ -766,7 +824,7 @@ function applyLicenseEntitlements(status = {}) {
   $$('[data-owner-catalog]').forEach((element) => element.classList.toggle("hidden", !showCatalog));
   $$(".help-reference-grid > div").filter((element) => /Publish a catalog|Customer privacy/.test(element.textContent)).forEach((element) => element.classList.toggle("hidden", !showCatalog));
   if (!showCatalog && $("#catalogView")?.classList.contains("active")) showView("sale");
-  ["#importBtn", "#guidedSetupBtn", "#setupChooseSpreadsheetBtn", "#setupChooseImagesBtn", "#setupChooseImageFolderBtn", "#continueGuidedSetupBtn", "#addImagesBtn", "#imageInboxBtn", "#imageInboxAddBtn", "#imageInboxOrderedBtn", "#addSingleCardBtn", "#confirmImportBtn", "#confirmAddCardBtn", "#addFolderBtn", "#autoMatchBtn", "#forceAllImageLookupBtn", "#choosePrimaryFolderBtn", "#addLookupFolderBtn", "#addExcludedFolderBtn", "#setupChooseFolderBtn", "#workflowAutoMatchBtn", "#workflowOrderedBtn", "#workflowManualBtn", "#workflowChooseFilesBtn", "#attachOrderedImagesBtn", "#chooseOrderedImagesBtn", "#applyOrderedImagesBtn"].forEach((selector) => {
+  ["#importBtn", "#guidedSetupBtn", "#setupChooseSpreadsheetBtn", "#setupChooseImagesBtn", "#setupChooseImageFolderBtn", "#continueGuidedSetupBtn", "#addImagesBtn", "#imageInboxBtn", "#imageInboxAddBtn", "#imageInboxOrderedBtn", "#addSingleCardBtn", "#confirmImportBtn", "#confirmAddCardBtn", "#addFolderBtn", "#autoMatchBtn", "#forceAllImageLookupBtn", "#choosePrimaryFolderBtn", "#addLookupFolderBtn", "#addExcludedFolderBtn", "#setupChooseFolderBtn", "#workflowAutoMatchBtn", "#workflowOrderedBtn", "#workflowManualBtn", "#workflowChooseFilesBtn", "#attachOrderedImagesBtn", "#chooseOrderedImagesBtn", "#applyOrderedImagesBtn", "#missingImagesLookupBtn", "#preflightChooseFolderBtn", "#preflightRunLookupBtn"].forEach((selector) => {
     const button = $(selector);
     if (!button) return;
     button.disabled = !importsAllowed;
@@ -876,6 +934,30 @@ function render() {
   applyDisplayPreferences();
   renderCsmFileManager(false);
   renumberSidebar();
+  updateDisabledButtonExplanations();
+}
+
+function updateDisabledButtonExplanations() {
+  const reasons = {
+    attachOrderedImagesBtn: "Select one or more cards before attaching images in order.",
+    bundleOfferBtn: "Select at least two available cards to create a bundle offer.",
+    bulkEditBtn: "Select one or more cards before using bulk edit.",
+    deleteSelectedCardsBtn: "Select one or more cards before deleting.",
+    confirmSelectedMatchesBtn: "Select one or more image-review rows first.",
+    deleteSelectedMatchesBtn: "Select one or more image-review rows first.",
+    confirmPerfectMatchesBtn: "There are no unconfirmed, conflict-free 100% matches.",
+    applyOrderedImagesBtn: "Choose the required images, review their order, and check the confirmation box.",
+    fixNextProblemBtn: "No preparation problems remain.",
+    openFacebookPostBtn: "Paste and save the Facebook post link first."
+  };
+  Object.entries(reasons).forEach(([id, reason]) => {
+    const button = document.getElementById(id);
+    if (!button) return;
+    if (!button.disabled) { if (button.title?.includes(reason)) button.title = ""; return; }
+    if (button.title && /Activate Card Sale Manager/.test(button.title)) return;
+    button.title = isBeginnerMode() ? `Why this is unavailable: ${reason}` : reason;
+    button.setAttribute("aria-label", `${button.textContent.trim()}. ${reason}`);
+  });
 }
 
 function renderCommandCenter() {
@@ -1103,6 +1185,8 @@ function renderImages() {
   </article>`).join("") : `<div class="empty-state"><div class="empty-icon">▧</div><h3>No sale images yet</h3><p>Add images automatically, in sale order, or one card at a time.</p><button type="button" class="primary" data-empty-action="images">Add images</button></div>`;
   const unattached = unattachedSaleImages(sale).length;
   $("#imageInboxBtn").textContent = `Open image inbox${unattached ? ` (${unattached})` : ""}`;
+  const missingSlots = sale.cards.reduce((count, card) => count + requiredImageSlots(sale).filter((slot) => !imagePathFor(card, slot)).length, 0);
+  $("#missingImagesBtn").textContent = `Open Missing Images Workspace${missingSlots ? ` (${missingSlots})` : ""}`;
   hydrateThumbnails($("#imageQueue"));
 }
 
@@ -1569,6 +1653,11 @@ function showView(view) {
     toast("Catalog is available only in the private owner edition.");
     return;
   }
+  if (view === "live" && isBeginnerMode() && !bypassReadinessOnce && activeSale().beginnerReadinessApprovedSignature !== readinessSignature()) {
+    openSaleReadiness();
+    return;
+  }
+  bypassReadinessOnce = false;
   const previous = uiState().activeView || $$(".view.active")[0]?.id?.replace(/View$/, "");
   if (previous) uiState().scroll[previous] = document.querySelector("main")?.scrollTop || window.scrollY || 0;
   uiState().activeView = view;
@@ -1578,6 +1667,7 @@ function showView(view) {
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `${view}View`));
   const labels = { command: "COMMAND CENTER", sale: "SALE WORKSPACE", catalog: "CATALOG", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", pulling: "CARD PULLING", notifications: "NOTIFICATIONS", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK", help: "HELP & GUIDE" };
   $("#viewEyebrow").textContent = labels[view];
+  renderBeginnerCoach(view);
   requestAnimationFrame(() => { const main = document.querySelector("main"); if (main) main.scrollTop = Number(uiState().scroll[view] || 0); });
   saveSoon();
 }
@@ -2499,6 +2589,107 @@ async function forceAllImageLookup() {
   await autoMatchImages({ allSales: true, force: true });
 }
 
+function matchReviewExplanation(match) {
+  const top = match?.candidates?.[0];
+  if (!top) return { suggested: "CSM could not find a filename with enough matching clues.", review: "No image will be attached until you choose one manually." };
+  const clues = top.reasons.length ? top.reasons.join(", ") : "a partial filename";
+  let review = "The filename does not contain enough independent clues for safe automatic confirmation.";
+  if (match.conflict) review = match.conflictReason || "More than one card or file could use this image.";
+  else if (top.score < 45) review = "The score is too low to suggest this file automatically.";
+  else if (top.score < 100) review = "The match is useful, but it is below the 100% automatic-confirmation threshold.";
+  else if (!match.automatic) review = "The score is high, but CSM detected an ambiguity that needs your choice.";
+  return { suggested: `Suggested because it matched: ${clues}.`, review };
+}
+
+function openPickImage(matchKey) {
+  const match = pendingMatches?.review.find((item) => item.key === matchKey);
+  if (!match) return;
+  pickImageMatchKey = matchKey;
+  const explanation = matchReviewExplanation(match);
+  $("#pickImageTitle").textContent = `${match.card.ref} · ${match.card.year} ${match.card.set} ${numberLabel(match.card)} ${match.card.name}`;
+  $("#pickImageExplanation").textContent = `${explanation.suggested} ${explanation.review}`;
+  const selected = match.selected !== undefined ? match.selected : ((match.candidates[0]?.score || 0) >= 45 ? match.candidates[0].image.path : "");
+  $("#pickImageChoices").innerHTML = match.candidates.length ? match.candidates.map((candidate) => `<button type="button" class="pick-image-choice ${selected === candidate.image.path ? "selected" : ""}" data-pick-image="${escapeHtml(candidate.image.path)}"><img src="${fileUrl(candidate.image.path)}" alt="${escapeHtml(candidate.image.name || "Candidate image")}" /><span><strong>${escapeHtml(candidate.image.name || candidate.image.relativePath)}</strong><small>${Math.max(0, Math.min(100, candidate.score))}% match · ${escapeHtml(candidate.reasons.join(", ") || "partial filename")}</small><small>${escapeHtml(candidate.image.relativePath || candidate.image.path)}</small></span></button>`).join("") : `<div class="empty-state"><h3>No candidates found</h3><p>Add the image manually from the Missing Images Workspace.</p></div>`;
+  $("#pickImageDialog").showModal();
+}
+
+function choosePickImage(path) {
+  const match = pendingMatches?.review.find((item) => item.key === pickImageMatchKey);
+  if (!match) return;
+  match.selected = path || "";
+  renderMatchReview();
+  $("#pickImageDialog").close();
+  toast(path ? "Image selected. Confirm the match when you are ready." : "Card left unmatched.");
+}
+
+function missingImageRecords(query = "") {
+  const needle = String(query || "").trim().toLowerCase();
+  return activeSale().cards.flatMap((card) => requiredImageSlots(activeSale()).filter((slot) => !imagePathFor(card, slot)).map((slot) => ({ card, slot }))).filter(({ card }) => !needle || `${card.ref} ${card.year} ${card.set} ${card.number} ${card.name} ${card.notes}`.toLowerCase().includes(needle));
+}
+
+function renderMissingImages() {
+  const all = missingImageRecords();
+  const shown = missingImageRecords($("#missingImagesSearch")?.value || "");
+  const affectedCards = new Set(all.map((record) => record.card.id)).size;
+  $("#missingImagesSummary").innerHTML = `<div><strong>${affectedCards}</strong>cards incomplete</div><div><strong>${all.length}</strong>image slots missing</div><div><strong>${activeSale().cards.length - affectedCards}</strong>cards complete</div>`;
+  $("#missingImagesLookupBtn").disabled = all.length === 0;
+  $("#missingImagesLookupBtn").title = all.length ? "" : "Every card already has its required images.";
+  $("#missingImagesList").innerHTML = shown.length ? shown.map(({ card, slot }) => `<article class="missing-image-row" data-missing-card="${card.id}" data-missing-slot="${slot}"><div class="missing-image-placeholder">No ${escapeHtml(imageSlotLabel(slot).toLowerCase())}</div><div><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)}</strong><small>${escapeHtml(card.condition || "No grade")}${card.notes && !/^none$/i.test(card.notes) ? ` · ${escapeHtml(card.notes)}` : ""}</small><small>Purchased ${displayPurchaseDate(card.purchaseDate)}</small></div><div class="row-actions"><button type="button" class="secondary" data-missing-choose="${card.id}" data-missing-slot="${slot}">Choose image</button><button type="button" class="row-action" data-missing-lookup="${card.id}">Look up this card</button></div></article>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>${all.length ? "No cards match this search" : "Every card has its required images"}</h3><p>${all.length ? "Try a shorter player name, year, or card number." : "You can return to Sale Workspace or continue to Live Sale Mode."}</p></div>`;
+}
+
+function openMissingImages() {
+  $("#missingImagesSearch").value = "";
+  renderMissingImages();
+  $("#missingImagesDialog").showModal();
+}
+
+function renderImagePreflight() {
+  const settings = lookupSettings();
+  const folderCount = [settings.primaryFolder, ...settings.additionalFolders].filter(Boolean).length;
+  const indexed = Array.isArray(state.imageFolderIndex?.images) ? state.imageFolderIndex.images.length : 0;
+  const missing = missingImageRecords().length;
+  const checks = [
+    [Boolean(settings.primaryFolder), "Primary image folder", settings.primaryFolder || "No folder selected yet"],
+    [folderCount > 0, "Folders included", folderCount ? `${folderCount} folder location${folderCount === 1 ? "" : "s"} will be searched` : "Choose at least one folder"],
+    [true, "Excluded folders", settings.excludedFolders.length ? `${settings.excludedFolders.length} folder${settings.excludedFolders.length === 1 ? "" : "s"} will be ignored` : "No folders are excluded"],
+    [indexed > 0, "Saved image index", indexed ? `${indexed} images were found during the last scan` : "Run lookup once to create the image index"],
+    [missing === 0, "Cards needing images", missing ? `${missing} image slot${missing === 1 ? "" : "s"} still need a file` : "Every card is complete"]
+  ];
+  $("#imagePreflightResults").innerHTML = checks.map(([ready, label, detail]) => `<div class="readiness-item ${ready ? "ready" : "warning"}"><span>${ready ? "✓" : "!"}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></div></div>`).join("");
+  $("#preflightRunLookupBtn").disabled = !settings.primaryFolder || missing === 0;
+  $("#preflightRunLookupBtn").title = !settings.primaryFolder ? "Choose a primary folder before running lookup." : missing === 0 ? "Every card already has its required images." : "";
+}
+
+function openImagePreflight() { renderImagePreflight(); $("#imagePreflightDialog").showModal(); }
+
+function saleReadinessChecks() {
+  const sale = activeSale();
+  const available = sale.cards.filter((card) => card.status === "available" && !card.hiddenAfterCopy);
+  const missing = available.filter((card) => !cardHasRequiredImages(card, sale)).length;
+  const invalid = available.filter((card) => !String(card.name || "").trim() || !Number.isFinite(Number(card.price)) || Number(card.price) < 0).length;
+  const pendingReview = pendingMatches?.review?.filter((match) => !match.confirmed && match.sale?.id === sale.id).length || 0;
+  return [
+    { ready: available.length > 0, blocking: true, label: "Cards ready to post", detail: available.length ? `${available.length} available card${available.length === 1 ? " is" : "s are"} waiting to be posted` : "Import a card or restore an unposted available listing" },
+    { ready: invalid === 0, blocking: true, label: "Required listing details", detail: invalid ? `${invalid} cards have a missing player or invalid price` : "Player names and prices are valid" },
+    { ready: missing === 0, blocking: false, label: "Card images", detail: missing ? `${missing} cards are missing at least one required image` : "Every card has its required image files" },
+    { ready: pendingReview === 0, blocking: false, label: "Image review", detail: pendingReview ? `${pendingReview} suggested matches are still awaiting review` : "No image choices are waiting" },
+    { ready: Boolean(sale.facebookPostUrl), blocking: false, label: "Facebook post link", detail: sale.facebookPostUrl ? "A sale-post link is saved" : "Optional: add the Facebook group post link in Live Sale Mode" }
+  ];
+}
+
+function readinessSignature() { return saleReadinessChecks().map((item) => `${item.label}:${item.ready}`).join("|"); }
+
+function openSaleReadiness() {
+  const checks = saleReadinessChecks();
+  const blockers = checks.filter((item) => item.blocking && !item.ready).length;
+  const warnings = checks.filter((item) => !item.blocking && !item.ready).length;
+  $("#saleReadinessResults").innerHTML = checks.map((item) => `<div class="readiness-item ${item.ready ? "ready" : item.blocking ? "blocked" : "warning"}"><span>${item.ready ? "✓" : item.blocking ? "×" : "!"}</span><div><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.detail)}</small></div></div>`).join("");
+  $("#saleReadinessNote").textContent = blockers ? "Fix the red item before starting the sale. Orange items are warnings you can choose to continue past." : warnings ? "The sale can open, but review the orange warnings so nothing surprises you while posting." : "Everything CSM can check is ready.";
+  $("#openLiveAfterReadinessBtn").disabled = blockers > 0;
+  $("#openLiveAfterReadinessBtn").title = blockers ? "Fix the red readiness item first." : "";
+  $("#saleReadinessDialog").showModal();
+}
+
 function renderMatchReview() {
   const pending = pendingMatches.review.filter((match) => !match.confirmed).length;
   const suggested = pendingMatches.review.filter((match) => !match.confirmed && (match.candidates[0]?.score || 0) >= 45).length;
@@ -2515,13 +2706,14 @@ function renderMatchReview() {
   selectedMatchIds = new Set([...selectedMatchIds].filter((id) => validIds.has(id)));
   $("#matchReviewList").innerHTML = filtered.length ? filtered.map((match) => {
     const top = match.candidates[0];
+    const explanation = matchReviewExplanation(match);
     const selectTop = match.selected !== undefined ? Boolean(match.selected) : Boolean(top && top.score >= 45);
     const selectedPath = match.selected !== undefined ? match.selected : (selectTop ? top.image.path : "");
     return `<article class="match-row ${match.conflict ? "match-conflict" : ""}" data-match-card="${match.card.id}" data-match-key="${match.key}">
       <label class="match-select-box"><input type="checkbox" data-select-match="${match.key}" ${selectedMatchIds.has(match.key) ? "checked" : ""} /> Select</label>
       <div class="match-card-name"><strong>${escapeHtml(match.sale?.name || activeSale().name)} · ${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.year)} ${escapeHtml(match.card.set)} #${escapeHtml(match.card.number)} ${escapeHtml(match.card.name)} ${escapeHtml(duplicateInfo(match.card, match.sale || activeSale()).label)}</strong>${saleImageMode(match.sale) === "front-back" ? `<span class="status available">${imageSlotLabel(match.slot)} scan</span>` : ""}<span>Flaws: ${escapeHtml(match.card.notes && !/^none$/i.test(match.card.notes) ? match.card.notes : "None listed")}</span><span>Purchase date: ${displayPurchaseDate(match.card.purchaseDate)}</span>${match.conflict ? `<span class="match-warning">${escapeHtml(match.conflictReason || "Choose the correct image manually.")}</span>` : ""}</div>
-      <div class="candidate-picker"><img data-match-preview src="${selectedPath ? fileUrl(selectedPath) : "assets/favicon.svg"}" alt="" /><div><select data-match-select ${match.confirmed ? "disabled" : ""}><option value="">Leave unmatched</option>${match.candidates.map((candidate) => `<option value="${escapeHtml(candidate.image.path)}" ${selectedPath === candidate.image.path ? "selected" : ""}>${escapeHtml(candidate.image.relativePath)} — ${Math.max(0, Math.min(100, candidate.score))}% match</option>`).join("")}</select><div class="confidence-note">${top ? `Best clue: ${escapeHtml(top.reasons.join(", ") || "partial filename")}` : "No likely filename found"}</div></div></div>
-      <div class="match-confirm">${match.confirmed ? `<span class="status available">Confirmed</span><button type="button" class="row-action" data-reopen-match="${match.key}">Reopen</button>` : `<button type="button" class="primary" data-confirm-match="${match.key}">${selectedPath ? "Confirm match" : "Confirm no image"}</button>`}<button type="button" class="row-action" data-rematch-match="${match.card.id}">Re-run related</button></div>
+      <div class="candidate-picker"><img data-match-preview src="${selectedPath ? fileUrl(selectedPath) : "assets/favicon.svg"}" alt="" /><div><select data-match-select ${match.confirmed ? "disabled" : ""}><option value="">Leave unmatched</option>${match.candidates.map((candidate) => `<option value="${escapeHtml(candidate.image.path)}" ${selectedPath === candidate.image.path ? "selected" : ""}>${escapeHtml(candidate.image.relativePath)} — ${Math.max(0, Math.min(100, candidate.score))}% match</option>`).join("")}</select><div class="match-why"><strong>${escapeHtml(explanation.suggested)}</strong><span>Why review is needed: ${escapeHtml(explanation.review)}</span></div></div></div>
+      <div class="match-confirm">${match.confirmed ? `<span class="status available">Confirmed</span><button type="button" class="row-action" data-reopen-match="${match.key}">Reopen</button>` : `<button type="button" class="primary" data-confirm-match="${match.key}">${selectedPath ? "Confirm match" : "Confirm no image"}</button>`}${match.candidates.length > 1 ? `<button type="button" class="secondary" data-pick-match="${match.key}">Compare images</button>` : ""}<button type="button" class="row-action" data-rematch-match="${match.card.id}">Re-run related</button></div>
     </article>`;
   }).join("") : `<div class="empty-state"><h3>No matches in this filter</h3><p>Change the filter or search text to see other cards.</p></div>`;
   const visibleIds = filtered.map((match) => match.key);
@@ -2532,6 +2724,7 @@ function renderMatchReview() {
   $("#selectAllMatches").checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
   $("#selectAllMatches").indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
   $("#confirmPerfectMatchesBtn").disabled = !pendingMatches.review.some((match) => !match.confirmed && !match.conflict && (match.candidates[0]?.score || 0) >= 100);
+  updateDisabledButtonExplanations();
 }
 
 function confirmMatch(match, selectedPath = match.selected) {
@@ -2783,16 +2976,31 @@ function restoreArchivedSale(saleId) {
   toast(`${sale.name} restored to the active sale list.`);
 }
 
-function assignBuyer(cardId, buyerName, offeredPrice, claimType = "claim", claimNote = "") {
+function assignBuyer(cardId, buyerName, offeredPrice, claimType = "claim", claimNote = "", conflictConfirmed = false) {
   const card = activeSale().cards.find((item) => item.id === cardId);
-  if (unresolvedBundleForCard(card)) return toast("Manage this card through its bundle in the Offers tab.");
   const buyer = canonicalBuyerName(buyerName);
   if (!card || !buyer) return toast("Enter a buyer name first.");
+  if (unresolvedBundleForCard(card)) return toast("Manage this card through its bundle in the Offers tab.");
   const hasOffer = claimType === "offer";
   const wasAcceptedOffer = hasOffer && card.offerStatus === "accepted";
   const acceptedPrice = hasOffer ? Number(offeredPrice) : Number(card.price);
   if (hasOffer && String(offeredPrice ?? "").trim() === "") return toast("Enter the accepted offer price.");
   if (!Number.isFinite(acceptedPrice) || acceptedPrice < 0) return toast("Enter a valid price.");
+  const buyerChanged = Boolean(card.buyer && card.buyer !== buyer);
+  const supersedesOffer = !hasOffer && card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus || "pending");
+  if (!conflictConfirmed && (buyerChanged || supersedesOffer)) {
+    pendingBuyerConflict = { cardId, buyerName: buyer, offeredPrice, claimType, claimNote };
+    const current = card.buyer || "the current buyer";
+    const details = [
+      [false, "Existing activity", `${current} currently has ${card.claimType === "offer" ? `${money(card.offerPrice)} offer activity` : "a claim"} on this card`],
+      [true, "New activity", `${buyer} will receive a ${hasOffer ? `${money(acceptedPrice)} offer` : `full-price ${money(card.price)} claim`}`],
+      [!buyerChanged, "Buyer profile", buyerChanged ? `${current} will be removed from this card, but their saved buyer profile will not be deleted` : "The same buyer remains attached"]
+    ];
+    $("#buyerConflictDetails").innerHTML = details.map(([ready, label, detail]) => `<div class="readiness-item ${ready ? "ready" : "warning"}"><span>${ready ? "✓" : "!"}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></div></div>`).join("");
+    $("#confirmBuyerConflictBtn").textContent = supersedesOffer ? "Record full-price claim" : "Move card to new buyer";
+    $("#buyerConflictDialog").showModal();
+    return;
+  }
   snapshotSale(`Before assigning ${card.ref} to ${buyer}`);
   const previousBuyer = card.buyer;
   card.buyer = buyer;
@@ -3526,11 +3734,11 @@ function openWalkthrough() { walkthroughStep = 0; renderWalkthrough(); $("#walkt
 
 function renderSetupStep() {
   $$('[data-setup-step]').forEach((section, index) => section.classList.toggle("hidden", index !== setupStep));
-  $("#setupStepLabel").textContent = `Step ${setupStep + 1} of 3`; $("#setupProgress").value = setupStep + 1; $("#setupBackBtn").disabled = setupStep === 0; $("#setupNextBtn").textContent = setupStep === 2 ? "Finish setup" : "Next";
+  $("#setupStepLabel").textContent = `Step ${setupStep + 1} of 4`; $("#setupProgress").max = 4; $("#setupProgress").value = setupStep + 1; $("#setupBackBtn").disabled = setupStep === 0; $("#setupNextBtn").textContent = setupStep === 3 ? "Finish setup" : "Next";
 }
 
 function openSetupWizard() {
-  setupStep = 0; const sale = activeSale(); $("#setupSellerName").value = state.preferences?.sellerName || ""; $("#setupPwePrice").value = sale.pweShipping ?? 1; $("#setupPmwtPrice").value = sale.pmwtShipping ?? 5; $("#setupImageFolder").value = lookupSettings().primaryFolder || ""; renderSetupStep(); $("#setupWizardDialog").showModal();
+  setupStep = 0; const sale = activeSale(); $("#setupSellerName").value = state.preferences?.sellerName || ""; $("#setupPwePrice").value = sale.pweShipping ?? 1; $("#setupPmwtPrice").value = sale.pmwtShipping ?? 5; $("#setupImageFolder").value = lookupSettings().primaryFolder || ""; const mode = document.querySelector(`input[name="setupExperienceMode"][value="${isBeginnerMode() ? "beginner" : "standard"}"]`); if (mode) mode.checked = true; renderSetupStep(); $("#setupWizardDialog").showModal();
 }
 
 async function renderDetailedGuide(query = $("#guideSearch")?.value || "") {
@@ -4030,7 +4238,7 @@ function bindEvents() {
       saveSoon(); render(); renderImageInbox();
     }
   });
-  $("#workflowAutoMatchBtn").addEventListener("click", () => { $("#imageWorkflowDialog").close(); autoMatchImages(); });
+  $("#workflowAutoMatchBtn").addEventListener("click", () => { $("#imageWorkflowDialog").close(); if (isBeginnerMode()) openImagePreflight(); else autoMatchImages(); });
   $("#workflowOrderedBtn").addEventListener("click", () => openOrderedImageWorkflow());
   $("#workflowManualBtn").addEventListener("click", () => { $("#imageWorkflowDialog").close(); showView("sale"); state.filter = "missing-image"; $$("[data-filter]").forEach((button) => button.classList.toggle("active", button.dataset.filter === "missing-image")); renderListings(); toast("Drag an image file from your computer onto the matching card row."); });
   $("#workflowChooseFilesBtn").addEventListener("click", () => { $("#imageWorkflowDialog").close(); addImages("files"); });
@@ -4054,8 +4262,20 @@ function bindEvents() {
   ["dragleave", "drop"].forEach((type) => $("#orderedImageDropZone").addEventListener(type, () => $("#orderedImageDropZone").classList.remove("drag-over")));
   $("#orderedImageDropZone").addEventListener("drop", async (event) => { event.preventDefault(); await addOrderedImagePaths(await droppedImagePaths(event.dataTransfer)); });
   $("#addFolderBtn").addEventListener("click", () => addImages("folder"));
-  $("#autoMatchBtn").addEventListener("click", autoMatchImages);
+  $("#autoMatchBtn").addEventListener("click", () => { if (isBeginnerMode()) openImagePreflight(); else autoMatchImages(); });
   $("#forceAllImageLookupBtn").addEventListener("click", forceAllImageLookup);
+  $("#missingImagesBtn").addEventListener("click", openMissingImages);
+  $("#missingImagesSearch").addEventListener("input", renderMissingImages);
+  $("#missingImagesPreflightBtn").addEventListener("click", openImagePreflight);
+  $("#missingImagesLookupBtn").addEventListener("click", async () => { $("#missingImagesDialog").close(); await autoMatchImages(); });
+  $("#missingImagesList").addEventListener("click", async (event) => {
+    const choose = event.target.closest("[data-missing-choose]");
+    const lookup = event.target.closest("[data-missing-lookup]");
+    if (choose) { await chooseManualImage(choose.dataset.missingChoose, choose.dataset.missingSlot || "single"); renderMissingImages(); }
+    if (lookup) { $("#missingImagesDialog").close(); await autoMatchImages({ cardIds: [lookup.dataset.missingLookup], force: true, includeRelated: true }); }
+  });
+  $("#preflightChooseFolderBtn").addEventListener("click", async () => { const folder = await window.cardSale.chooseLookupFolder(); if (folder) { lookupSettings().primaryFolder = folder; state.imageFolderIndex = null; saveSoon(); renderFolderSettings(); renderImagePreflight(); } });
+  $("#preflightRunLookupBtn").addEventListener("click", async () => { $("#imagePreflightDialog").close(); await autoMatchImages(); });
   $("#bundleOfferBtn").addEventListener("click", openBundleOffer);
   $("#bundleOfferPrice").addEventListener("input", updateBundleOfferPreview);
   $("#createBundleOfferBtn").addEventListener("click", createBundleOffer);
@@ -4082,7 +4302,8 @@ function bindEvents() {
     const imageMode = document.querySelector('input[name="newSaleImageMode"]:checked')?.value === "front-back" ? "front-back" : "single";
     const facebookPostUrl = $("#newSaleFacebookPostUrl").value.trim(); if (facebookPostUrl && !/^https:\/\//i.test(facebookPostUrl)) return toast("Enter a complete https Facebook link or leave it blank.");
     const sale = { id: uid(), name, imageMode, facebookPostUrl, pweShipping: Number($("#newSalePweShipping").value || 0), pmwtShipping: Number($("#newSalePmwtShipping").value || 0), shippingRules: clone(ensureShippingRules(activeSale())), template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [], additionalLookupFolders: [], excludedLookupFolders: [] };
-    state.sales.push(sale); state.activeSaleId = sale.id; state.selectedBuyer = ""; resetListingView(); $("#newSaleDialog").close(); saveSoon(); render(); toast("New sale created.");
+    if (isBeginnerMode() && !state.preferences.firstRealSaleStarted) { sale.beginnerJourney = { startedAt: new Date().toISOString() }; state.preferences.firstRealSaleStarted = true; }
+    state.sales.push(sale); state.activeSaleId = sale.id; state.selectedBuyer = ""; resetListingView(); $("#newSaleDialog").close(); saveSoon(); render(); toast(sale.beginnerJourney ? "New sale created. CSM will guide you through the first one." : "New sale created."); if (sale.beginnerJourney) setTimeout(openGuidedSetup, 250);
   });
   $("#saleSelect").addEventListener("change", (event) => { state.activeSaleId = event.target.value; state.selectedBuyer = ""; resetListingView(); saveSoon(); render(); });
   $("#listingSort").addEventListener("change", (event) => { activeSale().sortMode = event.target.value; renumberCardReferences(activeSale(), { audit: false }); saveSoon(); renderListings(); });
@@ -4252,6 +4473,8 @@ function bindEvents() {
   });
   $("#matchReviewList").addEventListener("click", (event) => {
     if (!pendingMatches) return;
+    const pickKey = event.target.closest("[data-pick-match]")?.dataset.pickMatch;
+    if (pickKey) { openPickImage(pickKey); return; }
     const rematchId = event.target.dataset.rematchMatch;
     if (rematchId) { forceImageLookupForCard(rematchId); return; }
     const confirmId = event.target.dataset.confirmMatch;
@@ -4273,6 +4496,10 @@ function bindEvents() {
   $("#confirmSelectedMatchesBtn").addEventListener("click", () => confirmSelectedMatches());
   $("#confirmPerfectMatchesBtn").addEventListener("click", confirmPerfectMatches);
   $("#deleteSelectedMatchesBtn").addEventListener("click", deleteSelectedMatches);
+  $("#pickImageChoices").addEventListener("click", (event) => { const path = event.target.closest("[data-pick-image]")?.dataset.pickImage; if (path) choosePickImage(path); });
+  $("#pickImageLeaveUnmatchedBtn").addEventListener("click", () => choosePickImage(""));
+  $("#confirmBuyerConflictBtn").addEventListener("click", () => { const pending = pendingBuyerConflict; pendingBuyerConflict = null; $("#buyerConflictDialog").close(); if (pending) assignBuyer(pending.cardId, pending.buyerName, pending.offeredPrice, pending.claimType, pending.claimNote, true); });
+  $("#buyerConflictDialog").addEventListener("close", () => { if (!$("#buyerConflictDialog").open) pendingBuyerConflict = null; });
   $("#buyerList").addEventListener("click", (event) => { const button = event.target.closest("[data-buyer]"); if (button) { state.selectedBuyer = button.dataset.buyer; renderOrders(); } });
   $("#orderSearch").addEventListener("input", (event) => { orderDeskSettings().query = event.target.value; saveSoon(); renderOrders(); });
   $("#orderStatusFilter").addEventListener("change", (event) => { orderDeskSettings().status = event.target.value; saveSoon(); renderOrders(); });
@@ -4423,6 +4650,7 @@ function bindEvents() {
   $("#applyPresetBtn").addEventListener("click", applyPreset);
   $("#deletePresetBtn").addEventListener("click", () => { const id = $("#presetSelect").value; const index = presets().findIndex((item) => item.id === id); if (index >= 0) { presets().splice(index, 1); saveSoon(); renderPresetDialog(); toast("Preset deleted."); } });
   $("#shortcutsBtn").addEventListener("click", () => $("#shortcutsDialog").showModal());
+  $("#experienceModeBtn").addEventListener("click", () => { state.preferences.experienceMode = isBeginnerMode() ? "standard" : "beginner"; state.preferences.hiddenCoachViews = []; applyDisplayPreferences(); saveSoon(); toast(`${isBeginnerMode() ? "Beginner" : "Standard"} mode is now active.`); });
   $("#closeQuickEditBtn").addEventListener("click", closeQuickEdit);
   $("#saveQuickEditBtn").addEventListener("click", saveQuickEdit);
   $("#quickEditDrawer").addEventListener("input", (event) => { if (event.target.matches("input, textarea")) updateQuickEditPreview(); });
@@ -4436,7 +4664,9 @@ function bindEvents() {
   $("#setupChooseFolderBtn").addEventListener("click", async () => { const folder = await window.cardSale.chooseLookupFolder(); if (folder) $("#setupImageFolder").value = folder; });
   $("#setupBackBtn").addEventListener("click", () => { setupStep = Math.max(0, setupStep - 1); renderSetupStep(); });
   $("#setupSkipBtn").addEventListener("click", () => { state.preferences.setupCompleted = true; saveSoon(); $("#setupWizardDialog").close(); });
-  $("#setupNextBtn").addEventListener("click", () => { if (setupStep < 2) { setupStep += 1; return renderSetupStep(); } const firstSetup = !state.preferences.setupCompleted; state.preferences.sellerName = $("#setupSellerName").value.trim(); activeSale().pweShipping = Number($("#setupPwePrice").value || 0); activeSale().pmwtShipping = Number($("#setupPmwtPrice").value || 0); const folder = $("#setupImageFolder").value.trim(); if (folder) lookupSettings().primaryFolder = folder; if (state.preferences.sellerName) { ensurePackingSettings().brandName = state.preferences.sellerName; ensurePweLabelSettings().returnName ||= state.preferences.sellerName; } if (firstSetup && !$("#setupUseSample").checked) { activeSale().name = "My first sale"; activeSale().cards = []; activeSale().orders = {}; activeSale().images = []; } state.preferences.setupCompleted = true; saveSoon(); $("#setupWizardDialog").close(); render(); showView("command"); toast("Setup complete. Your defaults are saved locally."); if ($("#setupStartGuide").checked) setTimeout(openWalkthrough, 250); });
+  $("#setupNextBtn").addEventListener("click", () => { if (setupStep < 3) { setupStep += 1; return renderSetupStep(); } const firstSetup = !state.preferences.setupCompleted; state.preferences.experienceMode = document.querySelector('input[name="setupExperienceMode"]:checked')?.value || "beginner"; state.preferences.hiddenCoachViews = []; state.preferences.sellerName = $("#setupSellerName").value.trim(); activeSale().pweShipping = Number($("#setupPwePrice").value || 0); activeSale().pmwtShipping = Number($("#setupPmwtPrice").value || 0); const folder = $("#setupImageFolder").value.trim(); if (folder) lookupSettings().primaryFolder = folder; if (state.preferences.sellerName) { ensurePackingSettings().brandName = state.preferences.sellerName; ensurePweLabelSettings().returnName ||= state.preferences.sellerName; } if (firstSetup && !$("#setupUseSample").checked) { activeSale().name = "My first sale"; activeSale().cards = []; activeSale().orders = {}; activeSale().images = []; } state.preferences.setupCompleted = true; saveSoon(); $("#setupWizardDialog").close(); render(); showView("command"); toast("Setup complete. Your defaults are saved locally."); if ($("#setupStartGuide").checked) setTimeout(openWalkthrough, 250); });
+  $("#openLiveAfterReadinessBtn").addEventListener("click", () => { activeSale().beginnerReadinessApprovedSignature = readinessSignature(); if (activeSale().beginnerJourney && !activeSale().beginnerJourney.completedAt) activeSale().beginnerJourney.completedAt = new Date().toISOString(); saveSoon(); $("#saleReadinessDialog").close(); bypassReadinessOnce = true; showView("live"); });
+  $("#beginnerCoach").addEventListener("click", (event) => { if (!event.target.closest("[data-dismiss-coach]")) return; const view = uiState().activeView || "command"; state.preferences.hiddenCoachViews ||= []; if (!state.preferences.hiddenCoachViews.includes(view)) state.preferences.hiddenCoachViews.push(view); saveSoon(); renderBeginnerCoach(view); });
   $("#walkthroughBackBtn").addEventListener("click", () => { walkthroughStep = Math.max(0, walkthroughStep - 1); renderWalkthrough(); });
   $("#walkthroughNextBtn").addEventListener("click", () => { const steps = activeWalkthroughSteps(); if (walkthroughStep >= steps.length - 1) return $("#walkthroughDialog").close(); walkthroughStep += 1; renderWalkthrough(); });
   $("#walkthroughOpenBtn").addEventListener("click", () => { const view = activeWalkthroughSteps()[walkthroughStep].view; $("#walkthroughDialog").close(); showView(view); });
@@ -4556,6 +4786,7 @@ async function init() {
     state.importPresets ||= [];
     state.importMemories ||= {};
     state.preferences.setupCompleted ??= true;
+    state.preferences.experienceMode ||= "standard";
     historicalSales().forEach((sale) => {
       if (!sale.template || legacyTemplates.has(sale.template)) sale.template = DEFAULT_TEMPLATE;
       sale.pweShipping ??= 1;
@@ -4620,6 +4851,7 @@ async function init() {
     ]).sort((a, b) => a.at.localeCompare(b.at));
   }
   state.preferences ||= { fontScale: 1, compact: false, theme: "system", reducedMotion: false };
+  state.preferences.experienceMode ||= firstLaunch ? "beginner" : "standard";
   cloudflareCatalogSettings();
   state.teamMatchMemory ||= {};
   state.teamLookupCache ||= {};

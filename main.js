@@ -678,9 +678,15 @@ function createWindow() {
     mainWindow.webContents.once("did-finish-load", async () => {
       await new Promise((resolve) => setTimeout(resolve, 2400));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
-      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder", "image-workflow"].find((view) => captureName.includes(view)) || "");
+      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["beginner-setup", "missing-images", "sale-readiness", "dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder", "image-workflow"].find((view) => captureName.includes(view)) || "");
       if (captureView && captureView !== "setup") await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item) => item.close())");
-      if (captureView === "image-workflow") {
+      if (captureView === "beginner-setup") {
+        await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); document.querySelectorAll('[data-setup-step]').forEach((section,index)=>section.classList.toggle('hidden',index!==1)); document.querySelector('#setupStepLabel').textContent='Step 2 of 4'; document.querySelector('#setupProgress').value=2; document.querySelector('#setupBackBtn').disabled=false; document.querySelector('#setupWizardDialog').setAttribute('open',''); true");
+      } else if (captureView === "missing-images") {
+        await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); openMissingImages()");
+      } else if (captureView === "sale-readiness") {
+        await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); openSaleReadiness()");
+      } else if (captureView === "image-workflow") {
         await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; currentLicense={configured:false,licensed:true,owner:false,catalogVisible:false}; applyLicenseEntitlements(currentLicense); document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); document.querySelector('#imageWorkflowDialog').showModal()");
       } else if (captureView === "guided-setup") {
         await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; currentLicense={configured:false,licensed:true,owner:false,catalogVisible:false}; applyLicenseEntitlements(currentLicense); openGuidedSetup()");
