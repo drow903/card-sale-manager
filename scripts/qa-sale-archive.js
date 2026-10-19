@@ -4,8 +4,9 @@ const vm = require("vm");
 const source = fs.readFileSync("renderer.js", "utf8");
 
 function functionSource(name) {
-  const start = source.indexOf(`function ${name}(`);
+  let start = source.indexOf(`function ${name}(`);
   if (start < 0) throw new Error(`Missing function: ${name}`);
+  if (source.slice(Math.max(0, start - 6), start) === "async ") start -= 6;
   const brace = source.indexOf("{", start);
   let depth = 0;
   for (let index = brace; index < source.length; index += 1) {
@@ -38,6 +39,7 @@ const context = vm.createContext({
   String,
   Set,
   window: { confirm: () => true },
+  confirmDestructive: async () => true,
   uid: () => "replacement",
   saveSoon: () => {},
   render: () => {},
@@ -50,13 +52,14 @@ const context = vm.createContext({
   else vm.runInContext(functionSource(name), context);
 });
 
-vm.runInContext("deleteActiveSale()", context);
-if (state.sales.some((sale) => sale.id === closed.id)) throw new Error("Deleted sale remained in the active sale list.");
-if (state.archivedSales.length !== 1 || state.archivedSales[0].id !== closed.id) throw new Error("Deleted sale was not preserved in archived history.");
-const history = vm.runInContext('buyerHistory("Alex")', context);
-if (history.cards.length !== 1 || history.spent !== 12) throw new Error("Archived sale disappeared from buyer history.");
-if (undoStack[0]?.archivedSaleId !== closed.id) throw new Error("Archive-aware undo metadata was not recorded.");
-vm.runInContext('restoreArchivedSale("closed-sale")', context);
-if (!state.sales.some((sale) => sale.id === closed.id) || state.archivedSales.length) throw new Error("Archived sale could not be restored to the active list.");
-
-console.log(JSON.stringify({ activeSaleRemoved: true, archivedRecordPreserved: true, buyerHistoryPreserved: true, archiveRestorable: true }));
+(async () => {
+  await vm.runInContext("deleteActiveSale()", context);
+  if (state.sales.some((sale) => sale.id === closed.id)) throw new Error("Deleted sale remained in the active sale list.");
+  if (state.archivedSales.length !== 1 || state.archivedSales[0].id !== closed.id) throw new Error("Deleted sale was not preserved in archived history.");
+  const history = vm.runInContext('buyerHistory("Alex")', context);
+  if (history.cards.length !== 1 || history.spent !== 12) throw new Error("Archived sale disappeared from buyer history.");
+  if (undoStack[0]?.archivedSaleId !== closed.id) throw new Error("Archive-aware undo metadata was not recorded.");
+  vm.runInContext('restoreArchivedSale("closed-sale")', context);
+  if (!state.sales.some((sale) => sale.id === closed.id) || state.archivedSales.length) throw new Error("Archived sale could not be restored to the active sale list.");
+  console.log(JSON.stringify({ activeSaleRemoved: true, archivedRecordPreserved: true, buyerHistoryPreserved: true, archiveRestorable: true }));
+})().catch((error) => { console.error(error); process.exitCode = 1; });

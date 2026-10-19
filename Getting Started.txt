@@ -39,6 +39,31 @@ on another computer, CSM automatically saves a conflict copy and offers three
 choices: stay read-only, save the local work as a new file, or take over editing.
 Take over only after the other computer has closed the file.
 
+VERSION 1.9 WORKSPACE TIPS
+
+Claims Desk now uses the full available height. The card table and Recent
+Claims scroll separately. Collapse Recent Claims or use its width slider when
+you need more table space; CSM remembers the setting. Alt+Up and Alt+Down move
+between the same field on neighboring claim rows, and Enter saves the row.
+
+The Facebook sale link saved during setup is available from Command Center,
+Live Sale Mode, Claims Desk, and Buyer Orders. Live Sale Mode shows the exact
+filename under each image and can copy it, copy the full path, reveal the file,
+open related-image review, or remove the association and rematch it.
+
+Address Review is local and advisory. It checks city/state/ZIP layout, state
+abbreviations, ZIP length, duplicate lines, PO boxes, shared addresses, and
+changes from a buyer's previous address. Always confirm the final address with
+the buyer.
+
+Performance mode defaults to Auto and helps very large sales avoid rendering
+off-screen rows and cards until needed. Cycle Auto, On, and Off from the
+sidebar if you are troubleshooting an older computer.
+
+Archived Sale Records can permanently remove an empty mistake or unwanted
+record. CSM shows exact impact counts, leaves buyer profiles and source images
+alone, and creates a complete recovery backup before it deletes the record.
+
 1. Double-click Card Sale Manager.exe.
 2. Choose New sale and give the sale a name.
 3. Choose Guided sale setup when you have both a spreadsheet and images. Drop
@@ -64,11 +89,16 @@ Take over only after the other computer has closed the file.
    These settings carry over to every sale. Unique 100% matches are attached
    automatically; genuinely ambiguous matches appear in Image Review with the
    reason they were suggested and the reason approval is required. Use Compare
-   images to inspect competing files side by side. Missing Images Workspace
+   images to inspect competing files side by side. Related-image review shows
+   complete file names, paths, purchase-date decisions, and every candidate for
+   the duplicate group. You can drop the correct file onto a row, remove a bad
+   association without deleting the source image, and re-run the whole group.
+   Missing Images Workspace
    gathers every card that still needs a front, back, or single image.
-   card's flaws. A purchase-date code is also auto-confirmed when only one copy
-   of that card has that purchase date. Same-card duplicates with the same date
-   remain in review.
+   A purchase-date code is also auto-confirmed when only one copy of that card
+   has that purchase date. A valid but different filename date is rejected, not
+   merely given a lower score. Same-card duplicates with the same date use their
+   final sequence number and remain in review if more than one assignment is safe.
 7. For filename-free batch attachment, select cards with their checkboxes. Use
    Shift-click or Select range when the cards are continuous, then choose Attach
    images in order. Select the image files in the same order the cards appear in

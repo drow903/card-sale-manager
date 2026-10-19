@@ -19,12 +19,14 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Adds sale-preparation badges, grouped Fix Center review, and a Fix next problem action for incomplete card data, images, and optional teams.
 - Uses a complete Card Sale Manager identity across the Windows icon, sidebar, light and dark themes, onboarding, walkthrough, Help guide, and default packing-slip design.
 - Formats each card into a copy-ready sale listing.
-- Matches local images using year folders, player names, card numbers, five- to eight-digit purchase-date codes (including `MMDDYY` such as `091326`), and duplicate sequence numbers.
+- Matches local images using year folders, player names, card numbers, six- to eight-digit purchase-date codes (including `MMDDYY` such as `091326`), and duplicate sequence numbers.
 - Auto-confirms a purchase-date filename match when that date identifies only one copy of the card; duplicate same-date copies still require review.
+- Hard-rejects an image when its valid filename date conflicts with the card purchase date, keys remembered matches by card, date, and image side, and assigns duplicate groups one-to-one instead of greedily reusing the strongest file.
 - Re-runs lookup for one card together with every card that shared its suggested image, or deliberately rechecks confirmed images across every current and past sale.
 - Prevents one image file from being attached to multiple listings within the same sale while allowing that image to be reused in a later sale.
 - Provides a guided Add Images screen for automatic folder matching, filename-free sale-order attachment, direct card-by-card drop, or ordinary manual selection.
 - Adds a dedicated Missing Images Workspace and a side-by-side Pick One review for competing matches, with clear explanations of why a file was suggested and why manual approval is needed.
+- Expands related-image review with complete filenames, paths, date-conflict explanations, drag-and-drop replacement, remove-and-rematch controls, and safe group confirmation.
 - Attaches a selected range of images in exact sale order with a numbered pairing review, count safeguards, reordering controls, and separate paired or all-fronts-then-all-backs modes.
 - Supports direct image drop onto an individual card and native drag-out to Facebook; correctly named files are helpful but never required.
 - Keeps unattached files in an Image Inbox where they can be assigned manually, removed from CSM without deleting the source file, or paired to selected cards in order.
@@ -54,14 +56,19 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Protects cloud edits with automatic conflict copies and a takeover screen showing the other device, activity time, and revisions.
 - Pins, reveals, removes, and clearly marks unavailable entries in the recent CSM file list.
 - Includes Live Sale Mode with posted-card progress, an optional saved Facebook post link, and an editable Sale Reply Library.
+- Shows each attached filename in Live Sale Mode with actions to copy the name or path, reveal the file, open related-image review, or remove and rematch it.
+- Keeps the saved Facebook sale link one click away from Command Center, Live Sale Mode, Claims Desk, and Buyer Orders.
+- Gives Claims Desk a full-height independently scrolling table and activity panel, sticky controls, keyboard row navigation, and saved activity-panel size/collapse preferences.
+- Adds an automatic or manually controlled large-sale performance mode using deferred off-screen rendering, plus a cancel control for long image-folder scans.
 - Provides sale closing, carryover, health-check, version restore, and undo workflows.
 - Preserves removed sales in an archived-records area so card, buyer, order, and audit history remain available and the sale can be restored later.
+- Allows a deliberately confirmed permanent deletion from Archived Sale Records, shows exact impact counts, preserves buyer profiles and image files, and creates a full recovery backup first.
 - Explains the exact effect of card, buyer-profile, image-inbox, and sale removal before confirming destructive actions.
 - Tracks private profit and inventory aging information with sortable profit columns.
 - Stores buyer profiles, tags, notes, purchase patterns, and repeat-buyer alerts.
 - Keeps buyer profiles until the user explicitly deletes them; updates and startup cleanup never remove profiles automatically.
 - Avoids creating permanent buyer profiles for pending offers; profiles begin with an accepted claim or offer, an order, or an intentional manual save.
-- Remembers buyer aliases and address history, and flags missing, incomplete, or duplicate mailing addresses.
+- Remembers buyer aliases and address history, and flags missing, incomplete, changed, duplicate, invalid-state, malformed ZIP, duplicate-line, and PO-box mailing-address concerns.
 - Generates editable sale-introduction posts from the current sale and saved shipping settings.
 - Includes a Packing Slip Studio with saved branded templates, logos, custom colors and messages, local QR codes, links, card thumbnails, configurable sections, live previews, and letter/half-sheet/4×6/compact layouts.
 - Prints filtered buyer slips in one job, exports combined PDFs, tracks successful prints and reprints, and can add a shipping-label page.

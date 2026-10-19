@@ -21,7 +21,7 @@ const image = { path: "C:\\Cards\\1959\\Mantle 9182025.jpg", relativePath: "1959
 const state = { activeSaleId: "sale-a", sales: [{ id: "sale-a", name: "Current", cards: [card], images: [] }] };
 const context = vm.createContext({ state, Date, Set, String, Number, Boolean, Array, Object, console, uid: () => "image-id", toast: () => {} });
 [
-  "activeSale", "normalizeMatchText", "normalizedCardKey", "duplicateInfo", "normalizePurchaseDate",
+  "activeSale", "normalizeMatchText", "normalizedCardKey", "validDateCode", "duplicateInfo", "matchingDuplicateInfo", "normalizePurchaseDate",
   "saleImageMode", "requiredImageSlots", "imagePathFor", "setImagePathFor", "imageMatchKey", "cardImagePaths", "imageSide",
   "cardLastName", "imageDateCodes", "imageSequenceNumber", "allCardRecords", "scoreImage",
   "proposedImageMatch", "imageOwner", "attachImage"
