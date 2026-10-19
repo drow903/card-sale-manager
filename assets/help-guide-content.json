@@ -293,7 +293,7 @@
       "title": "Sale Workspace",
       "summary": "Manage every listing, image, custom field, order, and bulk change in the active sale.",
       "paragraphs": [
-        "Sale Workspace is the main editing screen. Search and filter cards, copy individual listings, change images, select several rows, build bundles, bulk edit, review teams, carry over unsold cards, and close the sale.",
+        "Sale Workspace is the main editing screen. Search and filter cards, copy individual listings, change images, select several rows, build bundles, bulk edit, review teams, carry over unsold cards, and close the sale. Performance mode defaults to Auto and turns on deferred off-screen rendering for very large sales; use the sidebar button to force it on or off when troubleshooting. Long image-folder scans can be canceled from the real progress display without attaching partial matches.",
         "The Post queue follows listing order. Copying listing text hides only the listing. Dragging an image hides only the image. Ctrl+Z restores the most recently hidden item.",
         "Each listing shows a preparation badge such as Ready, Missing image, Image needs review, Price needs review, or Team not set. These badges use the same checklist as Command Center and Fix Center.",
         "Columns lets you simplify the table. Selection buttons can target a continuous range, visible rows, every filtered result, or the entire sale. Shift-clicking card checkboxes also selects a continuous range. Clicking a card title opens its detail drawer. Card numbers with letters, dashes, prefixes, and suffixes are kept intact and sorted naturally.",
@@ -312,7 +312,8 @@
       "paragraphs": [
         "Live Sale Mode shows the next available, uncopied listing. Use the arrow buttons or keyboard controls to move through cards.",
         "Drag the image first. After Facebook attaches it, copy and paste the listing. Copying advances CSM to the next card.",
-        "The top meter shows how much of the complete sale has been posted. The optional Facebook link opens the saved group post, and Sale replies stores reusable claim, backup, offer, and still-shopping messages."
+        "The top meter shows how much of the complete sale has been posted. The optional Facebook link opens the saved group post from Live Sale Mode, Command Center, Claims Desk, or Buyer Orders, and Sale replies stores reusable claim, backup, offer, and still-shopping messages.",
+        "The full image filename appears below each front, back, or single image. Use its actions to copy the filename or full path, reveal the file in its folder, open related-image review, or remove a bad association and rematch it. Removing an association never deletes the original file."
       ]
     },
     {
@@ -322,7 +323,8 @@
       "summary": "Assign a buyer, choose claim or offer, and keep a timestamped history.",
       "paragraphs": [
         "Every sale card appears automatically. A claim uses the listed price. An offer stores the proposed price and waits for a decision in Offers.",
-        "Clicking recent activity jumps to the related card. Use Clear when an assignment was entered by mistake or when a buyer backs out before an agreement is final."
+        "Clicking recent activity jumps to the related card. Use Clear when an assignment was entered by mistake or when a buyer backs out before an agreement is final.",
+        "The card table and Recent claims panel now fill the available window and scroll independently. Collapse Recent claims or adjust its width when you want more room; CSM remembers that choice. Press Alt+Up or Alt+Down while editing a row to move to the same field on the previous or next card, and press Enter to save that row."
       ]
     },
     {
@@ -351,7 +353,7 @@
       "title": "Buyer Orders",
       "summary": "Confirm totals, shipping, addresses, payment, and buyer messages.",
       "paragraphs": [
-        "The buyer list scrolls separately and can be filtered by payment, packing, shipping, address, or attention status. The selected order shows images, filenames, accepted prices, totals, notes, and buyer history.",
+        "The buyer list scrolls separately and can be filtered by payment, packing, shipping, address, or attention status. The selected order shows images, filenames, accepted prices, totals, notes, and buyer history. Address review warns about missing city/state/ZIP information, invalid state abbreviations, duplicate lines, PO boxes, shared addresses, and changes from a buyer's previously saved address.",
         "Open Shipping rules to change the automatic PMWT thresholds. CSM explains exactly which card-count or value rule caused a PMWT recommendation. You can still override it.",
         "Use full buyer names where possible and save alternate Facebook names as aliases rather than creating duplicate profiles."
       ]
@@ -406,7 +408,8 @@
       "paragraphs": [
         "Removing a sale moves its protected record here. Buyer profiles, purchase history, card details, and reporting totals continue to use the archived data.",
         "Before removing a sale or card, CSM explains exactly what will disappear and what will remain. Removing something from CSM never deletes the original image file from the computer.",
-        "Restore a sale when you need it back in the active-sale menu."
+        "Restore a sale when you need it back in the active-sale menu.",
+        "Delete permanently is intended for empty mistakes or records you deliberately no longer need. CSM shows the exact card, sold-card, buyer, and payment/order impact, preserves buyer profiles and image files, and refuses to continue unless it can create a full local recovery backup first."
       ]
     },
     {

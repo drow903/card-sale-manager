@@ -202,11 +202,21 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .empty-icon { font-size: 35px; color: var(--navy); }
 .hidden { display: none !important; }
 
-.claims-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; }
-.claim-list-panel { position: sticky; top: 18px; max-height: calc(100vh - 74px); display: flex; flex-direction: column; overflow: hidden; }
+.claims-layout { display: grid; grid-template-columns: minmax(0, 1fr) var(--claim-activity-width, 330px); gap: 18px; height: calc(100vh - 172px); min-height: 480px; }
+.claim-list-panel, .claim-activity-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .claim-list-panel .toolbar { position: sticky; top: 0; z-index: 4; background: var(--panel); flex: 0 0 auto; }
-.claim-table-wrap { min-height: 0; height: 520px; flex: 1 1 auto; }
+.claim-table-wrap { min-height: 0; height: auto; flex: 1 1 auto; overflow: auto; }
 .claim-table-wrap thead th { top: 0; z-index: 3; box-shadow: 0 1px 0 var(--border); }
+.claim-activity-panel .timeline { min-height: 0; flex: 1 1 auto; overflow: auto; }
+.claim-panel-controls { display: flex; align-items: center; gap: 7px; }
+.claim-panel-controls input[type="range"] { width: 90px; }
+.claims-layout.activity-collapsed { grid-template-columns: minmax(0, 1fr) 58px; }
+.claims-layout.activity-collapsed .claim-activity-panel .panel-header > div:first-child,
+.claims-layout.activity-collapsed .claim-activity-panel .timeline { display: none; }
+.claims-layout.activity-collapsed .claim-panel-controls input { display: none; }
+.claims-layout.activity-collapsed .claim-activity-panel .panel-header { padding: 10px; justify-content: center; }
+.claims-layout.activity-collapsed #toggleClaimActivityBtn { writing-mode: vertical-rl; min-height: 110px; }
+.claim-row-active { box-shadow: inset 4px 0 0 var(--green); background: color-mix(in srgb, var(--green) 7%, transparent); }
 .buyer-assignment { width: 170px; }
 .claim-note-input { width: 170px; margin-top: 5px; font-size: 11px; }
 .offer-input { width: 105px; }
@@ -449,6 +459,13 @@ dialog:has(.large) { width: min(850px, calc(100% - 32px)); }
 .live-image img { max-width: 100%; max-height: 500px; object-fit: contain; border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.16); cursor: grab; }
 .live-scan strong { color: var(--ink); }
 .live-scan small, .live-scan > p { color: var(--muted); }
+.live-file-meta { min-width: 0; display: grid; gap: 6px; width: 100%; }
+.live-file-name { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink) !important; font-weight: 800; }
+.live-file-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+.live-file-actions button { font-size: 11px; padding: 5px 8px; }
+.performance-mode tbody tr, .performance-mode .image-card, .performance-mode .timeline-item { content-visibility: auto; contain-intrinsic-size: auto 76px; }
+.performance-indicator { color: var(--green); font-weight: 800; }
+.progress-caption { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .live-copy { padding: 54px; background: var(--panel); color: var(--ink); display: grid; align-content: center; gap: 18px; }
 .live-copy h2 { font-size: 34px; margin: 0; }
 .live-copy pre { white-space: pre-wrap; padding: 20px; border-radius: 10px; background: var(--blue-soft); color: var(--ink); font: 18px/1.5 Consolas, monospace; }
@@ -686,6 +703,9 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; background: var
   .sale-switcher label, .sale-switcher select, .sale-switcher button, .save-status span:last-child { display: none; }
   main { padding: 0 18px 30px; }
   .claims-layout, .orders-layout { grid-template-columns: 1fr; }
+  .claims-layout { height: auto; min-height: 0; }
+  .claim-list-panel { height: min(70vh, 720px); }
+  .claim-activity-panel { height: min(45vh, 460px); }
   .buyer-list-panel { position: relative; top: auto; height: min(460px, 60vh); }
   .dashboard-grid, .live-layout, .profile-layout { grid-template-columns: 1fr; }
   .stats { grid-template-columns: repeat(2, 1fr); }

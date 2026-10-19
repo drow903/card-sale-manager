@@ -36,6 +36,7 @@ let allowWindowClose = false;
 let closeFallbackTimer = null;
 let saveQueue = Promise.resolve();
 let activeCsmDocument = null;
+const cancelledImageScans = new Set();
 const csmInstanceId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 let pendingCsmPath = process.argv.find((value) => /\.csm$/i.test(String(value || ""))) || "";
 
@@ -698,7 +699,7 @@ function createWindow() {
         await mainWindow.webContents.executeJavaScript("autoMatchImages()");
         await new Promise((resolve) => setTimeout(resolve, 2500));
       } else if (captureView === "claims") {
-        await mainWindow.webContents.executeJavaScript("showView('claims')");
+        await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); showView('claims')");
       } else if (captureView === "offers-accept") {
         await mainWindow.webContents.executeJavaScript("const card = activeSale().cards.find((item) => item.offerStatus === 'pending'); acceptOffer(card?.id); if (!card || card.offerStatus !== 'accepted' || !cardsForBuyer(card.buyer).includes(card)) throw new Error('Offer acceptance QA failed'); showView('orders')");
       } else if (captureView === "offers-counter") {
@@ -1255,6 +1256,12 @@ app.whenReady().then(() => {
     if (!value || !path.isAbsolute(value) || !fs.existsSync(value)) return "Folder not found.";
     return shell.openPath(value);
   });
+  ipcMain.handle("app:show-file", async (_event, filePath) => {
+    const value = String(filePath || "");
+    if (!value || !path.isAbsolute(value) || !fs.existsSync(value)) return false;
+    shell.showItemInFolder(value);
+    return true;
+  });
   ipcMain.handle("tracking:open", async (_event, target) => {
     const value = String(target || ""); let parsed;
     try { parsed = new URL(value); } catch { return false; }
@@ -1342,6 +1349,9 @@ app.whenReady().then(() => {
 
   ipcMain.handle("images:scan-folder", async (event, input) => {
     if (!paidAllowed()) return [];
+    const senderId = event.sender.id;
+    cancelledImageScans.delete(senderId);
+    const canceled = () => cancelledImageScans.has(senderId) || event.sender.isDestroyed();
     const folders = (typeof input === "string" ? [input] : input?.folders || []).filter(Boolean);
     const excludedFolders = (typeof input === "string" ? [] : input?.excludedFolders || [])
       .map((folder) => path.resolve(folder).toLowerCase());
@@ -1358,6 +1368,7 @@ app.whenReady().then(() => {
     const pending = folders.filter((folder) => fs.existsSync(folder) && !isExcluded(folder)).map((folder) => ({ folder, root: folder }));
     event.sender.send("images:scan-progress", { phase: "counting", directoriesFound: pending.length, percent: 0 });
     while (pending.length) {
+      if (canceled()) { cancelledImageScans.delete(senderId); return found; }
       const current = pending.shift();
       if (isExcluded(current.folder)) continue;
       directories.push(current);
@@ -1370,6 +1381,7 @@ app.whenReady().then(() => {
     }
     const totalFolders = directories.length;
     for (let index = 0; index < directories.length; index += 1) {
+      if (canceled()) { cancelledImageScans.delete(senderId); return found; }
       const current = directories[index];
       const entries = await fs.promises.readdir(current.folder, { withFileTypes: true });
       for (const entry of entries) {
@@ -1395,8 +1407,10 @@ app.whenReady().then(() => {
       });
     }
     event.sender.send("images:scan-progress", { phase: "scanned", foldersScanned: totalFolders, totalFolders, found: found.length, percent: 60 });
+    cancelledImageScans.delete(senderId);
     return found;
   });
+  ipcMain.handle("images:cancel-scan", (event) => { cancelledImageScans.add(event.sender.id); return true; });
 
   ipcMain.handle("file:start-drag", (event, filePath) => {
     if (!paidAllowed()) return false;

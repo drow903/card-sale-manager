@@ -42,6 +42,7 @@
           <button id="csmFileBtn" class="sidebar-link full">Portable CSM file</button>
           <button id="shortcutsBtn" class="sidebar-link full">Keyboard shortcuts</button>
           <button id="experienceModeBtn" class="sidebar-link full">Mode: Beginner</button>
+          <button id="performanceModeBtn" class="sidebar-link full">Performance: Auto</button>
           <button id="downloadTemplateBtn" class="sidebar-link full">Download import template</button>
           <button id="openDataFolderBtn" class="sidebar-link full">Open data folder</button>
           <button id="openImageFolderBtn" class="sidebar-link full">Open image folder</button>
@@ -61,6 +62,7 @@
             <p class="brand-tagline">From first claim to final shipment.</p>
           </div>
           <div class="top-actions">
+            <button id="saleFacebookShortcutBtn" class="secondary hidden" title="Open the Facebook post saved for this sale">Open Facebook post</button>
             <button id="contextHelpBtn" class="secondary">Help for this screen</button>
             <button id="saleIntroBtn" class="secondary">Sale introduction</button>
             <button id="guidedSetupBtn" class="secondary">Guided sale setup</button>
@@ -121,7 +123,7 @@
                 <button id="autoMatchBtn" class="primary full">Auto-match card images</button>
                 <button id="missingImagesBtn" class="secondary full">Open Missing Images Workspace</button>
                 <button id="forceAllImageLookupBtn" class="secondary full">Re-run lookup for every sale</button>
-                <div id="lookupProgress" class="task-progress hidden"><div class="progress-track"><div id="lookupProgressBar" class="progress-bar"></div></div><small id="lookupProgressText">Starting image lookup…</small></div>
+                <div id="lookupProgress" class="task-progress hidden"><div class="progress-track"><div id="lookupProgressBar" class="progress-bar"></div></div><div class="progress-caption"><small id="lookupProgressText">Starting image lookup…</small><button id="cancelImageLookupBtn" type="button" class="row-action">Cancel</button></div></div>
                 <button id="imageFolderSettingsBtn" class="secondary full">Image lookup folders</button>
                 <button id="addFolderBtn" class="secondary full">Add image folder</button>
                 <button id="imageInboxBtn" class="secondary full">Open image inbox</button>
@@ -175,8 +177,8 @@
               <datalist id="buyerNames"></datalist>
               <div class="table-wrap claim-table-wrap"><table><thead><tr><th>Ref</th><th>Card</th><th>List / cost</th><th>Claim</th><th>Offer</th><th>Offer price</th><th>Buyer</th><th></th></tr></thead><tbody id="claimRows"></tbody></table></div>
             </section>
-            <section class="panel">
-              <div class="panel-header"><div><h2>Recent claims</h2><p>Newest activity appears first.</p></div></div>
+            <section id="claimActivityPanel" class="panel claim-activity-panel">
+              <div class="panel-header"><div><h2>Recent claims</h2><p>Newest activity appears first.</p></div><div class="claim-panel-controls"><input id="claimActivityWidth" type="range" min="260" max="520" step="10" value="330" title="Recent claims width" /><button id="toggleClaimActivityBtn" class="row-action" type="button">Collapse</button></div></div>
               <div id="claimTimeline" class="timeline"></div>
             </section>
           </div>
@@ -453,7 +455,7 @@
 
     <dialog id="mergeBuyerDialog"><form method="dialog" class="dialog-card"><div class="dialog-header"><div><p class="eyebrow">BUYER PROFILES</p><h2>Merge duplicate buyers</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><p class="dialog-copy">All cards, orders, aliases, tags, addresses, and notes from the first profile will be moved into the profile you keep.</p><label>Profile to merge<select id="mergeBuyerSource"></select></label><label>Profile to keep<select id="mergeBuyerTarget"></select></label><p id="mergeBuyerPreview" class="setup-note"></p><div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirmMergeBuyerBtn" type="button" class="primary">Merge profiles</button></div></form></dialog>
 
-    <dialog id="archivedSalesDialog"><form method="dialog" class="dialog-card large"><div class="dialog-header"><div><p class="eyebrow">PROTECTED HISTORY</p><h2>Archived sale records</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><p class="dialog-copy">Sales removed from the active list remain here so buyer histories, order records, and reporting totals are not lost.</p><div id="archivedSalesList" class="csm-manager-list"></div><div class="dialog-actions"><button value="cancel" class="primary">Done</button></div></form></dialog>
+    <dialog id="archivedSalesDialog"><form method="dialog" class="dialog-card large"><div class="dialog-header"><div><p class="eyebrow">PROTECTED HISTORY</p><h2>Archived sale records</h2></div><button value="cancel" class="icon-btn" aria-label="Close">×</button></div><p class="dialog-copy">Sales removed from the active list remain here so buyer histories, order records, and reporting totals are not lost. Empty mistakes can be permanently deleted; CSM creates a backup first.</p><div id="archivedSalesList" class="csm-manager-list"></div><div class="dialog-actions"><button value="cancel" class="primary">Done</button></div></form></dialog>
 
     <dialog id="matchDialog">
       <form method="dialog" class="dialog-card match-dialog-card">
