@@ -56,6 +56,9 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Protects cloud edits with automatic conflict copies and a takeover screen showing the other device, activity time, and revisions.
 - Pins, reveals, removes, and clearly marks unavailable entries in the recent CSM file list.
 - Includes Live Sale Mode with posted-card progress, an optional saved Facebook post link, and an editable Sale Reply Library.
+- Adds an optional always-on-top Live Sale mini window that stays synced with the main app, remembers its position, supports compact and expanded views, and keeps image dragging, listing copying, navigation, and undo close at hand.
+- Creates private Visual Buyer Order cards in square, vertical, or printable Letter formats using the order's front images, customer-facing listing text, final paid prices, and the seller's Packing Slip Studio branding. Buyer names, flaws, addresses, shipping, and costs are excluded.
+- Generates 15-, 30-, or 60-second MP4 sale trailers from selected front images in vertical, square, and widescreen formats, with independently optional intro/outro slides, editable headings, saved styles, optional music and backgrounds, preview rendering, and a small CSM logo watermark.
 - Shows each attached filename in Live Sale Mode with actions to copy the name or path, reveal the file, open related-image review, or remove and rematch it.
 - Keeps the saved Facebook sale link one click away from Command Center, Live Sale Mode, Claims Desk, and Buyer Orders.
 - Gives Claims Desk a full-height independently scrolling table and activity panel, sticky controls, keyboard row navigation, and saved activity-panel size/collapse preferences.
@@ -68,7 +71,8 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Stores buyer profiles, tags, notes, purchase patterns, and repeat-buyer alerts.
 - Keeps buyer profiles until the user explicitly deletes them; updates and startup cleanup never remove profiles automatically.
 - Avoids creating permanent buyer profiles for pending offers; profiles begin with an accepted claim or offer, an order, or an intentional manual save.
-- Remembers buyer aliases and address history, and flags missing, incomplete, changed, duplicate, invalid-state, malformed ZIP, duplicate-line, and PO-box mailing-address concerns.
+- Remembers buyer aliases and address history, flags missing, incomplete, changed, duplicate, invalid-state, malformed ZIP, duplicate-line, and PO-box mailing-address concerns, and lets a seller explicitly validate a confirmed address so the same change warning does not return.
+- Keeps the Buyer Profiles directory in its own scrolling panel while the selected profile remains visible beside it.
 - Generates editable sale-introduction posts from the current sale and saved shipping settings.
 - Includes a Packing Slip Studio with saved branded templates, logos, custom colors and messages, local QR codes, links, card thumbnails, configurable sections, live previews, and letter/half-sheet/4×6/compact layouts.
 - Prints filtered buyer slips in one job, exports combined PDFs, tracks successful prints and reprints, and can add a shipping-label page.

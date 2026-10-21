@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CSM Live Sale</title>
+  <link rel="stylesheet" href="live-popout.css" />
+</head>
+<body>
+  <header><img src="assets/brand-mark.svg" alt="" /><div><strong>LIVE SALE</strong><span id="saleName">Card Sale Manager</span></div><button id="settingsBtn" title="Pop-out settings">⚙</button><button id="closeBtn" title="Close pop-out">×</button></header>
+  <section id="settings" class="settings hidden">
+    <label><input id="autoAdvance" type="checkbox" checked /> Advance after copying</label>
+    <label>Opacity <input id="opacity" type="range" min="65" max="100" value="100" /></label>
+    <button id="toggleSize" class="secondary">Compact view</button>
+  </section>
+  <main>
+    <div class="progress-summary"><strong id="postedText">0 of 0 posted</strong><span id="percentText">0%</span></div>
+    <progress id="progress" max="1" value="0"></progress>
+    <div id="content"></div>
+  </main>
+  <footer><button id="previousBtn" class="secondary">← Previous</button><button id="undoBtn" class="secondary">Undo</button><button id="nextBtn" class="secondary">Next →</button></footer>
+  <script src="live-popout.js"></script>
+</body>
+</html>

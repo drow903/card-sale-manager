@@ -385,7 +385,8 @@
       "title": "Buyer Profiles",
       "summary": "Keep addresses, aliases, tags, notes, history, and repeat-buyer interests together.",
       "paragraphs": [
-        "Profiles follow the buyer across sales. Add aliases when one person uses different Facebook display names. Tags such as Vintage, Yankees, or Set Builder make the directory easier to search.",
+        "Profiles follow the buyer across sales. The buyer directory scrolls independently so the search and selected profile stay in place. Add aliases when one person uses different Facebook display names. Tags such as Vintage, Yankees, or Set Builder make the directory easier to search.",
+        "Use Save and validate profile after confirming a changed mailing address with the buyer. That address becomes the approved address and clears the prior-address change warning; other problems such as a missing ZIP remain visible until corrected.",
         "Delete a profile when it was created by mistake, such as a rejected offer from someone who never became a customer. Historical sale records remain protected.",
         "Use Merge profiles when two names belong to the same buyer. CSM moves their card history, orders, aliases, tags, notes, and address into the profile you keep."
       ]
@@ -449,6 +450,73 @@
         "CSM saves locally as you work and shows Changes saved locally in the lower-left corner. Daily rotating backups protect recent work. Before an update, CSM creates a permanent update archive of the local workspace and any open portable file.",
         "Updates should not remove sales or buyer profiles. If the current workspace ever looks wrong, stop entering new data until you inspect the portable file, update archive, and daily backups. Restoring one copy can replace newer work, so protect the current file first.",
         "Open data folder shows the local files CSM manages. Restore earlier version returns only the active sale to an earlier snapshot. The portable-file manager handles full-workspace recovery copies."
+      ]
+    },
+    {
+      "id": "live-mini-window",
+      "group": "Creative tools",
+      "title": "Use the always-on-top Live Sale window",
+      "summary": "Keep the current card and posting controls visible over your browser.",
+      "paragraphs": [
+        "The mini window is optional. Open it from Live Sale Mode when you want the current card, image, listing, progress, navigation, and Undo to stay visible while the main CSM window is behind Facebook.",
+        "The mini window stays synced with full Live Sale Mode. Closing it does not close CSM, and minimizing the main window does not hide the mini window. CSM restores the mini window to a visible monitor if your screen arrangement changes.",
+        "Drag the image into Facebook before choosing Copy listing. CSM warns when no image has been dragged for the current card. Front-and-back sales let you drag each side separately, but CSM does not force both sides when you intentionally need only one."
+      ],
+      "steps": [
+        "Open Live Sale Mode and choose Pop out Live Sale.",
+        "Drag the shown image into the Facebook comment first.",
+        "Choose Copy listing. Leave Auto-advance on to move immediately, or turn it off and choose Next when ready.",
+        "Use C, Left Arrow, Right Arrow, F, B, Space, or Ctrl+Z while the mini window has focus."
+      ],
+      "tips": [
+        "Compact view, opacity, size, and position are remembered on this computer.",
+        "The mini window helps one-monitor setups but works just as well as a small second-screen control panel."
+      ]
+    },
+    {
+      "id": "visual-order-cards",
+      "group": "Creative tools",
+      "title": "Create visual buyer order cards",
+      "summary": "Give a buyer a private, polished picture of the cards in the final order.",
+      "paragraphs": [
+        "Visual Buyer Order cards use the seller branding already saved in Packing Slip Studio. Each purchased card shows its front image, customer-facing listing text without flaws, and the final paid price.",
+        "Buyer names, addresses, shipping details, private notes, purchase prices, and profit information are never included. CSM does not send anything automatically.",
+        "Square and vertical layouts save numbered PNG images to Downloads. Letter output creates a printable PDF. A missing image uses a clear placeholder instead of silently dropping the card."
+      ],
+      "steps": [
+        "Open Buyer Orders and choose the order.",
+        "Choose Create visual order cards.",
+        "Pick Showcase or Compact and Square, Vertical, or Printable Letter.",
+        "Edit the heading and optional status line, then choose Generate preview.",
+        "Review every page before copying the shown page or saving the complete numbered set."
+      ],
+      "tips": [
+        "Cards remain in the same order as the sale.",
+        "If prices, cards, or images change after generation, CSM marks the previous visual as stale. Generate it again before sharing."
+      ]
+    },
+    {
+      "id": "sale-trailers",
+      "group": "Creative tools",
+      "title": "Generate a sale trailer",
+      "summary": "Turn selected front images into a short MP4 preview for an upcoming sale.",
+      "paragraphs": [
+        "Sale Trailer works entirely from images already attached to the sale. Choose an automatic mix, a random group, or your own manual selection. Before rendering, CSM checks every selected image. Missing or unreadable files are listed and skipped so the remaining valid cards can still become a trailer.",
+        "Output can be vertical, square, widescreen, or several formats in one run. Choose 15, 30, or 60 seconds, then select Clean, Sports, Vintage, or Minimal styling. Intro and outro slides are optional and can be enabled independently.",
+        "Music is optional. Choose an MP3 or WAV file from your computer, set the volume, and preview the result. CSM does not change or upload the original audio or card images."
+      ],
+      "steps": [
+        "Open Live Sale Mode and choose Sale trailer.",
+        "Choose cards, length, style, output formats, background, intro, and outro.",
+        "Optionally add music and choose the small CSM watermark corner.",
+        "Create a low-quality preview and watch it from beginning to end.",
+        "Create the final MP4 files. They are saved in Downloads."
+      ],
+      "tips": [
+        "Vertical usually fits Facebook and phone viewing best; square is useful for flexible social posts; widescreen fits desktop video.",
+        "Use only music you have permission to publish.",
+        "Trailer choices are saved with the sale, but generated video files are not stored inside the CSM file.",
+        "If CSM skips an image, use the filename shown in the warning to locate or rematch that card before trying again."
       ]
     },
     {

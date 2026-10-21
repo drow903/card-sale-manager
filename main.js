@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, safeStorage, screen, shell } = require("electron");
 app.disableHardwareAcceleration();
 // Some Windows systems cannot start Chromium's separate GPU subprocess (0xC0000135).
 // The app uses local trusted content and software rendering, so keeping that work in-process
@@ -8,6 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const https = require("https");
+const http = require("http");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
 const QRCode = require("qrcode");
@@ -17,6 +18,7 @@ const { writeCatalog } = require("./catalog-export");
 const { publishDirectory, testConnection } = require("./cloudflare-pages");
 const { LicenseService } = require("./license-service");
 const licensingConfig = require("./licensing-config");
+const { renderTrailer, saveGeneratedImages } = require("./media-tools");
 
 const UPDATE_REPOSITORY = "drow903/card-sale-manager";
 
@@ -31,12 +33,17 @@ async function writeCatalogToken(token) {
 }
 
 let mainWindow;
+let livePopoutWindow;
 let licenseService;
 let allowWindowClose = false;
 let closeFallbackTimer = null;
 let saveQueue = Promise.resolve();
 let activeCsmDocument = null;
 const cancelledImageScans = new Set();
+const trailerProcess = { current: null };
+let facebookCompanionServer = null;
+const facebookCompanionPort = 43817;
+let facebookPairingUntil = 0;
 const csmInstanceId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 let pendingCsmPath = process.argv.find((value) => /\.csm$/i.test(String(value || ""))) || "";
 
@@ -646,6 +653,140 @@ function downloadUpdate(url, destination, progress, redirects = 0) {
   });
 }
 
+function facebookCompanionCredentialPath() {
+  return path.join(app.getPath("userData"), "facebook-owner-companion.json");
+}
+
+function facebookCompanionExtensionPath() {
+  return app.isPackaged ? path.join(process.resourcesPath, "facebook-owner-companion") : path.join(__dirname, "facebook-owner-companion");
+}
+
+async function facebookCompanionToken() {
+  try {
+    const saved = JSON.parse(await fs.promises.readFile(facebookCompanionCredentialPath(), "utf8"));
+    if (saved.encryptedToken && safeStorage.isEncryptionAvailable()) return safeStorage.decryptString(Buffer.from(saved.encryptedToken, "base64"));
+  } catch {}
+  if (!safeStorage.isEncryptionAvailable()) throw new Error("Windows credential encryption is unavailable on this computer.");
+  const token = crypto.randomBytes(32).toString("hex");
+  await fs.promises.mkdir(path.dirname(facebookCompanionCredentialPath()), { recursive: true });
+  await fs.promises.writeFile(facebookCompanionCredentialPath(), JSON.stringify({ encryptedToken: safeStorage.encryptString(token).toString("base64"), createdAt: new Date().toISOString() }), "utf8");
+  return token;
+}
+
+function ownerEntitled() {
+  return Boolean(licenseService?.publicStatus?.().owner);
+}
+
+function readRequestBody(request, limit = 256 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = []; let size = 0;
+    request.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > limit) { reject(new Error("Request is too large.")); request.destroy(); return; }
+      chunks.push(chunk);
+    });
+    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    request.on("error", reject);
+  });
+}
+
+function sendCompanionResponse(response, statusCode, value, origin = "") {
+  const allowedOrigin = /^chrome-extension:\/\//i.test(origin) ? origin : "null";
+  response.writeHead(statusCode, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Headers": "Content-Type, X-CSM-Token",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Cache-Control": "no-store"
+  });
+  response.end(JSON.stringify(value));
+}
+
+function startFacebookCompanionServer() {
+  if (facebookCompanionServer) return;
+  facebookCompanionServer = http.createServer(async (request, response) => {
+    const origin = String(request.headers.origin || "");
+    if (request.method === "OPTIONS") return sendCompanionResponse(response, 204, {}, origin);
+    if (!/^chrome-extension:\/\//i.test(origin)) return sendCompanionResponse(response, 403, { ok: false, message: "Browser extension access only." }, origin);
+    const requested = new URL(request.url || "/", `http://127.0.0.1:${facebookCompanionPort}`);
+    if (requested.pathname === "/status" && request.method === "GET") {
+      return sendCompanionResponse(response, 200, { ok: true, owner: ownerEntitled(), pairing: ownerEntitled() && Date.now() < facebookPairingUntil, appOpen: Boolean(mainWindow && !mainWindow.isDestroyed()) }, origin);
+    }
+    if (requested.pathname === "/pair" && request.method === "POST") {
+      if (!ownerEntitled() || Date.now() >= facebookPairingUntil) return sendCompanionResponse(response, 403, { ok: false, message: "Open Owner Comment Capture in CSM and start pairing first." }, origin);
+      const token = await facebookCompanionToken();
+      facebookPairingUntil = 0;
+      mainWindow?.webContents.send("facebook:pairing-complete");
+      return sendCompanionResponse(response, 200, { ok: true, token }, origin);
+    }
+    if (requested.pathname === "/capture" && request.method === "POST") {
+      if (!ownerEntitled()) return sendCompanionResponse(response, 403, { ok: false, message: "The private CSM owner edition is required." }, origin);
+      const expected = await facebookCompanionToken();
+      const supplied = String(request.headers["x-csm-token"] || "");
+      const valid = supplied.length === expected.length && crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+      if (!valid) return sendCompanionResponse(response, 401, { ok: false, message: "Pair this browser with CSM again." }, origin);
+      let payload;
+      try { payload = JSON.parse(await readRequestBody(request)); } catch { return sendCompanionResponse(response, 400, { ok: false, message: "The selected Facebook comment could not be read." }, origin); }
+      const record = {
+        id: crypto.randomUUID(),
+        receivedAt: new Date().toISOString(),
+        commentText: String(payload.commentText || "").trim().slice(0, 4000),
+        contextText: String(payload.contextText || "").trim().slice(0, 12000),
+        displayedName: String(payload.displayedName || "").trim().slice(0, 200),
+        displayedTime: String(payload.displayedTime || "").trim().slice(0, 100),
+        commentId: String(payload.commentId || "").trim().slice(0, 300),
+        pageUrl: String(payload.pageUrl || "").trim().slice(0, 2000)
+      };
+      if (!record.commentText) return sendCompanionResponse(response, 400, { ok: false, message: "Select or right-click the buyer's comment text and try again." }, origin);
+      mainWindow?.webContents.send("facebook:capture", record);
+      return sendCompanionResponse(response, 200, { ok: true, message: "Sent to the CSM Claims Desk." }, origin);
+    }
+    return sendCompanionResponse(response, 404, { ok: false, message: "Not found." }, origin);
+  });
+  facebookCompanionServer.on("error", (error) => {
+    logStability("facebook-companion-server", { reason: String(error.message || "server error").slice(0, 160) });
+    facebookCompanionServer = null;
+  });
+  facebookCompanionServer.listen(facebookCompanionPort, "127.0.0.1");
+}
+
+function livePopoutSettingsPath() { return path.join(app.getPath("userData"), "live-popout-window.json"); }
+function readLivePopoutSettings() { try { return JSON.parse(fs.readFileSync(livePopoutSettingsPath(), "utf8")); } catch { return {}; } }
+function saveLivePopoutSettings() {
+  if (!livePopoutWindow || livePopoutWindow.isDestroyed()) return;
+  const saved = { bounds: livePopoutWindow.getBounds(), maximized: livePopoutWindow.isMaximized() };
+  fs.promises.writeFile(livePopoutSettingsPath(), JSON.stringify(saved), "utf8").catch(() => {});
+}
+function usablePopoutBounds(saved = {}) {
+  const fallback = { width: 430, height: 720 };
+  const candidate = { ...fallback, ...(saved.bounds || {}) };
+  const visible = screen.getAllDisplays().some((display) => {
+    const area = display.workArea;
+    return candidate.x < area.x + area.width - 80 && candidate.x + candidate.width > area.x + 80 && candidate.y < area.y + area.height - 80 && candidate.y + candidate.height > area.y + 80;
+  });
+  if (visible) return candidate;
+  const area = screen.getPrimaryDisplay().workArea;
+  return { ...fallback, x: area.x + area.width - fallback.width - 24, y: area.y + 24 };
+}
+function openLivePopout(payload) {
+  if (livePopoutWindow && !livePopoutWindow.isDestroyed()) {
+    livePopoutWindow.show(); livePopoutWindow.focus(); livePopoutWindow.webContents.send("live-popout:state", payload); return;
+  }
+  const bounds = usablePopoutBounds(readLivePopoutSettings());
+  livePopoutWindow = new BrowserWindow({
+    ...bounds, show: false, minWidth: 330, minHeight: 430, backgroundColor: "#071a2b", title: "CSM Live Sale",
+    icon: path.join(__dirname, "assets", "icon.ico"), alwaysOnTop: true, autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, "live-popout-preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: false }
+  });
+  livePopoutWindow.setAlwaysOnTop(true, "floating");
+  livePopoutWindow.loadFile("live-popout.html");
+  livePopoutWindow.webContents.once("did-finish-load", () => { livePopoutWindow.webContents.send("live-popout:state", payload); livePopoutWindow.show(); });
+  let saveTimer;
+  const queueSave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveLivePopoutSettings, 250); };
+  livePopoutWindow.on("move", queueSave); livePopoutWindow.on("resize", queueSave);
+  livePopoutWindow.on("closed", () => { livePopoutWindow = null; mainWindow?.webContents.send("live-popout:closed"); });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     show: !process.env.CARD_SALE_CAPTURE_PATH,
@@ -679,9 +820,15 @@ function createWindow() {
     mainWindow.webContents.once("did-finish-load", async () => {
       await new Promise((resolve) => setTimeout(resolve, 2400));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
-      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["beginner-setup", "missing-images", "sale-readiness", "dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder", "image-workflow"].find((view) => captureName.includes(view)) || "");
+      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["facebook-capture", "order-cards", "sale-trailer", "beginner-setup", "missing-images", "sale-readiness", "dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder", "image-workflow"].find((view) => captureName.includes(view)) || "");
       if (captureView && captureView !== "setup") await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item) => item.close())");
-      if (captureView === "beginner-setup") {
+      if (captureView === "facebook-capture") {
+        await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; currentLicense={configured:true,licensed:true,owner:true,catalogVisible:true}; applyLicenseEntitlements(currentLicense); showView('claims'); v2RenderCaptureDialog(); document.querySelector('#facebookCaptureDialog').showModal()");
+      } else if (captureView === "order-cards") {
+        await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; showView('orders'); v2OpenOrderCards()");
+      } else if (captureView === "sale-trailer") {
+        await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; bypassReadinessOnce=true; showView('live'); document.querySelector('#saleTrailerDialog').setAttribute('open',''); true");
+      } else if (captureView === "beginner-setup") {
         await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); document.querySelectorAll('[data-setup-step]').forEach((section,index)=>section.classList.toggle('hidden',index!==1)); document.querySelector('#setupStepLabel').textContent='Step 2 of 4'; document.querySelector('#setupProgress').value=2; document.querySelector('#setupBackBtn').disabled=false; document.querySelector('#setupWizardDialog').setAttribute('open',''); true");
       } else if (captureView === "missing-images") {
         await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); openMissingImages()");
@@ -769,7 +916,11 @@ app.on("second-instance", (_event, commandLine) => {
   if (requestedFile) mainWindow.webContents.send("csm:open-request", requestedFile);
 });
 
-app.on("before-quit", () => releaseCsmLock());
+app.on("before-quit", () => {
+  releaseCsmLock();
+  if (trailerProcess.current) trailerProcess.current.kill();
+  facebookCompanionServer?.close();
+});
 
 app.on("render-process-gone", (_event, webContents, details) => {
   logStability("render-process-gone", { reason: details?.reason || "unknown", exitCode: details?.exitCode ?? -1 });
@@ -781,6 +932,7 @@ app.on("child-process-gone", (_event, details) => {
 
 app.whenReady().then(() => {
   licenseService = new LicenseService({ app, safeStorage, config: licensingConfig });
+  startFacebookCompanionServer();
   const catalogDenied = () => ({ ok: false, denied: true, message: "Catalog is available only in the private CSM owner edition." });
   const requireCatalog = () => Boolean(licenseService?.catalogAllowed());
   const paidAllowed = () => !licenseService?.configured || Boolean(licenseService.publicStatus().licensed);
@@ -799,6 +951,30 @@ app.whenReady().then(() => {
     await shell.openExternal(target);
     return true;
   });
+  ipcMain.handle("facebook:companion-status", async () => ({
+    owner: ownerEntitled(),
+    running: Boolean(facebookCompanionServer),
+    port: facebookCompanionPort,
+    pairing: ownerEntitled() && Date.now() < facebookPairingUntil,
+    extensionPath: facebookCompanionExtensionPath()
+  }));
+  ipcMain.handle("facebook:start-pairing", async () => {
+    if (!ownerEntitled()) throw new Error("A verified Owner Tools license is required.");
+    await facebookCompanionToken();
+    facebookPairingUntil = Date.now() + 5 * 60 * 1000;
+    return { ok: true, expiresAt: new Date(facebookPairingUntil).toISOString(), port: facebookCompanionPort };
+  });
+  ipcMain.handle("facebook:open-extension-folder", async () => {
+    if (!ownerEntitled()) return false;
+    const target = facebookCompanionExtensionPath();
+    const error = await shell.openPath(target);
+    return !error;
+  });
+  ipcMain.handle("live-popout:open", (_event, payload) => { if (!paidAllowed()) return false; openLivePopout(payload); return true; });
+  ipcMain.handle("live-popout:sync", (_event, payload) => { if (livePopoutWindow && !livePopoutWindow.isDestroyed()) livePopoutWindow.webContents.send("live-popout:state", payload); return true; });
+  ipcMain.handle("live-popout:action", (_event, action) => { mainWindow?.webContents.send("live-popout:action", action); return true; });
+  ipcMain.handle("live-popout:opacity", (_event, value) => { if (!livePopoutWindow || livePopoutWindow.isDestroyed()) return false; const opacity = Math.max(0.65, Math.min(1, Number(value || 1))); livePopoutWindow.setOpacity(opacity); return true; });
+  ipcMain.handle("live-popout:close", () => { livePopoutWindow?.close(); return true; });
   if (!hasSingleInstanceLock) return;
   ipcMain.handle("data:load", async () => {
     if (activeCsmDocument?.envelope) {
@@ -1202,6 +1378,11 @@ app.whenReady().then(() => {
   });
   ipcMain.handle("app:version", () => app.getVersion());
   ipcMain.handle("clipboard:write", (_event, value) => { if (!paidAllowed()) return false; clipboard.writeText(String(value || "")); return true; });
+  ipcMain.handle("clipboard:write-image", (_event, dataUrl) => {
+    if (!paidAllowed() || !String(dataUrl || "").startsWith("data:image/")) return false;
+    clipboard.writeImage(nativeImage.createFromDataURL(dataUrl));
+    return true;
+  });
   ipcMain.handle("app:download-template", async () => {
     const result = await dialog.showSaveDialog(mainWindow, { title: "Save the card import template", defaultPath: "Card-Sale-Manager-Import-Template.xlsx", filters: [{ name: "Excel workbook", extensions: ["xlsx"] }] });
     if (result.canceled || !result.filePath) return false;
@@ -1346,6 +1527,35 @@ app.whenReady().then(() => {
     if (!text) return "";
     return QRCode.toDataURL(text, { errorCorrectionLevel: "M", margin: 1, width: 220, color: { dark: /^#[0-9a-f]{6}$/i.test(color) ? color : "#172333", light: "#ffffffff" } });
   });
+
+  ipcMain.handle("order-card:save-images", async (_event, payload) => {
+    if (!paidAllowed()) return paidDenied();
+    const paths = await saveGeneratedImages(app.getPath("downloads"), payload);
+    return { success: true, paths };
+  });
+  ipcMain.handle("trailer:choose-music", async () => {
+    if (!paidAllowed()) return "";
+    const result = await dialog.showOpenDialog(mainWindow, { title: "Choose trailer music", properties: ["openFile"], filters: [{ name: "Audio", extensions: ["mp3", "wav", "m4a", "aac", "ogg", "flac"] }] });
+    return result.canceled ? "" : result.filePaths[0];
+  });
+  ipcMain.handle("trailer:choose-background", async () => {
+    if (!paidAllowed()) return "";
+    const result = await dialog.showOpenDialog(mainWindow, { title: "Choose trailer background", properties: ["openFile"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "bmp"] }] });
+    return result.canceled ? "" : result.filePaths[0];
+  });
+  ipcMain.handle("trailer:render", async (event, payload) => {
+    if (!paidAllowed()) return paidDenied();
+    if (trailerProcess.current) throw new Error("Another trailer is still rendering.");
+    try {
+      const result = await renderTrailer({ app, payload, processRef: trailerProcess, progress: (details) => { if (!event.sender.isDestroyed()) event.sender.send("trailer:progress", details); } });
+      if (result.preview) await shell.openPath(result.filePath);
+      return result;
+    } catch (error) {
+      logStability("trailer-render-error", { reason: String(error?.message || error || "unknown").slice(0, 500), frameCount: Array.isArray(payload?.frames) ? payload.frames.length : 0, preview: Boolean(payload?.preview), format: String(payload?.formatName || "unknown").slice(0, 32) });
+      throw error;
+    }
+  });
+  ipcMain.handle("trailer:cancel", () => { if (trailerProcess.current) { trailerProcess.current.kill(); trailerProcess.current = null; return true; } return false; });
 
   ipcMain.handle("images:scan-folder", async (event, input) => {
     if (!paidAllowed()) return [];

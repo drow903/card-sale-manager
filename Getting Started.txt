@@ -54,7 +54,10 @@ open related-image review, or remove the association and rematch it.
 Address Review is local and advisory. It checks city/state/ZIP layout, state
 abbreviations, ZIP length, duplicate lines, PO boxes, shared addresses, and
 changes from a buyer's previous address. Always confirm the final address with
-the buyer.
+the buyer. After confirming a changed address, open Buyer Profiles and choose
+Save and validate profile. That clears the old-address warning while leaving
+any real formatting problems visible. The directory list scrolls separately
+from the selected profile.
 
 Performance mode defaults to Auto and helps very large sales avoid rendering
 off-screen rows and cards until needed. Cycle Auto, On, and Off from the
@@ -63,6 +66,35 @@ sidebar if you are troubleshooting an older computer.
 Archived Sale Records can permanently remove an empty mistake or unwanted
 record. CSM shows exact impact counts, leaves buyer profiles and source images
 alone, and creates a complete recovery backup before it deletes the record.
+
+VERSION 2.0 CREATIVE TOOLS
+
+Live Sale Mode now has an optional always-on-top mini window. Choose Pop out
+Live Sale when you want the current card, its image, listing text, posting
+progress, Previous, Next, and Undo to remain visible while Facebook is in
+front. Drag the image first, then copy the listing. The mini window stays in
+sync with the main app and remembers its size, position, opacity, and compact
+or expanded view. Keyboard shortcuts work only while the mini window has focus.
+
+Buyer Orders can create private Visual Buyer Order cards. Select a buyer, choose
+Create visual order cards, then select square, vertical, or printable Letter
+output and generate a preview. Each card shows its front image, customer-facing
+listing text without flaws, and the final paid price. CSM deliberately leaves
+off the buyer name, address, shipping, private notes, and purchase cost. If the
+order changes later, CSM warns that the old visual is stale and should be
+regenerated. Nothing is sent automatically; copy or save the finished images
+only after reviewing them.
+
+Sale Trailer creates an optional MP4 preview for an upcoming sale. Choose cards
+with front images, a 15-, 30-, or 60-second length, vertical, square, and/or
+widescreen output, then pick a style, background, music file, intro, and outro.
+The intro and outro slides can be turned on or off separately. Both are included
+by default, and CSM remembers the choice for that sale.
+Run the low-quality preview before creating final files. Finished videos save
+to Downloads and always carry a small CSM logo watermark in the selected
+corner. Before rendering, CSM checks every selected image. Missing or unreadable
+files are listed by card and filename, then skipped so valid cards can still be
+used. The original images and music files are never changed.
 
 1. Double-click Card Sale Manager.exe.
 2. Choose New sale and give the sale a name.

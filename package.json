@@ -1,16 +1,17 @@
 {
   "name": "card-sale-manager",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "description": "Local-first card sale workflow manager",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload.js && node --check renderer.js",
+    "check": "node --check main.js && node --check preload.js && node --check renderer.js && node --check features-v200.js && node --check media-tools.js && node --check live-popout.js && node --check live-popout-preload.js",
     "dist": "electron-builder --win"
   },
   "dependencies": {
     "blake3-wasm": "2.1.5",
+    "ffmpeg-static": "5.2.0",
     "qrcode": "1.5.4",
     "xlsx": "^0.18.5"
   },
@@ -31,12 +32,20 @@
       "cloudflare-pages.js",
       "license-service.js",
       "licensing-config.js",
+      "media-tools.js",
       "preload.js",
+      "live-popout-preload.js",
+      "live-popout.js",
+      "live-popout.html",
+      "live-popout.css",
       "renderer.js",
+      "features-v200.js",
       "index.html",
       "styles.css",
       "assets/**/*",
+      "facebook-owner-companion/**/*",
       "node_modules/qrcode/**/*",
+      "node_modules/ffmpeg-static/**/*",
       "node_modules/blake3-wasm/**/*",
       "node_modules/dijkstrajs/**/*",
       "node_modules/pngjs/**/*",
@@ -50,6 +59,16 @@
         "portable"
       ]
     },
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "facebook-owner-companion",
+        "to": "facebook-owner-companion",
+        "filter": ["**/*"]
+      }
+    ],
     "fileAssociations": [
       {
         "ext": "csm",

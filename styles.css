@@ -485,6 +485,9 @@ textarea { border: 1px solid #cfd7df; border-radius: 8px; padding: 10px 11px; re
 .compact-mode .panel-header { min-height: 62px; padding-top: 12px; padding-bottom: 10px; }
 
 .profile-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 18px; }
+.profile-layout > .panel:first-child { position: sticky; top: 18px; height: calc(100vh - 170px); min-height: 420px; display: flex; flex-direction: column; overflow: hidden; }
+.profile-layout > .panel:first-child > .panel-header, .profile-layout > .panel:first-child > .profile-search { flex: 0 0 auto; }
+#buyerProfileList { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .profile-search { margin: 12px; }
 .profile-detail { min-height: 620px; }
 .csm-document-status { display: grid; gap: 5px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); }
@@ -708,6 +711,7 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; background: var
   .claim-activity-panel { height: min(45vh, 460px); }
   .buyer-list-panel { position: relative; top: auto; height: min(460px, 60vh); }
   .dashboard-grid, .live-layout, .profile-layout { grid-template-columns: 1fr; }
+  .profile-layout > .panel:first-child { position: relative; top: auto; height: min(460px, 60vh); min-height: 320px; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .mapping-grid { grid-template-columns: repeat(2, 1fr); }
   .match-row, .tracking-panel { grid-template-columns: 1fr; }
@@ -865,3 +869,26 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; background: var
   .pick-image-choices { grid-template-columns: 1fr; }
   .missing-images-toolbar,.missing-image-row { grid-template-columns: 1fr; }
 }
+#facebookCaptureBtn .count-pill{margin-left:6px;padding:2px 7px;background:var(--danger,#dc2626);color:#fff}
+.facebook-companion-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0}
+.facebook-capture-list{display:grid;gap:12px;max-height:55vh;overflow:auto;padding-right:6px}
+.facebook-capture{border:1px solid var(--border);border-radius:14px;padding:14px;background:var(--surface-2)}
+.facebook-capture.processed{opacity:.7}.facebook-capture header,.facebook-capture footer{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.facebook-capture blockquote{margin:12px 0;padding:12px 14px;border-left:4px solid var(--accent);background:var(--surface);border-radius:8px;white-space:pre-wrap}
+.facebook-capture-fields{display:grid;grid-template-columns:2fr 1.2fr 1fr .8fr;gap:10px;margin-bottom:12px}
+.order-card-controls,.trailer-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:end}
+.order-card-preview{min-height:320px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;justify-items:center;background:#03101a;border:1px solid var(--border);border-radius:14px;padding:16px;margin-top:16px}
+.order-card-preview img{max-width:100%;max-height:55vh;border-radius:10px;box-shadow:0 15px 45px rgba(0,0,0,.42)}
+.order-card-preview>button{font-size:30px;border-radius:50%;width:46px;height:46px}
+.trailer-controls fieldset{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:8px 12px}
+.trailer-card-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;max-height:38vh;overflow:auto;margin:16px 0;padding:4px}
+.trailer-image-warnings{display:grid;gap:5px;margin:14px 0 0;padding:13px 15px;border:1px solid rgba(245,158,11,.45);border-radius:10px;background:rgba(245,158,11,.12);color:var(--text)}
+.trailer-image-warnings>span{color:var(--muted);font-size:12px;line-height:1.45}
+.trailer-image-warnings ul{display:grid;gap:7px;max-height:150px;overflow:auto;margin:5px 0 0;padding:0;list-style:none}
+.trailer-image-warnings li{display:grid;gap:2px;padding-top:7px;border-top:1px solid rgba(245,158,11,.25);font-size:12px}
+.trailer-image-warnings li span{color:var(--muted);overflow-wrap:anywhere}
+.trailer-picker-heading{grid-column:1/-1;display:flex;justify-content:space-between;color:var(--muted)}
+.trailer-card-choice{display:grid;grid-template-columns:auto 48px minmax(0,1fr) auto;gap:8px;align-items:center;border:1px solid var(--border);border-radius:10px;padding:8px;background:var(--surface-2)}
+.trailer-card-choice img{width:48px;height:64px;object-fit:contain;background:#fff;border-radius:5px}
+.trailer-order-actions{display:flex;gap:4px}.trailer-order-actions button{padding:5px 8px}
+@media(max-width:1000px){.facebook-capture-fields,.order-card-controls,.trailer-controls{grid-template-columns:1fr 1fr}}

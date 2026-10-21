@@ -227,7 +227,7 @@ function allBuyerNames() {
   return [...new Set([...Object.keys(state.buyerProfiles || {}), ...historicalSales().flatMap((sale) => sale.cards.filter(cardInOrder).map((card) => card.buyer).filter(Boolean))])].sort((a, b) => a.localeCompare(b));
 }
 
-function blankBuyerProfile() { return { notes: "", address: "", tags: [], aliases: [], previousAddresses: [], manuallySaved: false }; }
+function blankBuyerProfile() { return { notes: "", address: "", validatedAddress: "", addressValidatedAt: "", tags: [], aliases: [], previousAddresses: [], manuallySaved: false }; }
 
 function buyerProfile(name, create = false) {
   state.buyerProfiles ||= {};
@@ -236,6 +236,8 @@ function buyerProfile(name, create = false) {
   profile.tags ||= [];
   profile.aliases ||= [];
   profile.previousAddresses ||= [];
+  profile.validatedAddress ||= "";
+  profile.addressValidatedAt ||= "";
   return profile;
 }
 
@@ -268,8 +270,10 @@ function addressWarnings(buyer, address = buyerProfile(buyer).address) {
   const key = normalizedAddress(value);
   const duplicate = key && Object.keys(state.buyerProfiles || {}).find((name) => name !== buyer && normalizedAddress(buyerProfile(name).address) === key);
   if (duplicate) warnings.push(`Same address is also saved for ${duplicate}`);
-  const previous = buyerProfile(buyer).previousAddresses || [];
-  if (previous.length && !previous.some((item) => normalizedAddress(item.address) === key)) warnings.push("Address differs from this buyer’s previously saved addresses — confirm the change");
+  const profile = buyerProfile(buyer);
+  const previous = profile.previousAddresses || [];
+  const validatedKey = normalizedAddress(profile.validatedAddress);
+  if (previous.length && validatedKey !== key && !previous.some((item) => normalizedAddress(item.address) === key)) warnings.push("Address differs from this buyer’s previously saved addresses — confirm the change");
   return warnings;
 }
 
@@ -868,6 +872,7 @@ function applyLicenseEntitlements(status = {}) {
   const importsAllowed = !currentLicense.configured || currentLicense.licensed === true;
   const showCatalog = currentLicense.owner === true && currentLicense.catalogVisible === true;
   $$('[data-owner-catalog]').forEach((element) => element.classList.toggle("hidden", !showCatalog));
+  $$('[data-owner-facebook]').forEach((element) => element.classList.toggle("hidden", currentLicense.owner !== true));
   $$(".help-reference-grid > div").filter((element) => /Publish a catalog|Customer privacy/.test(element.textContent)).forEach((element) => element.classList.toggle("hidden", !showCatalog));
   if (!showCatalog && $("#catalogView")?.classList.contains("active")) showView("sale");
   ["#importBtn", "#guidedSetupBtn", "#setupChooseSpreadsheetBtn", "#setupChooseImagesBtn", "#setupChooseImageFolderBtn", "#continueGuidedSetupBtn", "#addImagesBtn", "#imageInboxBtn", "#imageInboxAddBtn", "#imageInboxOrderedBtn", "#addSingleCardBtn", "#confirmImportBtn", "#confirmAddCardBtn", "#addFolderBtn", "#autoMatchBtn", "#forceAllImageLookupBtn", "#choosePrimaryFolderBtn", "#addLookupFolderBtn", "#addExcludedFolderBtn", "#setupChooseFolderBtn", "#workflowAutoMatchBtn", "#workflowOrderedBtn", "#workflowManualBtn", "#workflowChooseFilesBtn", "#attachOrderedImagesBtn", "#chooseOrderedImagesBtn", "#applyOrderedImagesBtn", "#missingImagesLookupBtn", "#preflightChooseFolderBtn", "#preflightRunLookupBtn"].forEach((selector) => {
@@ -1288,6 +1293,7 @@ async function hydrateThumbnails(root = document) {
 }
 
 function renderClaims() {
+  window.CSMV2?.updateCaptureBadge?.();
   const sale = activeSale();
   const legacyClaims = sale.cards.filter((card) => card.claimedAt).map((card) => ({ id: `legacy-${card.id}`, at: card.claimedAt, type: card.claimType || "claim", message: `${card.claimType === "offer" ? "Offer" : "Claim"} recorded for ${card.ref} · ${card.name}`, cardId: card.id, buyer: card.buyer }));
   const claims = (sale.audit?.length ? sale.audit : legacyClaims).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
@@ -1466,6 +1472,7 @@ function renderOrderDetail() {
           <button class="primary" data-order-status="paid">Mark paid</button>
         </div>
         <button class="secondary full copy-summary" id="copySummaryBtn">Copy buyer summary</button>
+        <button class="secondary full" data-visual-order-card>Create visual order cards</button>
         <div class="message-grid"><button class="secondary" data-copy-message="payment-due">Payment due</button><button class="secondary" data-copy-message="payment-received">Payment received</button><button class="secondary" data-copy-message="shipped">Shipped</button><button class="secondary" data-copy-message="delayed">Delayed</button></div>
         <button class="row-action message-template-link" id="editMessageTemplatesBtn">Edit message templates</button>
       </aside>
@@ -1697,6 +1704,7 @@ function renderLiveSale() {
   const total = sale.cards.length; const overallPercent = total ? Math.round((posted / total) * 100) : 0;
   if (!cards.length) {
     $("#liveSaleContent").innerHTML = `<div class="live-overall-progress"><div><strong>${posted} of ${total} cards posted</strong><span>${overallPercent}% complete</span></div><progress max="${Math.max(1, total)}" value="${posted}"></progress></div><div class="empty-state"><div class="empty-icon">✓</div><h3>No unposted cards remaining</h3><p>Restore copied cards or import another list to continue.</p></div>`;
+    window.CSMV2?.syncPopout?.();
     return;
   }
   liveIndex = Math.max(0, Math.min(liveIndex, cards.length - 1));
@@ -1704,6 +1712,7 @@ function renderLiveSale() {
   const imageMode = saleImageMode(sale);
   const liveImages = requiredImageSlots(sale).map((slot) => { const path = imagePathFor(card, slot); const name = fileName(path); return `<div class="live-scan"><strong>${imageMode === "front-back" ? imageSlotLabel(slot) : "Card image"}</strong>${path ? `<img loading="lazy" draggable="true" data-live-image="${escapeHtml(path)}" src="${fileUrl(path)}" alt="${escapeHtml(card.name)} ${imageSlotLabel(slot)}" /><small>Drag this image to Facebook</small><div class="live-file-meta"><span class="live-file-name" title="${escapeHtml(path)}">${escapeHtml(name)}</span><div class="live-file-actions"><button class="row-action" data-live-file-action="copy" data-file-path="${escapeHtml(path)}">Copy filename</button><button class="row-action" data-live-file-action="folder" data-file-path="${escapeHtml(path)}">Open folder</button><button class="row-action" data-live-file-action="path" data-file-path="${escapeHtml(path)}">Full path</button><button class="row-action" data-live-file-action="resolve" data-card-id="${card.id}">Resolve</button><button class="row-action danger-link" data-live-file-action="remove" data-card-id="${card.id}" data-image-slot="${slot}">Remove & rematch</button></div></div>` : `<div class="empty-icon">▧</div><p>No ${imageSlotLabel(slot).toLowerCase()} matched</p><button class="secondary" data-live-file-action="resolve" data-card-id="${card.id}">Find image</button>`}</div>`; }).join("");
   $("#liveSaleContent").innerHTML = `<div class="live-overall-progress"><div><strong>${posted} of ${total} cards posted</strong><span>${overallPercent}% complete</span></div><progress max="${Math.max(1, total)}" value="${posted}"></progress></div><div class="live-progress"><strong>Next card ${liveIndex + 1} of ${cards.length}</strong><span>${cards.length} available and not copied</span></div><div class="live-layout"><div class="live-image ${imageMode === "front-back" ? "paired" : ""}">${liveImages}</div><div class="live-copy"><p class="eyebrow">READY TO POST</p><h2>${escapeHtml(card.name)}</h2><pre>${escapeHtml(formatLine(card))}</pre><div class="live-actions"><button class="primary" data-live-copy="${card.id}">Copy listing</button>${imageMode === "front-back" ? `<button class="secondary" data-live-image-card="${card.id}" data-live-image-side="front">${card.imagePath ? "Change front" : "Add front"}</button><button class="secondary" data-live-image-card="${card.id}" data-live-image-side="back">${card.backImagePath ? "Change back" : "Add back"}</button>` : `<button class="secondary" data-live-image-card="${card.id}" data-live-image-side="single">${card.imagePath ? "Change image" : "Add image"}</button>`}<button class="secondary" data-live-prev>Previous</button><button class="secondary" data-live-next>Skip / next</button></div><p class="live-private">Cost ${card.purchasePrice !== "" ? money(card.purchasePrice) : "—"} · Purchased ${displayPurchaseDate(card.purchaseDate)} · ${escapeHtml(card.notes || "No flaws listed")}</p></div></div>`;
+  window.CSMV2?.syncPopout?.();
 }
 
 function showView(view) {
@@ -3050,6 +3059,7 @@ async function deleteActiveSale() {
   const deletedIndex = state.sales.findIndex((item) => item.id === sale.id);
   state.archivedSales ||= [];
   const archivedSale = { ...clone(sale), archivedAt: new Date().toISOString(), archivedFromIndex: deletedIndex, archiveReason: "deleted" };
+  if (Array.isArray(archivedSale.facebookCaptures)) archivedSale.facebookCaptures = archivedSale.facebookCaptures.map(({ commentId, pageUrl, contextText, ...record }) => ({ ...record, sourceDetailsRemovedAt: new Date().toISOString() }));
   state.archivedSales = state.archivedSales.filter((item) => item.id !== sale.id);
   state.archivedSales.unshift(archivedSale);
   undoStack.push({ deletedSale: clone(sale), deletedIndex, archivedSaleId: sale.id });
@@ -4166,7 +4176,7 @@ function mergeBuyerProfiles() {
     (sale.audit || []).forEach((item) => { if (item.buyer === source) item.buyer = target; });
   });
   to.aliases = [...new Set([...(to.aliases || []), source, ...(from.aliases || [])])]; to.tags = [...new Set([...(to.tags || []), ...(from.tags || [])])];
-  to.notes = [to.notes, from.notes].filter(Boolean).join("\n"); if (!to.address && from.address) to.address = from.address; to.previousAddresses = [...(to.previousAddresses || []), ...(from.previousAddresses || [])];
+  to.notes = [to.notes, from.notes].filter(Boolean).join("\n"); if (!to.address && from.address) { to.address = from.address; to.validatedAddress = from.validatedAddress || ""; to.addressValidatedAt = from.addressValidatedAt || ""; } to.previousAddresses = [...(to.previousAddresses || []), ...(from.previousAddresses || [])];
   delete state.buyerProfiles[source]; state.selectedBuyer = target; state.profileBuyer = target; recordAudit("buyer-merge", `Merged ${source} into ${target}`, { buyer: target }); $("#mergeBuyerDialog").close(); saveSoon(); render(); toast(`${source} merged into ${target} across ${moved} card records.`);
 }
 
@@ -4833,7 +4843,7 @@ function bindEvents() {
   $("#mergeBuyerTarget").addEventListener("change", updateBuyerMergePreview);
   $("#confirmMergeBuyerBtn").addEventListener("click", mergeBuyerProfiles);
   $("#buyerProfileList").addEventListener("click", (event) => { const button = event.target.closest("[data-profile-buyer]"); if (button) { state.profileBuyer = button.dataset.profileBuyer; renderBuyerProfiles(); } });
-  $("#buyerProfileDetail").addEventListener("click", (event) => { if (event.target.id === "saveBuyerProfileBtn") { const profile = ensureBuyerProfile(state.profileBuyer); const nextAddress = $("#profileAddress").value.trim(); if (profile.address && normalizedAddress(profile.address) !== normalizedAddress(nextAddress)) profile.previousAddresses.push({ address: profile.address, changedAt: new Date().toISOString() }); profile.aliases = $("#profileAliases").value.split(",").map((alias) => alias.trim()).filter(Boolean); profile.tags = $("#profileTags").value.split(",").map((tag) => tag.trim()).filter(Boolean); profile.address = nextAddress; profile.notes = $("#profileNotes").value.trim(); profile.manuallySaved = true; saveSoon(); renderBuyerProfiles(); renderOrders(); toast(addressWarnings(state.profileBuyer).length ? "Profile saved with address warnings." : "Buyer profile saved and address checked."); } if (event.target.id === "deleteBuyerProfileBtn") deleteBuyerProfile(state.profileBuyer); if (event.target.dataset.profileCard) { showView("sale"); resetListingView(); state.query = activeSale().cards.find((card) => card.id === event.target.dataset.profileCard)?.name || ""; $("#cardSearch").value = state.query; renderListings(); } });
+  $("#buyerProfileDetail").addEventListener("click", (event) => { if (event.target.id === "saveBuyerProfileBtn") { const profile = ensureBuyerProfile(state.profileBuyer); const nextAddress = $("#profileAddress").value.trim(); if (profile.address && normalizedAddress(profile.address) !== normalizedAddress(nextAddress)) profile.previousAddresses.push({ address: profile.address, changedAt: new Date().toISOString() }); profile.aliases = $("#profileAliases").value.split(",").map((alias) => alias.trim()).filter(Boolean); profile.tags = $("#profileTags").value.split(",").map((tag) => tag.trim()).filter(Boolean); profile.address = nextAddress; profile.validatedAddress = nextAddress; profile.addressValidatedAt = nextAddress ? new Date().toISOString() : ""; profile.notes = $("#profileNotes").value.trim(); profile.manuallySaved = true; saveSoon(); renderBuyerProfiles(); renderOrders(); toast(addressWarnings(state.profileBuyer).length ? "Profile saved. Review the remaining address warnings." : "Buyer profile saved and address validated."); } if (event.target.id === "deleteBuyerProfileBtn") deleteBuyerProfile(state.profileBuyer); if (event.target.dataset.profileCard) { showView("sale"); resetListingView(); state.query = activeSale().cards.find((card) => card.id === event.target.dataset.profileCard)?.name || ""; $("#cardSearch").value = state.query; renderListings(); } });
   $("#setupChooseFolderBtn").addEventListener("click", async () => { const folder = await window.cardSale.chooseLookupFolder(); if (folder) $("#setupImageFolder").value = folder; });
   $("#setupBackBtn").addEventListener("click", () => { setupStep = Math.max(0, setupStep - 1); renderSetupStep(); });
   $("#setupSkipBtn").addEventListener("click", () => { state.preferences.setupCompleted = true; saveSoon(); $("#setupWizardDialog").close(); });
@@ -5014,7 +5024,7 @@ async function init() {
       Object.values(sale.orders).forEach((order) => { if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : ""; order.shippingAutoSelected ??= false; order.packingNotes ||= ""; order.packingSlipNote ||= ""; order.packingSlipPrintCount ||= 0; });
     });
     Object.entries(state.buyerProfiles).forEach(([name, profile]) => {
-      profile.tags ||= []; profile.aliases ||= []; profile.previousAddresses ||= [];
+      profile.tags ||= []; profile.aliases ||= []; profile.previousAddresses ||= []; profile.validatedAddress ||= ""; profile.addressValidatedAt ||= "";
       const hasSavedDetails = Boolean(String(profile.address || "").trim() || String(profile.notes || "").trim() || profile.tags.length || profile.aliases.length || profile.previousAddresses.length);
       if (hasSavedDetails) profile.manuallySaved ??= true;
     });
