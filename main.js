@@ -1209,7 +1209,7 @@ app.whenReady().then(() => {
   ipcMain.handle("setup:inspect-paths", async (_event, filePaths) => {
     if (!paidAllowed()) return { spreadsheetPath: "", imagePaths: [], skipped: 0 };
     const spreadsheet = /\.(?:xlsx?|csv|tsv)$/i;
-    const image = /\.(?:jpe?g|png|webp|gif|bmp|tiff?)$/i;
+    const image = /\.(?:jpe?g|png|webp|gif|bmp|tiff?|heic)$/i;
     const queue = [...new Set((Array.isArray(filePaths) ? filePaths : []).map((value) => String(value || "")).filter(Boolean))];
     const imagePaths = [];
     let spreadsheetPath = "";
@@ -1235,7 +1235,7 @@ app.whenReady().then(() => {
       title: "Choose card images",
       properties: ["openFile", "multiSelections"],
       filters: [
-        { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp", "tif", "tiff"] }
+        { name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp", "tif", "tiff", "heic"] }
       ]
     });
     return result.canceled ? [] : result.filePaths;
@@ -1243,7 +1243,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle("images:file-details", async (_event, filePaths) => {
     if (!paidAllowed()) return [];
-    const allowed = /\.(?:jpe?g|png|webp|gif|bmp|tiff?)$/i;
+    const allowed = /\.(?:jpe?g|png|webp|gif|bmp|tiff?|heic)$/i;
     const unique = [...new Set((Array.isArray(filePaths) ? filePaths : []).map((value) => String(value || "")).filter(Boolean))].slice(0, 5000);
     const details = [];
     for (let index = 0; index < unique.length; index += 1) {
@@ -1252,7 +1252,8 @@ app.whenReady().then(() => {
       try {
         const stat = await fs.promises.stat(filePath);
         if (!stat.isFile()) continue;
-        details.push({ path: filePath, name: path.basename(filePath), selectedOrder: index, createdAt: stat.birthtimeMs || stat.ctimeMs || 0, modifiedAt: stat.mtimeMs || 0 });
+        const extension = path.extname(filePath);
+        details.push({ path: filePath, name: path.basename(filePath), stem: path.basename(filePath, extension), relativePath: path.basename(filePath), readable: !nativeImage.createFromPath(filePath).isEmpty(), selectedOrder: index, createdAt: stat.birthtimeMs || stat.ctimeMs || 0, modifiedAt: stat.mtimeMs || 0 });
       } catch {}
     }
     return details;
@@ -1266,7 +1267,7 @@ app.whenReady().then(() => {
     });
     if (result.canceled) return [];
     const folder = result.filePaths[0];
-    const supported = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"]);
+    const supported = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic"]);
     const files = await fs.promises.readdir(folder, { withFileTypes: true });
     return files
       .filter((entry) => entry.isFile() && supported.has(path.extname(entry.name).toLowerCase()))
@@ -1567,7 +1568,7 @@ app.whenReady().then(() => {
       .map((folder) => path.resolve(folder).toLowerCase());
     const excludedPaths = new Set((typeof input === "string" ? [] : input?.excludedPaths || []).map((file) => path.resolve(file).toLowerCase()));
     if (!folders.length) return [];
-    const supported = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"]);
+    const supported = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic"]);
     const found = [];
     const seen = new Set();
     const isExcluded = (folder) => {
@@ -1604,7 +1605,8 @@ app.whenReady().then(() => {
           path: fullPath,
           name: entry.name,
           stem: path.basename(entry.name, path.extname(entry.name)),
-          relativePath: path.join(path.basename(current.root), path.relative(current.root, fullPath))
+          relativePath: path.join(path.basename(current.root), path.relative(current.root, fullPath)),
+          readable: !nativeImage.createFromPath(fullPath).isEmpty()
         });
       }
       const foldersScanned = index + 1;

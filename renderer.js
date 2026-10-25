@@ -1005,7 +1005,7 @@ function updateDisabledButtonExplanations() {
     deleteSelectedCardsBtn: "Select one or more cards before deleting.",
     confirmSelectedMatchesBtn: "Select one or more image-review rows first.",
     deleteSelectedMatchesBtn: "Select one or more image-review rows first.",
-    confirmPerfectMatchesBtn: "There are no unconfirmed, conflict-free 100% matches.",
+    confirmPerfectMatchesBtn: "There are no safe automatic matches waiting in this review.",
     applyOrderedImagesBtn: "Choose the required images, review their order, and check the confirmation box.",
     fixNextProblemBtn: "No preparation problems remain.",
     openFacebookPostBtn: "Paste and save the Facebook post link first."
@@ -2361,15 +2361,11 @@ function cardLastName(name) {
 }
 
 function imageDateCodes(image) {
-  return [...new Set((String(image?.stem || "").match(/(?<!\d)\d{6,8}(?!\d)/g) || [])
-    .map(normalizePurchaseDate)
-    .filter(validDateCode))];
+  return window.CSMImageMatcher.extractDateInfo(image).codes;
 }
 
-function imageSequenceNumber(image) {
-  const stem = String(image?.stem || "").trim();
-  const match = stem.match(/(?:^|[^\d])(\d{6,8})(?:[^\d]+(\d+))\s*$/);
-  return match?.[2] ? Number(match[2]) : null;
+function imageSequenceNumber(image, card = null) {
+  return window.CSMImageMatcher.sequenceNumber(image, card);
 }
 
 function allCardRecords() {
@@ -2381,96 +2377,21 @@ function cardRecord(cardId) {
 }
 
 function imageSide(image, card = null) {
-  const tokens = normalizeMatchText(image?.stem || image?.name || "").split(" ").filter(Boolean);
-  if (tokens.includes("back")) return "back";
-  if (tokens.includes("front")) return "front";
-  const remaining = [...tokens];
-  if (card) normalizeMatchText(card.name).split(" ").filter(Boolean).forEach((nameToken) => { const index = remaining.indexOf(nameToken); if (index >= 0) remaining.splice(index, 1); });
-  const hasFront = remaining.includes("f");
-  const hasBack = remaining.includes("b");
-  if (hasFront !== hasBack) return hasFront ? "front" : "back";
-  return "";
+  const sale = activeSale();
+  return window.CSMImageMatcher.detectSide(image, card, saleImageMode(sale));
 }
 
 function imageMatchRecords(records) {
   return records.flatMap(({ sale, card }) => requiredImageSlots(sale).map((slot) => ({ sale, card, slot, key: imageMatchKey(card, slot) })));
 }
 
-function scoreImage(card, image, sale = activeSale()) {
-  const stem = normalizeMatchText(image.stem);
-  const stemTokens = stem.split(" ").filter(Boolean);
-  const relative = normalizeMatchText(image.relativePath);
-  const pathTokens = relative.split(" ").filter(Boolean);
-  const year = normalizeMatchText(card.year);
-  const number = normalizeMatchText(card.number).replace(/^0+/, "") || "0";
-  const fullName = normalizeMatchText(card.name);
-  const nameTokens = fullName.split(" ").filter((token) => token.length > 1);
-  const lastName = cardLastName(card.name);
-  const purchaseDate = normalizePurchaseDate(card.purchaseDate);
-  const dateCodes = imageDateCodes(image);
-  const duplicate = matchingDuplicateInfo(card, sale);
-  const isDuplicate = duplicate.total > 1;
-  const imageSequence = imageSequenceNumber(image);
-  const dateConflict = validDateCode(purchaseDate) && dateCodes.length > 0 && !dateCodes.includes(purchaseDate);
-  let score = 0;
-  const reasons = [];
-
-  if (dateConflict) return { image, score: -1000, reasons: ["purchase date conflicts"], rejected: true, rejectionReason: `File date ${dateCodes.map(displayPurchaseDate).join(", ")} does not match ${displayPurchaseDate(purchaseDate)}` };
-
-  if (year && pathTokens.includes(year)) { score += 34; reasons.push("year folder"); }
-  if (number && stem.replace(/^0+/, "") === number) { score += 66; reasons.push("exact card number"); }
-  else if (number && stemTokens.some((token) => (token.replace(/^0+/, "") || "0") === number)) { score += 43; reasons.push("card number"); }
-  if (fullName && stem === fullName) { score += 66; reasons.push("full player name"); }
-  else if (lastName && stem === lastName) { score += 56; reasons.push("exact surname"); }
-  else if (lastName && stemTokens.includes(lastName)) { score += 44; reasons.push("surname"); }
-  else if (nameTokens.length > 1 && nameTokens.every((token) => stemTokens.includes(token))) { score += 38; reasons.push("player name"); }
-  const setTokens = normalizeMatchText(card.set).split(" ").filter((token) => token.length > 2);
-  if (setTokens.length && setTokens.some((token) => pathTokens.includes(token))) { score += 6; reasons.push("set folder"); }
-  if (validDateCode(purchaseDate) && dateCodes.includes(purchaseDate)) { score += isDuplicate ? 90 : 34; reasons.push("purchase date code"); }
-  else if (isDuplicate && validDateCode(purchaseDate)) { score -= 18; reasons.push("missing date code"); }
-  if (isDuplicate && dateCodes.includes(purchaseDate) && imageSequence != null) {
-    if (imageSequence === duplicate.index + 1) { score += 75; reasons.push(`duplicate order ${imageSequence}`); }
-    else { score -= 70; reasons.push(`different duplicate order ${imageSequence}`); }
-  }
-  return { image, score, reasons, rejected: false };
+function scoreImage(card, image, sale = activeSale(), slot = "single") {
+  return window.CSMImageMatcher.evaluateCandidate({ card, image, sale, slot, cards: sale.cards });
 }
 
 function proposedImageMatch(card, images, sale = activeSale(), slot = "single") {
-  const eligibleImages = saleImageMode(sale) === "front-back" ? images.filter((image) => imageSide(image, card) === slot) : images;
-  const scored = eligibleImages.map((image) => {
-    const candidate = scoreImage(card, image, sale);
-    if (!candidate.rejected && saleImageMode(sale) === "front-back" && imageSide(image, card) === slot) { candidate.score += 30; candidate.reasons.push(`${slot} filename key`); }
-    return candidate;
-  });
-  const rejectedCandidates = scored.filter((item) => item.rejected).sort((a, b) => String(a.image.path).localeCompare(String(b.image.path), undefined, { numeric: true }));
-  let candidates = scored.filter((item) => !item.rejected && item.score > 0)
-    .sort((a, b) => b.score - a.score || String(a.image.path).localeCompare(String(b.image.path), undefined, { numeric: true }));
-  const sameYearCandidates = candidates.filter((candidate) => candidate.reasons.includes("year folder"));
-  if (sameYearCandidates.length) candidates = sameYearCandidates;
-  candidates = candidates.slice(0, 6);
-  const top = candidates[0];
-  const next = candidates[1];
-  const hasDefinitiveFilename = top?.reasons.includes("exact card number") || top?.reasons.includes("full player name") || (top?.reasons.includes("card number") && top?.reasons.includes("surname"));
-  const samePlayerSameYear = candidates.filter((candidate) => candidate.reasons.includes("year folder") && candidate.reasons.some((reason) => ["full player name", "exact surname", "surname", "player name"].includes(reason)));
-  const ambiguous = Boolean(top && next && samePlayerSameYear.length > 1 && top.score === next.score);
-  const purchaseDate = normalizePurchaseDate(card.purchaseDate);
-  const sameCardDateCount = sale.cards.filter((item) => normalizedCardKey(item) === normalizedCardKey(card) && normalizePurchaseDate(item.purchaseDate) === purchaseDate).length;
-  const dateMatches = candidates.filter((candidate) => candidate.reasons.includes("purchase date code"));
-  const dateIdentifiesCard = Boolean(top && top.reasons.includes("purchase date code") && top.reasons.includes("year folder") && top.reasons.some((reason) => ["exact card number", "card number", "full player name", "exact surname", "surname", "player name"].includes(reason)));
-  const uniquePurchaseDateMatch = /^\d{8}$/.test(purchaseDate) && sameCardDateCount === 1 && dateMatches.length === 1 && dateMatches[0] === top && dateIdentifiesCard;
-  const duplicateNeedsDate = duplicateInfo(card, sale).total > 1 && validDateCode(purchaseDate);
-  return {
-    card,
-    sale,
-    slot,
-    key: imageMatchKey(card, slot),
-    candidates,
-    rejectedCandidates,
-    automatic: Boolean(top && !ambiguous && (!duplicateNeedsDate || top.reasons.includes("purchase date code")) && ((top.score >= 100 && hasDefinitiveFilename) || uniquePurchaseDateMatch)),
-    automaticReason: uniquePurchaseDateMatch ? "unique purchase date code" : "exact filename match",
-    conflict: ambiguous,
-    conflictReason: ambiguous ? "Multiple equally strong files match this player in the same year folder. Choose the correct file manually." : ""
-  };
+  const match = window.CSMImageMatcher.propose({ card, images, sale, slot });
+  return { ...match, key: imageMatchKey(card, slot), currentPath: imagePathFor(card, slot) };
 }
 
 function imageOwner(imagePath, exceptCardId = "", sale = activeSale(), exceptSlot = "") {
@@ -2506,7 +2427,7 @@ function attachImage(card, imagePath, quiet = false, sale = activeSale(), slot =
 function coordinateImageAssignments(matches) {
   const groups = new Map();
   matches.forEach((match) => {
-    const key = `${match.sale.id}::${normalizedCardKey(match.card)}::${match.slot}`;
+    const key = `${match.sale.id}::${match.duplicateKey}::${match.slot}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(match);
   });
@@ -2524,7 +2445,7 @@ function coordinateImageAssignments(matches) {
       options.forEach((candidate) => {
         const path = candidate.image.path.toLowerCase();
         if (used.has(path)) return;
-        used.add(path); visit(index + 1, used, [...chosen, candidate], total + candidate.score); used.delete(path);
+        used.add(path); visit(index + 1, used, [...chosen, candidate], total + candidate.rank); used.delete(path);
       });
     };
     visit(0, new Set(), [], 0);
@@ -2533,8 +2454,11 @@ function coordinateImageAssignments(matches) {
       const selected = best.chosen[index];
       const originalTop = match.candidates[0]?.image.path;
       if (selected) match.candidates = [selected, ...match.candidates.filter((candidate) => candidate.image.path !== selected.image.path)];
-      if (!selected || selected.image.path !== originalTop) match.automatic = false;
-      if (tied) { match.automatic = false; match.conflict = true; match.conflictReason = "More than one one-to-one assignment has the same score. Review this related group together."; }
+      match.automatic = false;
+      match.conflict = true;
+      match.status = "needs-review";
+      if (!selected || selected.image.path !== originalTop) match.conflictReason = "Duplicate copies were arranged by their filename sequence. Review the whole group before confirming.";
+      if (tied) match.conflictReason = "More than one one-to-one arrangement is possible. Review this related group together.";
     });
   });
   return matches;
@@ -2623,7 +2547,6 @@ async function autoMatchImages(options = {}) {
     proposed = coordinateImageAssignments(records.map((record) => proposedImageMatch(record.card, images, record.sale, record.slot)));
     proposed.forEach((match) => { match.card.lastSuggestedImagePath = match.candidates[0]?.image.path || ""; });
   }
-  if (options.force) records.forEach(detachImage);
   for (let index = 0; index < records.length; index += 1) {
     if (imageLookupCancelled) { progress.classList.add("hidden"); return toast("Image lookup canceled. No new matches were attached."); }
     const percent = 60 + Math.round(((index + 1) / records.length) * 35);
@@ -2644,6 +2567,7 @@ async function autoMatchImages(options = {}) {
     if (saleKey && topPathCounts.get(saleKey) > 1) {
       match.automatic = false;
       match.conflict = true;
+      match.status = "file-conflict";
       match.conflictReason = "This same image was suggested for more than one listing. Choose the correct file manually.";
       match.selected = "";
     }
@@ -2653,10 +2577,10 @@ async function autoMatchImages(options = {}) {
   const used = new Set(imageMatchRecords(allCardRecords()).filter((record) => !targetRecordKeys.has(`${record.sale.id}::${record.key}`) && imagePathFor(record.card, record.slot)).map((record) => `${record.sale.id}::${imagePathFor(record.card, record.slot).toLowerCase()}`));
   const automatic = [];
   const review = [];
-  proposed.sort((a, b) => (b.candidates[0]?.score || 0) - (a.candidates[0]?.score || 0)).forEach((match) => {
+  proposed.sort((a, b) => (b.candidates[0]?.rank || 0) - (a.candidates[0]?.rank || 0)).forEach((match) => {
     const topPath = match.candidates[0]?.image.path;
     const topKey = topPath ? `${match.sale.id}::${topPath.toLowerCase()}` : "";
-    if (match.automatic && topPath && !used.has(topKey)) {
+    if (!options.force && match.automatic && topPath && !used.has(topKey)) {
       if (attachImage(match.card, topPath, true, match.sale, match.slot)) {
         automatic.push({ card: match.card, candidate: match.candidates[0] });
         state.manualMatchMemory ||= {};
@@ -2665,20 +2589,22 @@ async function autoMatchImages(options = {}) {
       } else {
         match.automatic = false;
         match.conflict = true;
+        match.status = "file-conflict";
         match.selected = "";
         review.push(match);
       }
     } else {
       match.candidates = match.candidates.filter((candidate) => !used.has(`${match.sale.id}::${candidate.image.path.toLowerCase()}`));
-      if (match.conflict) match.selected = "";
+      if (match.conflict && match.status === "file-conflict") match.selected = "";
+      else match.selected = match.candidates[0]?.image.path || "";
       review.push(match);
     }
   });
 
-  const reviewItems = review.map((match) => ({ ...match, confirmed: false }));
+  const reviewItems = review.map((match) => ({ ...match, status: match.automatic ? "strong-suggestion" : match.status, confirmed: false }));
   pendingMatches = { review: reviewItems, scanned: images.length, filter: "all", query: "", scope: options.allSales ? "all sales" : records.length > 1 ? `${records.length} related cards` : sale.name };
   progressBar.style.width = "100%";
-  progressText.textContent = `Complete · ${automatic.length} exact match${automatic.length === 1 ? "" : "es"} attached automatically`;
+  progressText.textContent = `Complete · ${automatic.length} safe match${automatic.length === 1 ? "" : "es"} attached automatically`;
   if (automatic.length) saveSoon();
   progress.classList.add("hidden");
   selectedMatchIds.clear();
@@ -2686,14 +2612,18 @@ async function autoMatchImages(options = {}) {
   $$('[data-match-filter]').forEach((button) => button.classList.toggle("active", button.dataset.matchFilter === "all"));
   renderMatchReview();
   if (reviewItems.length) $("#matchDialog").showModal();
-  else { render(); toast(`${automatic.length} exact image match${automatic.length === 1 ? "" : "es"} attached automatically.`); }
+  else { render(); toast(`${automatic.length} safe image match${automatic.length === 1 ? "" : "es"} attached automatically.`); }
 }
 
 async function forceImageLookupForCard(cardId) {
   const record = cardRecord(cardId);
   if (!record) return;
   if ($("#matchDialog").open) $("#matchDialog").close();
-  const relatedIds = record.sale.cards.filter((card) => normalizedCardKey(card) === normalizedCardKey(record.card)).map((card) => card.id);
+  const relatedIds = record.sale.cards.filter((card) => {
+    const sameCard = normalizedCardKey(card) === normalizedCardKey(record.card);
+    const samePlayerYear = normalizeMatchText(card.year) === normalizeMatchText(record.card.year) && cardLastName(card.name) === cardLastName(record.card.name);
+    return sameCard || samePlayerYear;
+  }).map((card) => card.id);
   await autoMatchImages({ cardIds: relatedIds, force: true, includeRelated: true });
 }
 
@@ -2716,17 +2646,38 @@ function matchReviewExplanation(match) {
   const top = match?.candidates?.[0];
   if (!top) {
     const excluded = match?.rejectedCandidates?.length || 0;
-    return { suggested: excluded ? `${excluded} possible file${excluded === 1 ? " was" : "s were"} found, but the purchase-date code did not match this card.` : "CSM could not find a filename with enough matching clues.", review: "No image will be attached until you choose or drop one manually." };
+    return { suggested: excluded ? `${excluded} possible file${excluded === 1 ? " was" : "s were"} rejected by the matching rules.` : "CSM could not find an eligible filename for this card.", review: "No image will be attached until you choose or drop one manually." };
   }
   const clues = top.reasons.length ? top.reasons.join(", ") : "a partial filename";
-  let review = "The filename does not contain enough independent clues for safe automatic confirmation.";
+  let review = top.reviewReasons?.join("; ") || "Confirm this suggestion before it is attached.";
   if (match.conflict) review = match.conflictReason || "More than one card or file could use this image.";
-  else if (top.score < 45) review = "The score is too low to suggest this file automatically.";
-  else if (top.score < 100) review = "The match is useful, but it is below the 100% automatic-confirmation threshold.";
-  else if (!match.automatic) review = "The score is high, but CSM detected an ambiguity that needs your choice.";
   const date = normalizePurchaseDate(match.card.purchaseDate);
   const dateNote = validDateCode(date) ? (imageDateCodes(top.image).includes(date) ? ` The filename date matches ${displayPurchaseDate(date)}.` : ` This file has no conflicting date code for ${displayPurchaseDate(date)}.`) : " No purchase date was available for this card.";
   return { suggested: `Suggested because it matched: ${clues}.${dateNote}`, review };
+}
+
+function imageMatchStatusLabel(status) {
+  return ({
+    "confirmed-automatically": "Confirmed automatically",
+    "manually-confirmed": "Manually confirmed",
+    "strong-suggestion": "Strong suggestion",
+    "needs-review": "Needs review",
+    "file-conflict": "File conflict",
+    "missing-image": "Missing image",
+    "intentionally-no-image": "Intentionally no image"
+  })[status] || "Needs review";
+}
+
+function reservePendingSuggestion(match, path) {
+  const normalized = String(path || "").toLowerCase();
+  if (!normalized || !pendingMatches) return;
+  pendingMatches.review.forEach((other) => {
+    if (other.key === match.key || other.confirmed || String(other.selected || "").toLowerCase() !== normalized) return;
+    other.selected = "";
+    other.conflict = true;
+    other.status = "file-conflict";
+    other.conflictReason = `That file was moved to ${match.card.ref} · ${match.card.name}. Choose another file for this listing.`;
+  });
 }
 
 function openPickImage(matchKey) {
@@ -2736,8 +2687,8 @@ function openPickImage(matchKey) {
   const explanation = matchReviewExplanation(match);
   $("#pickImageTitle").textContent = `${match.card.ref} · ${match.card.year} ${match.card.set} ${numberLabel(match.card)} ${match.card.name}`;
   $("#pickImageExplanation").textContent = `${explanation.suggested} ${explanation.review}`;
-  const selected = match.selected !== undefined ? match.selected : ((match.candidates[0]?.score || 0) >= 45 ? match.candidates[0].image.path : "");
-  $("#pickImageChoices").innerHTML = match.candidates.length ? match.candidates.map((candidate) => `<button type="button" class="pick-image-choice ${selected === candidate.image.path ? "selected" : ""}" data-pick-image="${escapeHtml(candidate.image.path)}"><img src="${fileUrl(candidate.image.path)}" alt="${escapeHtml(candidate.image.name || "Candidate image")}" /><span><strong>${escapeHtml(candidate.image.name || candidate.image.relativePath)}</strong><small>${Math.max(0, Math.min(100, candidate.score))}% match · ${escapeHtml(candidate.reasons.join(", ") || "partial filename")}</small><small>${escapeHtml(candidate.image.relativePath || candidate.image.path)}</small></span></button>`).join("") : `<div class="empty-state"><h3>No candidates found</h3><p>Add the image manually from the Missing Images Workspace.</p></div>`;
+  const selected = match.selected !== undefined ? match.selected : (match.candidates[0]?.image.path || "");
+  $("#pickImageChoices").innerHTML = match.candidates.length ? match.candidates.map((candidate) => `<button type="button" class="pick-image-choice ${selected === candidate.image.path ? "selected" : ""}" data-pick-image="${escapeHtml(candidate.image.path)}"><img src="${fileUrl(candidate.image.path)}" alt="${escapeHtml(candidate.image.name || "Candidate image")}" /><span><strong>${escapeHtml(candidate.image.name || candidate.image.relativePath)}</strong><small>${escapeHtml(candidate.quality)} · ${escapeHtml(candidate.reasons.join(", ") || "partial filename")}</small><small>${escapeHtml(candidate.image.relativePath || candidate.image.path)}</small></span></button>`).join("") : `<div class="empty-state"><h3>No candidates found</h3><p>Add the image manually from the Missing Images Workspace.</p></div>`;
   $("#pickImageDialog").showModal();
 }
 
@@ -2745,6 +2696,7 @@ function choosePickImage(path) {
   const match = pendingMatches?.review.find((item) => item.key === pickImageMatchKey);
   if (!match) return;
   match.selected = path || "";
+  reservePendingSuggestion(match, match.selected);
   renderMatchReview();
   $("#pickImageDialog").close();
   toast(path ? "Image selected. Confirm the match when you are ready." : "Card left unmatched.");
@@ -2820,12 +2772,12 @@ function openSaleReadiness() {
 
 function renderMatchReview() {
   const pending = pendingMatches.review.filter((match) => !match.confirmed).length;
-  const suggested = pendingMatches.review.filter((match) => !match.confirmed && (match.candidates[0]?.score || 0) >= 45).length;
+  const suggested = pendingMatches.review.filter((match) => !match.confirmed && match.candidates.length).length;
   const confirmed = pendingMatches.review.filter((match) => match.confirmed).length;
   $("#matchSummary").innerHTML = `<div><strong>${pending}</strong>awaiting confirmation</div><div><strong>${suggested}</strong>with a likely match</div><div><strong>${confirmed}</strong>confirmed and hidden</div>${pendingMatches.scope ? `<small>Scope: ${escapeHtml(pendingMatches.scope)}</small>` : ""}`;
   const query = String(pendingMatches.query || "").toLowerCase();
   const filtered = pendingMatches.review.filter((match) => {
-    const hasSuggestion = (match.candidates[0]?.score || 0) >= 45;
+    const hasSuggestion = match.candidates.length > 0;
     const filterMatch = (pendingMatches.filter === "all" && !match.confirmed) || (pendingMatches.filter === "suggested" && !match.confirmed && hasSuggestion) || (pendingMatches.filter === "unmatched" && !match.confirmed && !hasSuggestion) || (pendingMatches.filter === "confirmed" && match.confirmed);
     const searchText = `${match.card.year} ${match.card.set} ${match.card.number} ${match.card.name} ${match.card.notes} ${match.candidates.map((candidate) => candidate.image.relativePath).join(" ")}`.toLowerCase();
     return filterMatch && searchText.includes(query);
@@ -2835,13 +2787,13 @@ function renderMatchReview() {
   $("#matchReviewList").innerHTML = filtered.length ? filtered.map((match) => {
     const top = match.candidates[0];
     const explanation = matchReviewExplanation(match);
-    const selectTop = match.selected !== undefined ? Boolean(match.selected) : Boolean(top && top.score >= 45);
+    const selectTop = match.selected !== undefined ? Boolean(match.selected) : Boolean(top);
     const selectedPath = match.selected !== undefined ? match.selected : (selectTop ? top.image.path : "");
     return `<article class="match-row ${match.conflict ? "match-conflict" : ""}" data-match-card="${match.card.id}" data-match-key="${match.key}">
       <label class="match-select-box"><input type="checkbox" data-select-match="${match.key}" ${selectedMatchIds.has(match.key) ? "checked" : ""} /> Select</label>
-      <div class="match-card-name"><strong>${escapeHtml(match.sale?.name || activeSale().name)} · ${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.year)} ${escapeHtml(match.card.set)} #${escapeHtml(match.card.number)} ${escapeHtml(match.card.name)} ${escapeHtml(duplicateInfo(match.card, match.sale || activeSale()).label)}</strong>${saleImageMode(match.sale) === "front-back" ? `<span class="status available">${imageSlotLabel(match.slot)} scan</span>` : ""}<span>Flaws: ${escapeHtml(match.card.notes && !/^none$/i.test(match.card.notes) ? match.card.notes : "None listed")}</span><span>Purchase date: ${displayPurchaseDate(match.card.purchaseDate)}</span>${match.conflict ? `<span class="match-warning">${escapeHtml(match.conflictReason || "Choose the correct image manually.")}</span>` : ""}</div>
-      <div class="candidate-picker"><img data-match-preview src="${selectedPath ? fileUrl(selectedPath) : "assets/favicon.svg"}" alt="" /><div><select data-match-select ${match.confirmed ? "disabled" : ""}><option value="">Leave unmatched</option>${match.candidates.map((candidate) => `<option value="${escapeHtml(candidate.image.path)}" ${selectedPath === candidate.image.path ? "selected" : ""}>${escapeHtml(candidate.image.name || fileName(candidate.image.path))} — ${Math.max(0, Math.min(100, candidate.score))}% — ${escapeHtml(candidate.reasons.join(", "))}</option>`).join("")}</select><div class="match-why"><strong>${escapeHtml(explanation.suggested)}</strong><span>Why review is needed: ${escapeHtml(explanation.review)}</span>${top ? `<span title="${escapeHtml(top.image.path)}">File: ${escapeHtml(top.image.relativePath || top.image.path)}</span>` : ""}${match.rejectedCandidates?.length ? `<span class="match-warning">${match.rejectedCandidates.length} wrong-date file${match.rejectedCandidates.length === 1 ? " was" : "s were"} excluded automatically.</span>` : ""}<span>Drop an image file anywhere on this row to assign it.</span></div></div></div>
-      <div class="match-confirm">${match.confirmed ? `<span class="status available">Confirmed</span><button type="button" class="row-action" data-reopen-match="${match.key}">Reopen</button>` : `<button type="button" class="primary" data-confirm-match="${match.key}">${selectedPath ? "Confirm match" : "Confirm no image"}</button>`}${match.candidates.length > 1 ? `<button type="button" class="secondary" data-pick-match="${match.key}">Compare all files</button>` : ""}<button type="button" class="row-action" data-clear-match="${match.key}">Remove association</button><button type="button" class="row-action" data-rematch-match="${match.card.id}">Re-run related</button></div>
+      <div class="match-card-name"><strong>${escapeHtml(match.sale?.name || activeSale().name)} · ${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.year)} ${escapeHtml(match.card.set)} #${escapeHtml(match.card.number)} ${escapeHtml(match.card.name)} ${escapeHtml(duplicateInfo(match.card, match.sale || activeSale()).label)}</strong><span class="status ${match.conflict ? "pending" : "available"}">${escapeHtml(imageMatchStatusLabel(match.status))}</span>${saleImageMode(match.sale) === "front-back" ? `<span class="status available">${imageSlotLabel(match.slot)} scan</span>` : ""}<span>Flaws: ${escapeHtml(match.card.notes && !/^none$/i.test(match.card.notes) ? match.card.notes : "None listed")}</span><span>Purchase date: ${displayPurchaseDate(match.card.purchaseDate)}</span>${match.currentPath ? `<span title="${escapeHtml(match.currentPath)}">Current image: ${escapeHtml(fileName(match.currentPath))}</span>` : ""}${match.conflict ? `<span class="match-warning">${escapeHtml(match.conflictReason || "Choose the correct image manually.")}</span>` : ""}</div>
+      <div class="candidate-picker"><img data-match-preview src="${selectedPath ? fileUrl(selectedPath) : "assets/favicon.svg"}" alt="" /><div><select data-match-select ${match.confirmed ? "disabled" : ""}><option value="">Leave unmatched</option>${match.candidates.map((candidate) => `<option value="${escapeHtml(candidate.image.path)}" ${selectedPath === candidate.image.path ? "selected" : ""}>${escapeHtml(candidate.image.name || fileName(candidate.image.path))} — ${escapeHtml(candidate.quality)} — ${escapeHtml(candidate.reasons.join(", "))}</option>`).join("")}</select><div class="match-why"><strong>${escapeHtml(explanation.suggested)}</strong><span>Why review is needed: ${escapeHtml(explanation.review)}</span>${top ? `<span title="${escapeHtml(top.image.path)}">Proposed file: ${escapeHtml(top.image.relativePath || top.image.path)}</span>` : ""}${match.rejectedCandidates?.length ? `<details><summary>${match.rejectedCandidates.length} rejected file${match.rejectedCandidates.length === 1 ? "" : "s"}</summary>${match.rejectedCandidates.map((candidate) => `<span title="${escapeHtml(candidate.image.path)}">${escapeHtml(candidate.image.name || candidate.image.path)} — ${escapeHtml(candidate.rejectionReason)}</span>`).join("")}</details>` : ""}<span>Drop an image file anywhere on this row to assign it.</span></div></div></div>
+      <div class="match-confirm">${match.confirmed ? `<span class="status available">${escapeHtml(imageMatchStatusLabel(match.status))}</span><button type="button" class="row-action" data-reopen-match="${match.key}">Reopen</button>` : `<button type="button" class="primary" data-confirm-match="${match.key}">${selectedPath ? "Confirm match" : "Confirm no image"}</button>`}${match.candidates.length > 1 ? `<button type="button" class="secondary" data-pick-match="${match.key}">Compare all files</button>` : ""}<button type="button" class="row-action" data-clear-match="${match.key}">Remove association</button><button type="button" class="row-action" data-rematch-match="${match.card.id}">Re-run related</button></div>
     </article>`;
   }).join("") : `<div class="empty-state"><h3>No matches in this filter</h3><p>Change the filter or search text to see other cards.</p></div>`;
   const visibleIds = filtered.map((match) => match.key);
@@ -2851,7 +2803,7 @@ function renderMatchReview() {
   $("#deleteSelectedMatchesBtn").disabled = selectedMatchIds.size === 0;
   $("#selectAllMatches").checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
   $("#selectAllMatches").indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
-  $("#confirmPerfectMatchesBtn").disabled = !pendingMatches.review.some((match) => !match.confirmed && !match.conflict && (match.candidates[0]?.score || 0) >= 100);
+  $("#confirmPerfectMatchesBtn").disabled = !pendingMatches.review.some((match) => !match.confirmed && !match.conflict && match.automatic && match.candidates.length === 1);
   updateDisabledButtonExplanations();
 }
 
@@ -2865,6 +2817,16 @@ function confirmMatch(match, selectedPath = match.selected) {
     state.manualMatchMemory[imageMemoryKey(match.card, match.slot)] = match.selected;
     const sale = match.sale || activeSale();
     if (previousPath && previousPath !== match.selected && !sale.cards.some((card) => cardImagePaths(card).includes(previousPath))) sale.images = sale.images.filter((image) => image.path !== previousPath);
+    match.status = "manually-confirmed";
+    pendingMatches?.review?.forEach((other) => {
+      if (other.key === match.key || other.confirmed) return;
+      other.candidates = other.candidates.filter((candidate) => candidate.image.path.toLowerCase() !== match.selected.toLowerCase());
+      if (String(other.selected || "").toLowerCase() === match.selected.toLowerCase()) other.selected = other.candidates[0]?.image.path || "";
+    });
+  } else {
+    if (match.currentPath) detachImage({ sale: match.sale || activeSale(), card: match.card, slot: match.slot });
+    delete state.manualMatchMemory?.[imageMemoryKey(match.card, match.slot)];
+    match.status = "intentionally-no-image";
   }
   match.confirmed = true;
   selectedMatchIds.delete(match.key);
@@ -2885,7 +2847,7 @@ function confirmSelectedMatches(ids = selectedMatchIds) {
 }
 
 function confirmPerfectMatches() {
-  const perfect = new Set(pendingMatches.review.filter((match) => !match.confirmed && !match.conflict && (match.candidates[0]?.score || 0) >= 100).map((match) => match.key));
+  const perfect = new Set(pendingMatches.review.filter((match) => !match.confirmed && !match.conflict && match.automatic && match.candidates.length === 1).map((match) => match.key));
   perfect.forEach((id) => {
     const match = pendingMatches.review.find((item) => item.key === id);
     if (match) match.selected = match.candidates[0]?.image.path || "";
@@ -4623,7 +4585,7 @@ function bindEvents() {
     const preview = $("[data-match-preview]", row);
     preview.src = event.target.value ? fileUrl(event.target.value) : "assets/favicon.svg";
     const match = pendingMatches?.review.find((item) => item.key === row.dataset.matchKey);
-    if (match) match.selected = event.target.value;
+    if (match) { match.selected = event.target.value; reservePendingSuggestion(match, match.selected); renderMatchReview(); }
   });
   $("#matchReviewList").addEventListener("click", (event) => {
     if (!pendingMatches) return;
@@ -4659,8 +4621,8 @@ function bindEvents() {
     const match = pendingMatches?.review.find((item) => item.key === row.dataset.matchKey); if (!match) return;
     const details = await window.cardSale.imageFileDetails([paths[0]]); const image = details[0]; if (!image) return toast("Drop a supported image file.");
     const owner = imageOwner(image.path, match.card.id, match.sale, match.slot); if (owner) return toast("That file is already attached to another listing. Remove that association first.");
-    const candidate = scoreImage(match.card, image, match.sale); candidate.score = Math.max(100, candidate.score); candidate.reasons.unshift("manually dropped"); candidate.rejected = false;
-    match.candidates = [candidate, ...match.candidates.filter((item) => item.image.path.toLowerCase() !== image.path.toLowerCase())]; match.selected = image.path; match.conflict = false;
+    const candidate = scoreImage(match.card, image, match.sale, match.slot); candidate.rank += 1000000; candidate.reasons.unshift("manually dropped"); candidate.rejected = false; candidate.eligible = true; candidate.quality = "Manual selection";
+    match.candidates = [candidate, ...match.candidates.filter((item) => item.image.path.toLowerCase() !== image.path.toLowerCase())]; match.selected = image.path; match.conflict = false; match.status = "strong-suggestion"; reservePendingSuggestion(match, image.path);
     renderMatchReview(); toast("Dropped image selected. Confirm the match when ready.");
   });
   $("#selectAllMatches").addEventListener("change", (event) => {

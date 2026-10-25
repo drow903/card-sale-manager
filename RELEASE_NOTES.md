@@ -1,12 +1,14 @@
-# Card Sale Manager 2.0.0
+# Card Sale Manager 2.1.0
 
 ## Highlights
 
-- Adds the optional owner-only Facebook browser companion for manually sending a right-clicked comment to Claims Desk for review.
-- Adds an always-on-top Live Sale companion window that stays synchronized with the main app.
-- Adds private visual buyer-order cards for sharing or printing.
-- Adds a sale-trailer generator with vertical, square, and widescreen output, optional music and backgrounds, independently optional intro and outro slides, and safer missing-image handling.
-- Improves buyer-profile address validation and gives the Buyer Directory its own scrolling region.
-- Updates the built-in help guide for all new 2.0 workflows.
+- Rebuilds automatic image matching around clear eligibility rules instead of percentage scores.
+- Prioritizes the expected year folder, then player or team, card number, purchase date, year, and brand.
+- Hard-rejects conflicting purchase dates, keeps identical duplicates together for review, recognizes common duplicate and front/back filename markers, and never assigns one physical file twice within a sale.
+- Makes re-runs transactional: existing links stay in place until the seller approves a proposed replacement.
+- Adds clearer match statuses, rejected-file reasons, current-versus-proposed filenames, and corrected Confirm match / Confirm no image wording.
+- Cleans up the Sale Workspace action bar and moves less-used tools into Additional actions.
+- Adds optional subtotal, shipping, final-total, and payment-status lines to visual buyer order cards.
+- Updates the built-in help guide for the new 2.1 workflows.
 
 The owner-only catalog and Facebook companion remain unavailable to standard customer licenses.

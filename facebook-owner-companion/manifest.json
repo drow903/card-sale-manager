@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CSM Owner Facebook Companion",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Owner-only, manual Facebook comment capture for Card Sale Manager.",
   "permissions": ["contextMenus", "storage", "activeTab"],
   "host_permissions": ["https://*.facebook.com/*", "http://127.0.0.1:43817/*"],

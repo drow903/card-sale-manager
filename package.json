@@ -1,12 +1,12 @@
 {
   "name": "card-sale-manager",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Local-first card sale workflow manager",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload.js && node --check renderer.js && node --check features-v200.js && node --check media-tools.js && node --check live-popout.js && node --check live-popout-preload.js",
+    "check": "node --check main.js && node --check preload.js && node --check image-matcher.js && node --check renderer.js && node --check features-v200.js && node --check media-tools.js && node --check live-popout.js && node --check live-popout-preload.js && node qa-image-matcher.js",
     "dist": "electron-builder --win"
   },
   "dependencies": {
@@ -39,6 +39,7 @@
       "live-popout.html",
       "live-popout.css",
       "renderer.js",
+      "image-matcher.js",
       "features-v200.js",
       "index.html",
       "styles.css",

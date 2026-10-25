@@ -128,7 +128,7 @@
       "summary": "Let CSM find likely images, then spend your time only on uncertain or conflicting matches.",
       "paragraphs": [
         "Choose Image lookup folders the first time you use a computer. Your primary, additional, and excluded folders carry from sale to sale.",
-        "A unique year, player, card number, and purchase-date match should confirm automatically. In front-and-back mode, CSM also uses F, B, Front, and Back filename keys to fill the correct image slot. CSM sends uncertain matches to review when several files could represent the same card or when an image was suggested for more than one listing.",
+        "CSM now uses named matching rules instead of a vague percentage. The expected year folder comes first, followed by player or team, card number, purchase date, year, and brand. A single eligible file in the correct folder can confirm automatically; date conflicts are rejected and duplicate copies stay together for review. In front-and-back mode, CSM also recognizes F, B, Front, Back, Obverse, Reverse, Side 1/2, and Scan 1/2 filename keys.",
         "The same file cannot be attached to multiple listings within one sale. If CSM finds a conflict, both cards stay unconfirmed until you choose separate images."
       ],
       "steps": [
@@ -142,7 +142,7 @@
         "Use Re-run lookup on one card when its suggestion is wrong. Use the full recheck only when you want CSM to reconsider current and past matches."
       ],
       "tips": [
-        "A 100 percent match should not need manual approval unless the file conflicts with another listing.",
+        "Image Review labels each result as Confirmed automatically, Strong suggestion, Needs review, File conflict, Missing image, or Intentionally no image, and explains both the evidence and the reason for review.",
         "Manual matches are remembered when the same card is carried into another sale.",
         "Ordered attachment blocks an oversized batch and warns when the card and image counts do not match. Nothing is applied until you check the confirmation and approve the preview."
       ]
@@ -293,7 +293,7 @@
       "title": "Sale Workspace",
       "summary": "Manage every listing, image, custom field, order, and bulk change in the active sale.",
       "paragraphs": [
-        "Sale Workspace is the main editing screen. Search and filter cards, copy individual listings, change images, select several rows, build bundles, bulk edit, review teams, carry over unsold cards, and close the sale. Performance mode defaults to Auto and turns on deferred off-screen rendering for very large sales; use the sidebar button to force it on or off when troubleshooting. Long image-folder scans can be canceled from the real progress display without attaching partial matches.",
+        "Sale Workspace is the main editing screen. Search and filter cards, copy individual listings, change images, select several rows, build bundles, bulk edit, review teams, carry over unsold cards, and close the sale. Selection controls and the most common card actions stay visible; Bundle offer, Teams, Catalog, Custom fields, References, carryover, and closing tools are grouped under Additional actions. Performance mode defaults to Auto and turns on deferred off-screen rendering for very large sales; use the sidebar button to force it on or off when troubleshooting. Long image-folder scans can be canceled from the real progress display without attaching partial matches.",
         "The Post queue follows listing order. Copying listing text hides only the listing. Dragging an image hides only the image. Ctrl+Z restores the most recently hidden item.",
         "Each listing shows a preparation badge such as Ready, Missing image, Image needs review, Price needs review, or Team not set. These badges use the same checklist as Command Center and Fix Center.",
         "Columns lets you simplify the table. Selection buttons can target a continuous range, visible rows, every filtered result, or the entire sale. Shift-clicking card checkboxes also selects a continuous range. Clicking a card title opens its detail drawer. Card numbers with letters, dashes, prefixes, and suffixes are kept intact and sorted naturally.",
@@ -480,14 +480,14 @@
       "summary": "Give a buyer a private, polished picture of the cards in the final order.",
       "paragraphs": [
         "Visual Buyer Order cards use the seller branding already saved in Packing Slip Studio. Each purchased card shows its front image, customer-facing listing text without flaws, and the final paid price.",
-        "Buyer names, addresses, shipping details, private notes, purchase prices, and profit information are never included. CSM does not send anything automatically.",
+        "Buyer names, addresses, private notes, purchase prices, and profit information are never included. Card subtotal, shipping method and charge, final order total, and payment status are separate optional switches and stay off until the seller enables them. CSM remembers these visual-summary choices and does not send anything automatically.",
         "Square and vertical layouts save numbered PNG images to Downloads. Letter output creates a printable PDF. A missing image uses a clear placeholder instead of silently dropping the card."
       ],
       "steps": [
         "Open Buyer Orders and choose the order.",
         "Choose Create visual order cards.",
         "Pick Showcase or Compact and Square, Vertical, or Printable Letter.",
-        "Edit the heading and optional status line, then choose Generate preview.",
+        "Edit the heading and optional status line. If wanted, choose which subtotal, shipping, final total, or payment details should appear, then choose Generate preview.",
         "Review every page before copying the shown page or saving the complete numbered set."
       ],
       "tips": [

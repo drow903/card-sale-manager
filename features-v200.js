@@ -107,7 +107,9 @@ async function v2CreateOrderPage(cards, settings, page, pageCount) {
   const logoSource = brand.logoPath ? await window.cardSale.packingFileDataUrl(brand.logoPath) : (brand.brandName === "Card Sale Manager" ? BUILT_IN_BRAND_LOGO : "");
   if (logoSource) { try { const logo = await v2LoadImage(logoSource); v2Contain(ctx, logo, width - 340, 42, 276, 105); } catch {} }
   if (settings.showStatus && settings.status) { ctx.fillStyle = "#b7c7d7"; ctx.font = "24px system-ui"; ctx.fillText(settings.status, 64, 177); }
-  const top = settings.showStatus ? 215 : 180; const gap = 26; const cols = settings.layout === "compact" ? 2 : 1; const rows = Math.ceil(cards.length / cols); const cellWidth = (width - 128 - gap * (cols - 1)) / cols; const cellHeight = Math.min((height - top - 100 - gap * Math.max(0, rows - 1)) / Math.max(1, rows), settings.layout === "compact" ? 360 : 560);
+  const totalLines = page === pageCount ? [settings.showSubtotal, settings.showShipping, settings.showTotal, settings.showPayment].filter(Boolean).length + (settings.showTotal && Number(settings.discount || 0) ? 1 : 0) : 0;
+  const totalsHeight = totalLines ? 52 + totalLines * 38 : 0;
+  const top = settings.showStatus ? 215 : 180; const gap = 26; const cols = settings.layout === "compact" ? 2 : 1; const rows = Math.ceil(cards.length / cols); const cellWidth = (width - 128 - gap * (cols - 1)) / cols; const cellHeight = Math.min((height - top - 100 - totalsHeight - gap * Math.max(0, rows - 1)) / Math.max(1, rows), settings.layout === "compact" ? 360 : 560);
   for (let index = 0; index < cards.length; index += 1) {
     const card = cards[index]; const col = index % cols; const row = Math.floor(index / cols); const x = 64 + col * (cellWidth + gap); const y = top + row * (cellHeight + gap);
     ctx.fillStyle = "#112433"; ctx.beginPath(); ctx.roundRect(x, y, cellWidth, cellHeight, 22); ctx.fill();
@@ -117,6 +119,21 @@ async function v2CreateOrderPage(cards, settings, page, pageCount) {
     ctx.fillStyle = "#fff"; ctx.font = `700 ${cols === 2 ? 21 : 27}px system-ui`; const listing = v2ListingWithoutFlaws(card); ctx.fillText(listing.length > (cols === 2 ? 38 : 70) ? `${listing.slice(0, cols === 2 ? 37 : 69)}…` : listing, x + 20, y + cellHeight - 60);
     ctx.fillStyle = accent; ctx.font = `800 ${cols === 2 ? 25 : 31}px system-ui`; ctx.fillText(money(card.claimPrice ?? card.price), x + 20, y + cellHeight - 22);
   }
+  if (totalLines) {
+    const x = 64; const boxWidth = width - 128; const boxY = height - totalsHeight - 56;
+    ctx.fillStyle = "#112433"; ctx.beginPath(); ctx.roundRect(x, boxY, boxWidth, totalsHeight, 18); ctx.fill();
+    const lines = [];
+    if (settings.showSubtotal) lines.push(["Card subtotal", money(settings.subtotal)]);
+    if (settings.showShipping) lines.push([`Shipping · ${settings.shippingMethod || "Not selected"}`, money(settings.shipping)]);
+    if (settings.showTotal && Number(settings.discount || 0)) lines.push(["Discount", `-${money(settings.discount)}`]);
+    if (settings.showTotal) lines.push(["Order total", money(settings.total)]);
+    if (settings.showPayment) lines.push(["Payment", settings.paymentLabel]);
+    lines.forEach(([label, value], index) => {
+      const y = boxY + 38 + index * 38; ctx.fillStyle = "#b7c7d7"; ctx.font = "22px system-ui"; ctx.textAlign = "left"; ctx.fillText(label, x + 24, y);
+      ctx.fillStyle = label === "Order total" ? accent : "#fff"; ctx.font = `${label === "Order total" ? "800" : "700"} 24px system-ui`; ctx.textAlign = "right"; ctx.fillText(value, x + boxWidth - 24, y);
+    });
+    ctx.textAlign = "left";
+  }
   ctx.fillStyle = "#8ca1b2"; ctx.font = "20px system-ui"; ctx.textAlign = "right"; ctx.fillText(`Page ${page} of ${pageCount}`, width - 64, height - 34); ctx.textAlign = "left";
   return canvas.toDataURL("image/png");
 }
@@ -124,11 +141,12 @@ async function v2CreateOrderPage(cards, settings, page, pageCount) {
 function v2OrderSignature(cards) { return cards.map((card) => `${card.id}:${card.claimPrice ?? card.price}:${card.imagePath || ""}`).join("|"); }
 async function v2GenerateOrderCards() {
   const cards = cardsForBuyer(state.selectedBuyer); if (!cards.length) return toast("Choose a buyer order first.");
-  const settings = { format: $("#orderCardFormat").value, layout: $("#orderCardLayout").value, heading: $("#orderCardHeading").value.trim(), showStatus: $("#orderCardShowStatus").checked, status: $("#orderCardStatus").value.trim() };
+  const order = orderFor(state.selectedBuyer); const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0); const shipping = shippingAmount(order); const discount = Number(order.discount || 0);
+  const settings = { format: $("#orderCardFormat").value, layout: $("#orderCardLayout").value, heading: $("#orderCardHeading").value.trim(), showStatus: $("#orderCardShowStatus").checked, status: $("#orderCardStatus").value.trim(), showSubtotal: $("#orderCardShowSubtotal").checked, showShipping: $("#orderCardShowShipping").checked, showTotal: $("#orderCardShowTotal").checked, showPayment: $("#orderCardShowPayment").checked, subtotal, shipping, discount, total: subtotal + shipping - discount, shippingMethod: order.shippingMethod || "", paymentLabel: ["paid", "packed", "shipped"].includes(order.status) ? `Paid${order.paymentMethod ? ` via ${order.paymentMethod}` : ""}` : "Payment due" };
   const perPage = settings.format === "vertical" ? (settings.layout === "compact" ? 8 : 4) : settings.format === "letter" ? (settings.layout === "compact" ? 10 : 5) : (settings.layout === "compact" ? 6 : 3);
   const groups = []; for (let index = 0; index < cards.length; index += perPage) groups.push(cards.slice(index, index + perPage));
   v2OrderPages = []; for (let index = 0; index < groups.length; index += 1) v2OrderPages.push(await v2CreateOrderPage(groups[index], settings, index + 1, groups.length));
-  v2OrderPageIndex = 0; const order = orderFor(state.selectedBuyer); order.visualOrderCard = { signature: v2OrderSignature(cards), settings, generatedAt: new Date().toISOString() }; saveSoon(); v2RenderOrderPreview();
+  v2OrderPageIndex = 0; order.visualOrderCard = { signature: v2OrderSignature(cards), settings, generatedAt: new Date().toISOString() }; state.preferences ||= {}; state.preferences.visualOrderCardSettings = { format: settings.format, layout: settings.layout, heading: settings.heading, showStatus: settings.showStatus, status: settings.status, showSubtotal: settings.showSubtotal, showShipping: settings.showShipping, showTotal: settings.showTotal, showPayment: settings.showPayment }; saveSoon(); v2RenderOrderPreview();
 }
 function v2RenderOrderPreview() {
   $("#orderCardPreview").innerHTML = v2OrderPages.length ? `<button type="button" data-order-page-prev>‹</button><img src="${v2OrderPages[v2OrderPageIndex]}" alt="Order card page ${v2OrderPageIndex + 1}" /><button type="button" data-order-page-next>›</button>` : '<div class="empty-state"><p>Generate a preview before saving or copying.</p></div>';
@@ -136,6 +154,10 @@ function v2RenderOrderPreview() {
 }
 function v2OpenOrderCards() {
   const cards = cardsForBuyer(state.selectedBuyer); const order = orderFor(state.selectedBuyer); const stale = order.visualOrderCard && order.visualOrderCard.signature !== v2OrderSignature(cards);
+  const settings = state.preferences?.visualOrderCardSettings || order.visualOrderCard?.settings || {};
+  if (settings.format) $("#orderCardFormat").value = settings.format; if (settings.layout) $("#orderCardLayout").value = settings.layout; if (settings.heading) $("#orderCardHeading").value = settings.heading;
+  $("#orderCardShowStatus").checked = Boolean(settings.showStatus); if (settings.status) $("#orderCardStatus").value = settings.status;
+  $("#orderCardShowSubtotal").checked = Boolean(settings.showSubtotal); $("#orderCardShowShipping").checked = Boolean(settings.showShipping); $("#orderCardShowTotal").checked = Boolean(settings.showTotal); $("#orderCardShowPayment").checked = Boolean(settings.showPayment);
   $("#orderCardStaleMessage").classList.toggle("hidden", !stale); $("#orderCardStaleMessage").textContent = stale ? "This order changed since the last visual card was generated. Create a fresh preview before sharing it." : "";
   v2OrderPages = []; v2RenderOrderPreview(); $("#visualOrderCardDialog").showModal();
 }

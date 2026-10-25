@@ -158,7 +158,17 @@ tr:last-child td { border-bottom: 0; }
 .select-column { width: 38px; text-align: center; }
 .select-column input { width: 17px; height: 17px; }
 .bulk-actions, .match-bulk { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
-.bulk-actions { margin-left: auto; }
+.workspace-action-bar { flex: 1 1 100%; display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 10px; }
+.workspace-selection-group,.workspace-primary-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-width: 0; }
+.workspace-primary-actions { justify-content: flex-end; }
+.workspace-primary-actions button { white-space: nowrap; }
+.selection-count { display: inline-flex; align-items: center; min-height: 28px; padding: 0 9px; border-radius: 999px; background: var(--soft); color: var(--ink); font-weight: 800; white-space: nowrap; }
+.workspace-more-actions { position: relative; }
+.workspace-more-actions > summary { list-style: none; min-height: 40px; display: flex; align-items: center; padding: 0 15px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); color: var(--ink); font-weight: 700; cursor: pointer; white-space: nowrap; }
+.workspace-more-actions > summary::-webkit-details-marker { display: none; }
+.workspace-more-actions[open] > summary { border-color: var(--brand-green); }
+.workspace-more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 210px; display: grid; gap: 6px; padding: 9px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel); box-shadow: 0 14px 38px rgba(0,0,0,.2); }
+.workspace-more-menu button { width: 100%; justify-content: flex-start; white-space: nowrap; }
 .bundle-total-strip { display: flex; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--blue-soft); }
 .bundle-total-strip span { display: grid; gap: 3px; color: var(--muted); font-size: 12px; }
 .bundle-total-strip strong { color: var(--text); font-size: 18px; }
@@ -857,6 +867,18 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; background: var
 .readiness-item small { margin-top: 2px; color: var(--muted); }
 .recommended-choice { border-color: rgba(25,181,107,.55); background: rgba(25,181,107,.08); }
 .recommended-choice strong b { display: inline-block; margin-left: 6px; padding: 3px 7px; border-radius: 999px; background: var(--green); color: white; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; vertical-align: 2px; }
+@media (max-width: 1380px) {
+  .workspace-action-bar { grid-template-columns: 1fr auto; }
+  .workspace-selection-group { grid-column: 1 / -1; }
+  .workspace-primary-actions { justify-content: flex-start; }
+}
+@media (max-width: 900px) {
+  .stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .workspace-action-bar { grid-template-columns: 1fr; }
+  .workspace-more-actions { justify-self: start; }
+  .workspace-more-menu { left: 0; right: auto; }
+}
+@media (max-width: 560px) { .stats { grid-template-columns: 1fr; } }
 @media (max-width: 1150px) {
   .image-workflow-options { grid-template-columns: 1fr; }
   .workflow-option { min-height: auto; }
@@ -877,6 +899,8 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; background: var
 .facebook-capture blockquote{margin:12px 0;padding:12px 14px;border-left:4px solid var(--accent);background:var(--surface);border-radius:8px;white-space:pre-wrap}
 .facebook-capture-fields{display:grid;grid-template-columns:2fr 1.2fr 1fr .8fr;gap:10px;margin-bottom:12px}
 .order-card-controls,.trailer-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:end}
+.order-card-total-options{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+.order-card-total-options legend{padding:0 6px;color:var(--muted);font-size:12px;font-weight:800}
 .order-card-preview{min-height:320px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;justify-items:center;background:#03101a;border:1px solid var(--border);border-radius:14px;padding:16px;margin-top:16px}
 .order-card-preview img{max-width:100%;max-height:55vh;border-radius:10px;box-shadow:0 15px 45px rgba(0,0,0,.42)}
 .order-card-preview>button{font-size:30px;border-radius:50%;width:46px;height:46px}
@@ -891,4 +915,4 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; background: var
 .trailer-card-choice{display:grid;grid-template-columns:auto 48px minmax(0,1fr) auto;gap:8px;align-items:center;border:1px solid var(--border);border-radius:10px;padding:8px;background:var(--surface-2)}
 .trailer-card-choice img{width:48px;height:64px;object-fit:contain;background:#fff;border-radius:5px}
 .trailer-order-actions{display:flex;gap:4px}.trailer-order-actions button{padding:5px 8px}
-@media(max-width:1000px){.facebook-capture-fields,.order-card-controls,.trailer-controls{grid-template-columns:1fr 1fr}}
+@media(max-width:1000px){.facebook-capture-fields,.order-card-controls,.trailer-controls{grid-template-columns:1fr 1fr}.order-card-total-options{grid-template-columns:1fr 1fr}}

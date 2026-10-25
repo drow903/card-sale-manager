@@ -118,8 +118,10 @@ used. The original images and music files are never changed.
    Correctly named files help automatic matching, but filenames are not required.
 6. For automatic matching, open Advanced image folders and set the primary
    folder containing your year folders. Add or exclude multiple folders at once.
-   These settings carry over to every sale. Unique 100% matches are attached
-   automatically; genuinely ambiguous matches appear in Image Review with the
+   These settings carry over to every sale. CSM uses clear matching rules instead
+   of a percentage: year folder, player or team, card number, purchase date, year,
+   and brand. A single safe candidate is attached automatically; genuinely
+   ambiguous matches appear in Image Review with the
    reason they were suggested and the reason approval is required. Use Compare
    images to inspect competing files side by side. Related-image review shows
    complete file names, paths, purchase-date decisions, and every candidate for
