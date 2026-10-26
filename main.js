@@ -40,6 +40,7 @@ let closeFallbackTimer = null;
 let saveQueue = Promise.resolve();
 let activeCsmDocument = null;
 const cancelledImageScans = new Set();
+const imageFingerprintCache = new Map();
 const trailerProcess = { current: null };
 let facebookCompanionServer = null;
 const facebookCompanionPort = 43817;
@@ -710,7 +711,10 @@ function startFacebookCompanionServer() {
     if (!/^chrome-extension:\/\//i.test(origin)) return sendCompanionResponse(response, 403, { ok: false, message: "Browser extension access only." }, origin);
     const requested = new URL(request.url || "/", `http://127.0.0.1:${facebookCompanionPort}`);
     if (requested.pathname === "/status" && request.method === "GET") {
-      return sendCompanionResponse(response, 200, { ok: true, owner: ownerEntitled(), pairing: ownerEntitled() && Date.now() < facebookPairingUntil, appOpen: Boolean(mainWindow && !mainWindow.isDestroyed()) }, origin);
+      const supplied = String(request.headers["x-csm-token"] || "");
+      const expected = ownerEntitled() && supplied ? await facebookCompanionToken() : "";
+      const tokenValid = Boolean(expected && supplied.length === expected.length && crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected)));
+      return sendCompanionResponse(response, tokenValid ? 200 : 401, { ok: tokenValid, owner: ownerEntitled(), tokenValid, pairing: ownerEntitled() && Date.now() < facebookPairingUntil, appOpen: Boolean(mainWindow && !mainWindow.isDestroyed()), message: tokenValid ? "Connected to Card Sale Manager." : "Pair this browser with CSM again." }, origin);
     }
     if (requested.pathname === "/pair" && request.method === "POST") {
       if (!ownerEntitled() || Date.now() >= facebookPairingUntil) return sendCompanionResponse(response, 403, { ok: false, message: "Open Owner Comment Capture in CSM and start pairing first." }, origin);
@@ -732,12 +736,16 @@ function startFacebookCompanionServer() {
         receivedAt: new Date().toISOString(),
         commentText: String(payload.commentText || "").trim().slice(0, 4000),
         contextText: String(payload.contextText || "").trim().slice(0, 12000),
+        contextCandidates: Array.isArray(payload.contextCandidates) ? payload.contextCandidates.map((value) => String(value || "").trim().slice(0, 5000)).filter(Boolean).slice(0, 8) : [],
+        contextSource: String(payload.contextSource || "").trim().slice(0, 80),
         displayedName: String(payload.displayedName || "").trim().slice(0, 200),
         displayedTime: String(payload.displayedTime || "").trim().slice(0, 100),
         commentId: String(payload.commentId || "").trim().slice(0, 300),
+        parentCommentId: String(payload.parentCommentId || "").trim().slice(0, 300),
         pageUrl: String(payload.pageUrl || "").trim().slice(0, 2000)
       };
       if (!record.commentText) return sendCompanionResponse(response, 400, { ok: false, message: "Select or right-click the buyer's comment text and try again." }, origin);
+      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoading()) return sendCompanionResponse(response, 503, { ok: false, message: "CSM is still opening. Wait a moment and try the comment again." }, origin);
       mainWindow?.webContents.send("facebook:capture", record);
       return sendCompanionResponse(response, 200, { ok: true, message: "Sent to the CSM Claims Desk." }, origin);
     }
@@ -1257,6 +1265,63 @@ app.whenReady().then(() => {
       } catch {}
     }
     return details;
+  });
+
+  ipcMain.handle("images:validate-files", async (_event, filePaths) => {
+    if (!paidAllowed()) return [];
+    const unique = [...new Set((Array.isArray(filePaths) ? filePaths : []).map((value) => String(value || "")).filter(Boolean))].slice(0, 5000);
+    return unique.map((filePath) => {
+      try {
+        const stat = fs.statSync(filePath);
+        if (!stat.isFile()) return { path: filePath, valid: false, reason: "The path no longer points to a file." };
+        const readable = !nativeImage.createFromPath(filePath).isEmpty();
+        return { path: filePath, valid: readable, reason: readable ? "" : "The image is not readable locally. It may still be a cloud-only placeholder." };
+      } catch (error) {
+        return { path: filePath, valid: false, reason: error?.code === "ENOENT" ? "The image was moved, renamed, or deleted after the folder scan." : "The image is not currently available on this computer." };
+      }
+    });
+  });
+
+  ipcMain.handle("images:fingerprint-files", async (_event, filePaths) => {
+    if (!paidAllowed()) return [];
+    const unique = [...new Set((Array.isArray(filePaths) ? filePaths : []).map((value) => String(value || "")).filter(Boolean))].slice(0, 5000);
+    const results = [];
+    for (const filePath of unique) {
+      try {
+        const stat = await fs.promises.stat(filePath);
+        if (!stat.isFile()) throw new Error("Not a file");
+        const signature = `${stat.size}:${Math.round(stat.mtimeMs)}`;
+        const cached = imageFingerprintCache.get(filePath.toLowerCase());
+        if (cached?.signature === signature) { results.push({ path: filePath, valid: true, fingerprint: cached.fingerprint }); continue; }
+        const fingerprint = await new Promise((resolve, reject) => {
+          const hash = crypto.createHash("sha256");
+          const stream = fs.createReadStream(filePath);
+          stream.on("data", (chunk) => hash.update(chunk)); stream.on("error", reject); stream.on("end", () => resolve(hash.digest("hex")));
+        });
+        imageFingerprintCache.set(filePath.toLowerCase(), { signature, fingerprint });
+        results.push({ path: filePath, valid: true, fingerprint });
+      } catch { results.push({ path: filePath, valid: false, fingerprint: "" }); }
+    }
+    return results;
+  });
+
+  ipcMain.handle("images:inspect-folders", async (_event, input) => {
+    if (!paidAllowed()) return [];
+    const folders = (input?.folders || []).filter(Boolean);
+    const excluded = (input?.excludedFolders || []).map((folder) => path.resolve(folder).toLowerCase());
+    const isExcluded = (folder) => { const resolved = path.resolve(folder).toLowerCase(); return excluded.some((item) => resolved === item || resolved.startsWith(`${item}${path.sep}`)); };
+    const found = [];
+    const pending = folders.filter((folder) => fs.existsSync(folder) && !isExcluded(folder)).map((folder) => ({ folder, root: folder }));
+    while (pending.length && found.length < 10000) {
+      const current = pending.shift();
+      if (isExcluded(current.folder)) continue;
+      found.push({ path: current.folder, relativePath: path.join(path.basename(current.root), path.relative(current.root, current.folder), "folder-placeholder.jpg") });
+      try {
+        const entries = await fs.promises.readdir(current.folder, { withFileTypes: true });
+        entries.filter((entry) => entry.isDirectory()).forEach((entry) => { const child = path.join(current.folder, entry.name); if (!isExcluded(child)) pending.push({ folder: child, root: current.root }); });
+      } catch {}
+    }
+    return found;
   });
 
   ipcMain.handle("dialog:image-folder", async () => {

@@ -53,6 +53,54 @@ assert.match(wrongDate.rejectionReason, /purchase date conflicts/);
 
 const wrongFolder = matcher.propose({ card: cards[0], images: [image("Herzog-438-051626", "1960")], sale });
 assert.equal(wrongFolder.automatic, false);
-assert.match(wrongFolder.conflictReason, /outside the expected year folder/);
+assert.equal(wrongFolder.candidates.length, 0);
+assert.match(wrongFolder.rejectedCandidates[0].rejectionReason, /not inside the 1959 year folder/);
+
+const mantleCards = [card("m61", "Mickey Mantle", "300", "", "1961")];
+const mantleImages = [
+  image("Mantle", "1961"),
+  image("Mantle", "1962"),
+  image("Mantle", "1965")
+];
+const mantleSale = { imageMode: "single", cards: mantleCards };
+const mantleResult = matcher.propose({ card: mantleCards[0], images: mantleImages, sale: mantleSale });
+assert.equal(mantleResult.automatic, true, "The unique Mantle in the 1961 folder should auto-confirm.");
+assert.equal(mantleResult.candidates.length, 1, "Other Mantle files outside 1961 must not remain eligible.");
+assert.match(mantleResult.candidates[0].image.relativePath, /^1961\\/);
+
+const noYearFolder = matcher.propose({ card: mantleCards[0], images: [image("Mantle", "Unsorted")], sale: mantleSale });
+assert.equal(noYearFolder.candidates.length, 0, "A yearless folder must not bypass the year-first rule.");
+assert.match(noYearFolder.rejectedCandidates[0].rejectionReason, /not inside the 1961 year folder/);
+
+for (const sport of ["Football", "Basketball", "Hockey"]) {
+  const sportCard = { ...card(`sport-${sport}`, "Bo Jackson", "12", "", "1990"), sport };
+  const sportSale = { imageMode: "single", cards: [sportCard] };
+  const fallback = matcher.propose({ card: sportCard, images: [image("Bo-Jackson", sport), image("Bo-Jackson", "1991")], sale: sportSale });
+  assert.equal(fallback.automatic, true, `${sport} folder fallback should auto-confirm when the year folder has no match.`);
+  assert.equal(fallback.candidates.length, 1);
+  assert.equal(fallback.candidates[0].sportFolderMatch, true);
+  const yearFirst = matcher.propose({ card: sportCard, images: [image("Bo-Jackson", sport), image("Bo-Jackson", "1990")], sale: sportSale });
+  assert.equal(yearFirst.candidates[0].folderMatch, true, `The 1990 folder must remain stronger than the ${sport} fallback.`);
+  assert.equal(yearFirst.candidates[0].sportFolderMatch, false);
+}
+
+const weakSportCard = { ...card("weak-football", "Bo Jackson", "12", "", "1990"), sport: "Football" };
+const weakSportMatch = matcher.propose({ card: weakSportCard, images: [image("Jackson", "Football")], sale: { imageMode: "single", cards: [weakSportCard] } });
+assert.equal(weakSportMatch.automatic, false, "A surname-only sport fallback must require review.");
+assert.match(weakSportMatch.conflictReason, /only a surname/);
+
+const aliasMatch = matcher.propose({ card: weakSportCard, images: [image("Bo-Jackson", "Gridiron")], sale: { imageMode: "single", cards: [weakSportCard] }, folderAliases: { football: ["Gridiron"] } });
+assert.equal(aliasMatch.automatic, true, "A saved custom sport-folder alias should be recognized.");
+
+const shortYear = matcher.propose({ card: mantleCards[0], images: [image("Mantle", "61")], sale: mantleSale });
+assert.equal(shortYear.automatic, true, "A two-digit folder matching the card's full year should be accepted.");
+assert.equal(shortYear.candidates[0].folderMatch, true);
+
+const broadRange = matcher.propose({ card: mantleCards[0], images: [image("Mantle", "Cards 1948-2026")], sale: mantleSale });
+assert.equal(broadRange.candidates.length, 0, "A broad parent-folder year range must not be mistaken for the card's year folder.");
+
+const baseballCard = { ...card("baseball", "Bo Jackson", "12", "", "1990"), sport: "Baseball" };
+const baseballFallback = matcher.propose({ card: baseballCard, images: [image("Jackson", "Football")], sale: { imageMode: "single", cards: [baseballCard] } });
+assert.equal(baseballFallback.candidates.length, 0, "Baseball cards must not use the non-baseball sport-folder fallback.");
 
 console.log("Image matcher checks passed.");

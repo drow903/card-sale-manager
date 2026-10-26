@@ -128,8 +128,10 @@
       "summary": "Let CSM find likely images, then spend your time only on uncertain or conflicting matches.",
       "paragraphs": [
         "Choose Image lookup folders the first time you use a computer. Your primary, additional, and excluded folders carry from sale to sale.",
-        "CSM now uses named matching rules instead of a vague percentage. The expected year folder comes first, followed by player or team, card number, purchase date, year, and brand. A single eligible file in the correct folder can confirm automatically; date conflicts are rejected and duplicate copies stay together for review. In front-and-back mode, CSM also recognizes F, B, Front, Back, Obverse, Reverse, Side 1/2, and Scan 1/2 filename keys.",
-        "The same file cannot be attached to multiple listings within one sale. If CSM finds a conflict, both cards stay unconfirmed until you choose separate images."
+        "CSM treats the expected year folder as the first boundary. A 1961 card first considers files inside the 1961 folder, so the same player in 1962 or 1965 cannot create a conflict. Matching two-digit folders such as 61 are supported, while broad names such as Cards 1948-2026 are not mistaken for a specific year. If no valid year-folder match exists for a card marked Football, Basketball, or Hockey, CSM can fall back to the folder named for that sport. NFL, NBA, and NHL are recognized, and custom folder aliases can be saved in Image lookup folders. A surname-only sport fallback stays in review until stronger evidence supports it. Inside the chosen folder, CSM checks player or team, card number, purchase date, filename year, and brand. A single eligible file can confirm automatically; date conflicts are rejected and duplicate copies stay together for review. In front-and-back mode, CSM also recognizes F, B, Front, Back, Obverse, Reverse, Side 1/2, and Scan 1/2 filename keys.",
+        "Every lookup performs a fresh folder scan. Choose Check image folders first to see which sale years have folders, which sport fallbacks are available, and which cards need a Sport value. If Image Review cannot use a fallback because Sport is blank, set Football, Basketball, or Hockey on that row and CSM immediately retries it.",
+        "Before CSM attaches a suggestion, it verifies that the image still exists and is readable locally. Moved, deleted, unreadable, and cloud-only files remain unattached with a specific explanation.",
+        "The same image cannot be attached to multiple listings within one sale. CSM compares file contents, so an identical renamed copy in another folder is also blocked. If CSM finds a conflict, both cards stay unconfirmed until you choose separate images."
       ],
       "steps": [
         "Open Sale Workspace and choose Auto-match card images.",
@@ -139,7 +141,7 @@
         "Open Image inbox to see only files that are not attached to a card. Choose a destination card from the row, add more files, or send selected cards to ordered pairing without renaming anything.",
         "For ordered attachment, photograph cards in sale order, select the same cards, and review the numbered card-to-image list. Files can be ordered by the order received from the computer, filename, creation date, or modified date.",
         "Use Add image to assign a file manually, or drag a file directly onto the card row. Front-and-back sales provide separate Add front and Add back controls.",
-        "Use Re-run lookup on one card when its suggestion is wrong. Use the full recheck only when you want CSM to reconsider current and past matches."
+        "Use Re-run lookup on one card when its suggestion is wrong. Use Re-run lookup for this sale when you want CSM to reconsider every image in the active sale without touching previous, closed, or archived sales."
       ],
       "tips": [
         "Image Review labels each result as Confirmed automatically, Strong suggestion, Needs review, File conflict, Missing image, or Intentionally no image, and explains both the evidence and the reason for review.",

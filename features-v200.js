@@ -20,19 +20,39 @@ function v2ListingWithoutFlaws(card) {
   return [card.year, card.set, card.name, numberLabel(card), card.condition, duplicateInfo(card).label].map((value) => String(value || "").trim()).filter(Boolean).join(" ").replace(/\s+/g, " ");
 }
 
-function v2CaptureSuggestion(capture) {
-  const haystack = `${capture.contextText || ""} ${capture.commentText || ""}`.toLowerCase();
-  let best = null; let bestScore = 0;
-  activeSale().cards.forEach((card) => {
-    let score = 0;
-    const terms = [card.name, card.year, card.number, card.set].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
-    if (terms[0] && haystack.includes(terms[0])) score += 55;
-    if (terms[1] && haystack.includes(terms[1])) score += 18;
-    if (terms[2] && new RegExp(`(?:#|\\b)${terms[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(haystack)) score += 18;
-    if (terms[3] && haystack.includes(terms[3])) score += 9;
-    if (score > bestScore) { best = card; bestScore = score; }
-  });
-  return bestScore >= 45 ? best?.id || "" : "";
+function v2CaptureNormalize(value) { return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " "); }
+function v2CaptureEscape(value) { return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function v2CaptureCardScore(card, source, commentOnly = false) {
+  const raw = String(source || ""); const normalized = v2CaptureNormalize(raw); let score = 0; const reasons = [];
+  const ref = String(card.ref || "").trim();
+  if (ref && new RegExp(`(?:^|\\b)(?:ref(?:erence)?|listing|card|#)\\s*${v2CaptureEscape(ref)}(?:\\b|$)`, "i").test(raw)) { score += 140; reasons.push(`reference ${ref}`); }
+  if (commentOnly) return { score, reasons };
+  const listing = v2CaptureNormalize(formatLine(card));
+  const listingCore = v2CaptureNormalize(v2ListingWithoutFlaws(card));
+  if (listing && normalized.includes(listing)) { score += 150; reasons.push("complete listing"); }
+  else if (listingCore && normalized.includes(listingCore)) { score += 105; reasons.push("listing details"); }
+  const name = v2CaptureNormalize(card.name); const year = v2CaptureNormalize(card.year); const number = v2CaptureNormalize(card.number); const set = v2CaptureNormalize(card.set);
+  if (name && normalized.includes(name)) { score += 58; reasons.push("player"); }
+  if (year && new RegExp(`(?:^| )${v2CaptureEscape(year)}(?: |$)`).test(normalized)) { score += 22; reasons.push("year"); }
+  if (number && new RegExp(`(?:^| )(?:card |number |# )?${v2CaptureEscape(number)}(?: |$)`).test(normalized)) { score += 24; reasons.push("card number"); }
+  if (set && normalized.includes(set)) { score += 14; reasons.push("brand"); }
+  const duplicate = v2CaptureNormalize(duplicateInfo(card).label);
+  if (duplicate && normalized.includes(duplicate)) { score += 45; reasons.push("duplicate position"); }
+  return { score, reasons };
+}
+function v2CaptureMatch(capture) {
+  const contexts = [capture.contextText, ...(capture.contextCandidates || [])].map((value) => String(value || "").trim()).filter(Boolean);
+  const ranked = activeSale().cards.map((card) => {
+    const commentMatch = v2CaptureCardScore(card, capture.commentText, true);
+    let best = { score: 0, reasons: [], context: "" };
+    contexts.forEach((context) => { const match = v2CaptureCardScore(card, context); if (match.score > best.score) best = { ...match, context }; });
+    if (commentMatch.score > best.score) best = { ...commentMatch, context: capture.commentText || "" };
+    return { card, ...best };
+  }).sort((a, b) => b.score - a.score);
+  const best = ranked[0]; const second = ranked[1];
+  const tied = best && second && best.score === second.score;
+  const confident = Boolean(best && best.score >= 55 && !tied && best.score - Number(second?.score || 0) >= 12);
+  return { cardId: confident ? best.card.id : "", score: best?.score || 0, explanation: confident ? `Matched by ${best.reasons.join(", ")}.` : best?.score ? "More than one card could fit this comment. Choose the card before approving." : "CSM could not identify the listing comment. Choose the card before approving.", contextPreview: best?.context || contexts[0] || "" };
 }
 
 function v2ClassifyCapture(capture) {
@@ -57,7 +77,7 @@ function v2RenderCaptureDialog() {
   $("#facebookClaimWords").value = sale.facebookCaptureSettings.claimWords.join(", ");
   $("#facebookIgnoreWords").value = sale.facebookCaptureSettings.ignoreWords.join(", ");
   const cards = sale.cards;
-  $("#facebookCaptureList").innerHTML = sale.facebookCaptures.length ? sale.facebookCaptures.map((capture) => `<article class="facebook-capture ${capture.status !== "pending" ? "processed" : ""}" data-facebook-capture="${escapeHtml(capture.id)}"><header><strong>${escapeHtml(capture.displayedName || "Buyer name not detected")}</strong><span>${escapeHtml(capture.displayedTime || new Date(capture.capturedAt).toLocaleString())}</span></header><blockquote>${escapeHtml(capture.commentText)}</blockquote>${capture.pageMismatch ? '<p class="cost-warning">This comment came from a different Facebook URL than the one saved for this sale.</p>' : ""}<div class="facebook-capture-fields"><label>Card<select data-capture-card><option value="">Choose card…</option>${cards.map((card) => `<option value="${card.id}" ${capture.cardId === card.id ? "selected" : ""}>${escapeHtml(card.ref)} · ${escapeHtml(v2ListingWithoutFlaws(card))}</option>`).join("")}</select></label><label>Buyer<input data-capture-buyer value="${escapeHtml(capture.displayedName || "")}" /></label><label>Action<select data-capture-type>${["claim", "offer", "backup", "question", "unrecognized"].map((type) => `<option value="${type}" ${capture.type === type ? "selected" : ""}>${type[0].toUpperCase()}${type.slice(1)}</option>`).join("")}</select></label><label>Offer price<input data-capture-price type="number" min="0" step="0.01" value="${escapeHtml(capture.offerPrice || "")}" /></label></div><footer>${capture.status === "pending" ? '<button type="button" class="primary" data-capture-approve>Approve</button><button type="button" class="secondary" data-capture-ignore>Ignore</button>' : `<span class="status paid">${escapeHtml(capture.status)}</span>`}</footer></article>`).join("") : '<div class="empty-state"><h3>No captured comments yet</h3><p>Use the browser right-click action, then review the result here.</p></div>';
+  $("#facebookCaptureList").innerHTML = sale.facebookCaptures.length ? sale.facebookCaptures.map((capture) => `<article class="facebook-capture ${capture.status !== "pending" ? "processed" : ""}" data-facebook-capture="${escapeHtml(capture.id)}"><header><strong>${escapeHtml(capture.displayedName || "Buyer name not detected")}</strong><span>${escapeHtml(capture.displayedTime || new Date(capture.capturedAt).toLocaleString())}</span></header><blockquote>${escapeHtml(capture.commentText)}</blockquote><p class="capture-match ${capture.cardId ? "matched" : "review"}"><strong>${capture.cardId ? "Card identified" : "Card needs review"}:</strong> ${escapeHtml(capture.matchExplanation || (capture.cardId ? "Matched to the Facebook listing comment." : "Choose the card before approving."))}</p>${capture.contextPreview ? `<details class="capture-context"><summary>Facebook listing detected</summary><p>${escapeHtml(capture.contextPreview.slice(0, 600))}</p></details>` : ""}${capture.pageMismatch ? '<p class="cost-warning">This comment came from a different Facebook URL than the one saved for this sale.</p>' : ""}<div class="facebook-capture-fields"><label>Card<select data-capture-card><option value="">Choose card…</option>${cards.map((card) => `<option value="${card.id}" ${capture.cardId === card.id ? "selected" : ""}>${escapeHtml(card.ref)} · ${escapeHtml(v2ListingWithoutFlaws(card))}</option>`).join("")}</select></label><label>Buyer<input data-capture-buyer value="${escapeHtml(capture.displayedName || "")}" /></label><label>Action<select data-capture-type>${["claim", "offer", "backup", "question", "unrecognized"].map((type) => `<option value="${type}" ${capture.type === type ? "selected" : ""}>${type[0].toUpperCase()}${type.slice(1)}</option>`).join("")}</select></label><label>Offer price<input data-capture-price type="number" min="0" step="0.01" value="${escapeHtml(capture.offerPrice || "")}" /></label></div><footer>${capture.status === "pending" ? '<button type="button" class="primary" data-capture-approve>Approve</button><button type="button" class="secondary" data-capture-ignore>Ignore</button>' : `<span class="status paid">${escapeHtml(capture.status)}</span>`}</footer></article>`).join("") : '<div class="empty-state"><h3>No captured comments yet</h3><p>Use the browser right-click action, then review the result here.</p></div>';
   v2UpdateCaptureBadge();
 }
 
@@ -260,7 +280,7 @@ function v2Init() {
   $("#facebookExtensionFolderBtn")?.addEventListener("click", () => window.cardSale.openFacebookExtensionFolder());
   ["#facebookClaimWords", "#facebookIgnoreWords"].forEach((selector) => $(selector)?.addEventListener("change", () => { const sale = v2SaleSettings(); sale.facebookCaptureSettings[selector.includes("Ignore") ? "ignoreWords" : "claimWords"] = $(selector).value.split(",").map((value) => value.trim()).filter(Boolean); saveSoon(); }));
   $("#facebookCaptureList")?.addEventListener("click", (event) => { const row = event.target.closest("[data-facebook-capture]"); if (!row) return; const capture = v2SaleSettings().facebookCaptures.find((item) => item.id === row.dataset.facebookCapture); if (!capture) return; if (event.target.matches("[data-capture-ignore]")) { capture.status = "ignored"; saveSoon(); v2RenderCaptureDialog(); return; } if (!event.target.matches("[data-capture-approve]")) return; const cardId = $("[data-capture-card]", row).value; const buyer = $("[data-capture-buyer]", row).value.trim(); const type = $("[data-capture-type]", row).value; const price = $("[data-capture-price]", row).value; if (["claim", "offer"].includes(type)) { if (!cardId || !buyer) return toast("Choose a card and enter the buyer name."); assignBuyer(cardId, buyer, price, type, `Captured from Facebook: ${capture.commentText}`); } capture.status = type === "question" ? "question noted" : type === "backup" ? "backup noted" : "approved"; capture.cardId = cardId; capture.type = type; saveSoon(); v2RenderCaptureDialog(); });
-  window.cardSale.onFacebookCapture((capture) => { const sale = v2SaleSettings(); const duplicate = capture.commentId && sale.facebookCaptures.some((item) => item.commentId === capture.commentId); if (duplicate) return toast("That Facebook comment was already captured."); const record = { ...capture, id: crypto.randomUUID(), status: "pending", type: v2ClassifyCapture(capture), cardId: v2CaptureSuggestion(capture), pageMismatch: Boolean(sale.facebookPostUrl && capture.pageUrl && !capture.pageUrl.includes(sale.facebookPostUrl) && !sale.facebookPostUrl.includes(capture.pageUrl)) }; const offer = String(capture.commentText || "").match(/\$\s*(\d+(?:\.\d{1,2})?)/); if (offer) record.offerPrice = offer[1]; sale.facebookCaptures.unshift(record); saveSoon(); v2UpdateCaptureBadge(); if ($("#facebookCaptureDialog").open) v2RenderCaptureDialog(); toast("Facebook comment captured for review."); });
+  window.cardSale.onFacebookCapture((capture) => { const sale = v2SaleSettings(); const duplicate = capture.commentId && sale.facebookCaptures.some((item) => item.commentId === capture.commentId); if (duplicate) return toast("That Facebook comment was already captured."); const match = v2CaptureMatch(capture); const record = { ...capture, id: crypto.randomUUID(), status: "pending", type: v2ClassifyCapture(capture), cardId: match.cardId, matchScore: match.score, matchExplanation: match.explanation, contextPreview: match.contextPreview, pageMismatch: Boolean(sale.facebookPostUrl && capture.pageUrl && !capture.pageUrl.includes(sale.facebookPostUrl) && !sale.facebookPostUrl.includes(capture.pageUrl)) }; const offer = String(capture.commentText || "").match(/\$\s*(\d+(?:\.\d{1,2})?)/); if (offer) record.offerPrice = offer[1]; sale.facebookCaptures.unshift(record); saveSoon(); v2UpdateCaptureBadge(); if ($("#facebookCaptureDialog").open) v2RenderCaptureDialog(); toast(match.cardId ? "Facebook comment captured and tied to its card." : "Comment captured. Choose the card before approving."); });
 
   $("#popoutLiveSaleBtn")?.addEventListener("click", () => window.cardSale.openLivePopout(v2LivePayload()));
   window.cardSale.onLivePopoutAction(v2HandlePopoutAction);

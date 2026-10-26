@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld("cardSale", {
   inspectSetupPaths: (filePaths) => ipcRenderer.invoke("setup:inspect-paths", filePaths),
   chooseImages: () => ipcRenderer.invoke("dialog:images"),
   imageFileDetails: (filePaths) => ipcRenderer.invoke("images:file-details", filePaths),
+  validateImageFiles: (filePaths) => ipcRenderer.invoke("images:validate-files", filePaths),
+  fingerprintImageFiles: (filePaths) => ipcRenderer.invoke("images:fingerprint-files", filePaths),
+  inspectImageFolders: (input) => ipcRenderer.invoke("images:inspect-folders", input),
   droppedFilePath: (file) => {
     try { return webUtils.getPathForFile(file); } catch { return ""; }
   },

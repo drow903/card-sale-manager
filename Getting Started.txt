@@ -118,10 +118,18 @@ used. The original images and music files are never changed.
    Correctly named files help automatic matching, but filenames are not required.
 6. For automatic matching, open Advanced image folders and set the primary
    folder containing your year folders. Add or exclude multiple folders at once.
-   These settings carry over to every sale. CSM uses clear matching rules instead
-   of a percentage: year folder, player or team, card number, purchase date, year,
-   and brand. A single safe candidate is attached automatically; genuinely
-   ambiguous matches appear in Image Review with the
+   These settings carry over to every sale. The card's year folder is the first
+   boundary: a 1961 card first searches the 1961 folder, so the same player in
+   1962 or 1965 cannot create a conflict. If no valid year-folder match exists for
+   a card marked Football, Basketball, or Hockey, CSM can fall back to the folder
+   named for that sport. NFL, NBA, and NHL are also recognized, and custom folder
+   names can be saved in Image lookup folders. A surname-only sport fallback stays
+   in review until a card number, purchase date, filename year, or full player name
+   supports it. Four-digit year folders and matching two-digit folders such as 61
+   are recognized; broad names such as Cards 1948-2026 are not mistaken for a
+   specific year. Inside the chosen folder, CSM checks player or team, card number,
+   purchase date, filename year, and brand. A single safe candidate is attached
+   automatically; genuinely ambiguous matches appear in Image Review with the
    reason they were suggested and the reason approval is required. Use Compare
    images to inspect competing files side by side. Related-image review shows
    complete file names, paths, purchase-date decisions, and every candidate for
@@ -133,6 +141,13 @@ used. The original images and music files are never changed.
    has that purchase date. A valid but different filename date is rejected, not
    merely given a lower score. Same-card duplicates with the same date use their
    final sequence number and remain in review if more than one assignment is safe.
+   Every lookup performs a fresh folder scan. Before attaching a suggestion, CSM
+   checks that the image still exists and can be opened locally; moved, deleted,
+   unreadable, or cloud-only files stay unattached with a specific explanation.
+   Use Check image folders before lookup to see which sale years have folders,
+   which sport fallbacks are available, and which cards need a Sport value. When
+   Image Review cannot use a sport fallback because Sport is blank, choose
+   Football, Basketball, or Hockey on that row to save the value and retry it.
 7. For filename-free batch attachment, select cards with their checkboxes. Use
    Shift-click or Select range when the cards are continuous, then choose Attach
    images in order. Select the image files in the same order the cards appear in
@@ -142,7 +157,8 @@ used. The original images and music files are never changed.
    you deliberately allow a partial batch. In front/back sales, choose whether
    files alternate front/back or contain all fronts followed by all backs.
    To attach one card at a time, drag an image onto that card's row or use its
-   Add image button. CSM will not reuse the same file on multiple listings.
+   Add image button. CSM will not reuse the same file on multiple listings, even
+   when an identical copy has a different filename or lives in another folder.
    Image inbox shows files that have been added but are not attached yet. Assign
    one directly to a card, add more images, or send selected cards to ordered
    pairing.
@@ -170,9 +186,9 @@ used. The original images and music files are never changed.
     Duplicate cards are labeled (1 of x). Date-coded filenames (MMDDYY, MDDYYYY,
     or MMDDYYYY) and a final sequence number such as 1 or 2 break ties.
     Re-run lookup on a card to recheck it together with any cards that shared
-    the same suggestion. Re-run lookup for every sale deliberately resets and
-    rechecks all current and past-sale image links. One file can never be linked
-    to more than one listing anywhere in the workspace.
+    the same suggestion. Re-run lookup for this sale deliberately resets and
+    rechecks only the active sale; closed, archived, and previous sales are left
+    alone. One file can never be linked to more than one listing within a sale.
 14. The app checks for GitHub releases when it opens. Use Check for updates in
     the sidebar at any time. Confirm the update once and the app downloads and
     installs the Windows setup file automatically.

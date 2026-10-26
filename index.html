@@ -126,7 +126,7 @@
               <div class="queue-actions">
                 <button id="autoMatchBtn" class="primary full">Auto-match card images</button>
                 <button id="missingImagesBtn" class="secondary full">Open Missing Images Workspace</button>
-                <button id="forceAllImageLookupBtn" class="secondary full">Re-run lookup for every sale</button>
+                <button id="forceAllImageLookupBtn" class="secondary full">Re-run lookup for this sale</button>
                 <div id="lookupProgress" class="task-progress hidden"><div class="progress-track"><div id="lookupProgressBar" class="progress-bar"></div></div><div class="progress-caption"><small id="lookupProgressText">Starting image lookup…</small><button id="cancelImageLookupBtn" type="button" class="row-action">Cancel</button></div></div>
                 <button id="imageFolderSettingsBtn" class="secondary full">Image lookup folders</button>
                 <button id="addFolderBtn" class="secondary full">Add image folder</button>
@@ -522,6 +522,7 @@
         <section class="folder-section"><div><h3>Primary folder</h3><p>The main folder that contains your year folders.</p></div><div id="primaryFolderRow"></div><button type="button" id="choosePrimaryFolderBtn" class="secondary">Choose primary folder</button></section>
         <section class="folder-section"><div><h3>Additional folders</h3><p>These shared folders are searched for every sale.</p></div><div id="additionalFolderList" class="folder-list"></div><button type="button" id="addLookupFolderBtn" class="secondary">+ Add one or more folders</button></section>
         <section class="folder-section"><div><h3>Excluded folders</h3><p>Images inside these shared folders are ignored for every sale.</p></div><div id="excludedFolderList" class="folder-list"></div><button type="button" id="addExcludedFolderBtn" class="secondary">+ Exclude one or more folders</button></section>
+        <section class="folder-section"><div><h3>Sport-folder fallbacks</h3><p>If no valid year-folder match exists, these folder names may be used when the card’s Sport is set. Separate aliases with commas.</p></div><div class="mapping-grid"><label>Football<input id="footballFolderAliases" placeholder="Football, NFL" /></label><label>Basketball<input id="basketballFolderAliases" placeholder="Basketball, NBA" /></label><label>Hockey<input id="hockeyFolderAliases" placeholder="Hockey, NHL" /></label></div></section>
         <div class="dialog-actions"><button value="default" class="primary">Done</button></div>
       </form>
     </dialog>

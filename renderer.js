@@ -442,6 +442,8 @@ function lookupSettings() {
   state.lookupSettings ||= { primaryFolder: "", additionalFolders: [], excludedFolders: [] };
   state.lookupSettings.additionalFolders ||= [];
   state.lookupSettings.excludedFolders ||= [];
+  state.lookupSettings.sportFolderAliases ||= { football: ["Football", "NFL"], basketball: ["Basketball", "NBA"], hockey: ["Hockey", "NHL"] };
+  ["football", "basketball", "hockey"].forEach((sport) => { state.lookupSettings.sportFolderAliases[sport] ||= []; });
   return state.lookupSettings;
 }
 
@@ -1273,7 +1275,7 @@ function openImageInbox() {
   $("#imageInboxDialog").showModal();
 }
 
-function attachInboxImage(row) {
+async function attachInboxImage(row) {
   if (!requireImportLicense()) return;
   const value = $("[data-inbox-target]", row)?.value || "";
   const [cardId, slot = "single"] = value.split("::");
@@ -1281,6 +1283,8 @@ function attachInboxImage(row) {
   const card = activeSale().cards.find((item) => item.id === cardId);
   const imagePath = row.dataset.inboxImage;
   if (!card || !imagePath) return;
+  const contentConflicts = await imageContentConflicts([{ path: imagePath, cardId: card.id, slot }], activeSale());
+  if (contentConflicts.has(imagePath.toLowerCase())) return toast(contentConflicts.get(imagePath.toLowerCase()));
   if (!attachImage(card, imagePath, true, activeSale(), slot)) return;
   state.manualMatchMemory ||= {};
   state.manualMatchMemory[imageMemoryKey(card, slot)] = imagePath;
@@ -2273,7 +2277,7 @@ function moveOrderedImage(index, direction) {
   renderOrderedImageReview();
 }
 
-function applyOrderedImages() {
+async function applyOrderedImages() {
   if (!pendingOrderedImages) return;
   const sale = activeSale();
   const cards = sortedSaleCards(sale).filter((card) => pendingOrderedImages.cardIds.includes(card.id));
@@ -2286,6 +2290,8 @@ function applyOrderedImages() {
   if (duplicate) return toast("The same image cannot be attached more than once.");
   const conflict = files.map((file, index) => ({ file, target: targets[index], owner: imageOwner(file.path, targets[index]?.card.id, sale, targets[index]?.slot) })).find((item) => item.owner);
   if (conflict) return toast("An image is already attached to another listing: " + conflict.file.name + ".");
+  const contentConflicts = await imageContentConflicts(files.map((file, index) => ({ path: file.path, cardId: targets[index]?.card.id, slot: targets[index]?.slot, label: targets[index] ? `${targets[index].card.ref} · ${targets[index].card.name}` : "" })), sale);
+  if (contentConflicts.size) return toast(contentConflicts.values().next().value);
   snapshotSale("Before attaching images in sale order");
   const replaced = [];
   files.forEach((file, index) => {
@@ -2334,6 +2340,8 @@ async function attachDroppedImagesToCard(cardId, paths, slotHint = "") {
   } else assignments.push({ file: details[0], slot: "single" });
   const conflict = assignments.find(({ file, slot }) => imageOwner(file.path, card.id, sale, slot));
   if (conflict) return toast("That file is already attached to another listing.");
+  const contentConflicts = await imageContentConflicts(assignments.map(({ file, slot }) => ({ path: file.path, cardId: card.id, slot, label: `${card.ref} · ${card.name}` })), sale);
+  if (contentConflicts.size) return toast(contentConflicts.values().next().value);
   snapshotSale("Before attaching dropped image");
   assignments.forEach(({ file, slot }) => {
     const previous = imagePathFor(card, slot);
@@ -2386,11 +2394,11 @@ function imageMatchRecords(records) {
 }
 
 function scoreImage(card, image, sale = activeSale(), slot = "single") {
-  return window.CSMImageMatcher.evaluateCandidate({ card, image, sale, slot, cards: sale.cards });
+  return window.CSMImageMatcher.evaluateCandidate({ card, image, sale, slot, cards: sale.cards, folderAliases: lookupSettings().sportFolderAliases });
 }
 
 function proposedImageMatch(card, images, sale = activeSale(), slot = "single") {
-  const match = window.CSMImageMatcher.propose({ card, images, sale, slot });
+  const match = window.CSMImageMatcher.propose({ card, images, sale, slot, folderAliases: lookupSettings().sportFolderAliases });
   return { ...match, key: imageMatchKey(card, slot), currentPath: imagePathFor(card, slot) };
 }
 
@@ -2422,6 +2430,33 @@ function attachImage(card, imagePath, quiet = false, sale = activeSale(), slot =
     sale.images.push({ id: uid(), path: imagePath, name: imagePath.split(/[\\/]/).pop() });
   }
   return true;
+}
+
+async function validateImagePath(imagePath) {
+  if (!imagePath) return { path: "", valid: true, reason: "" };
+  const results = await window.cardSale.validateImageFiles([imagePath]);
+  return results[0] || { path: imagePath, valid: false, reason: "The image is no longer available on this computer." };
+}
+
+async function imageContentConflicts(assignments, sale = activeSale()) {
+  const normalized = assignments.map((item) => ({ ...item, path: String(item.path || ""), slot: item.slot === "back" ? "back" : "single" })).filter((item) => item.path);
+  const targetKeys = new Set(normalized.map((item) => `${item.cardId}::${item.slot}`));
+  const existing = sale.cards.flatMap((card) => ["single", "back"].map((slot) => ({ cardId: card.id, slot, path: imagePathFor(card, slot), label: `${card.ref} · ${card.name}` }))).filter((item) => item.path && !targetKeys.has(`${item.cardId}::${item.slot}`));
+  const all = [...normalized, ...existing];
+  const fingerprints = await window.cardSale.fingerprintImageFiles([...new Set(all.map((item) => item.path))]);
+  const byPath = new Map(fingerprints.filter((item) => item.valid && item.fingerprint).map((item) => [item.path.toLowerCase(), item.fingerprint]));
+  const conflicts = new Map();
+  normalized.forEach((item, index) => {
+    const fingerprint = byPath.get(item.path.toLowerCase());
+    if (!fingerprint) return;
+    const other = all.find((candidate, candidateIndex) => {
+      if (candidate === item || candidateIndex === index) return false;
+      if (candidate.cardId === item.cardId && candidate.slot === item.slot) return false;
+      return candidate.path.toLowerCase() !== item.path.toLowerCase() && byPath.get(candidate.path.toLowerCase()) === fingerprint;
+    });
+    if (other) conflicts.set(item.path.toLowerCase(), `This is a duplicate copy of ${fileName(other.path)}${other.label ? ` already tied to ${other.label}` : ""}. Choose a different image.`);
+  });
+  return conflicts;
 }
 
 function coordinateImageAssignments(matches) {
@@ -2482,8 +2517,8 @@ async function autoMatchImages(options = {}) {
   saveSoon();
   $("#lookupFolderLabel").textContent = folder;
   const allRecords = allCardRecords();
-  let baseRecords = options.allSales
-    ? allRecords.slice()
+  let baseRecords = options.currentSale
+    ? sale.cards.map((card) => ({ sale, card }))
     : options.cardIds?.length
       ? allRecords.filter((record) => options.cardIds.includes(record.card.id))
       : sale.cards.filter((card) => !cardHasRequiredImages(card, sale)).map((card) => ({ sale, card }));
@@ -2514,15 +2549,8 @@ async function autoMatchImages(options = {}) {
   let images;
   try {
     const signature = JSON.stringify({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders });
-    const index = state.imageFolderIndex;
-    const indexFresh = !options.force && index?.signature === signature && Date.now() - Number(index.scannedAt || 0) < 6 * 60 * 60 * 1000 && Array.isArray(index.images);
-    if (indexFresh) {
-      images = index.images.filter((image) => !confirmedPaths.has(String(image.path || "").toLowerCase()));
-      progressBar.style.width = "60%"; progressText.textContent = `Using saved folder index · ${images.length} images`;
-    } else {
-      images = await window.cardSale.scanImageFolder({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders, excludedPaths: options.force ? [] : [...confirmedPaths] });
-      state.imageFolderIndex = { signature, scannedAt: Date.now(), images: clone(images) }; saveSoon();
-    }
+    images = await window.cardSale.scanImageFolder({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders, excludedPaths: options.force ? [] : [...confirmedPaths] });
+    state.imageFolderIndex = { signature, scannedAt: Date.now(), images: clone(images) }; saveSoon();
   } catch (error) {
     progress.classList.add("hidden");
     toast(error.message || "Image lookup could not finish.");
@@ -2573,6 +2601,31 @@ async function autoMatchImages(options = {}) {
     }
   });
 
+  const candidatePaths = [...new Set(proposed.flatMap((match) => match.candidates.map((candidate) => candidate.image.path)).filter(Boolean))];
+  const fileChecks = await window.cardSale.validateImageFiles(candidatePaths);
+  const invalidFiles = new Map(fileChecks.filter((check) => !check.valid).map((check) => [check.path.toLowerCase(), check.reason]));
+  proposed.forEach((match) => {
+    const invalid = match.candidates.filter((candidate) => invalidFiles.has(candidate.image.path.toLowerCase()));
+    if (!invalid.length) return;
+    invalid.forEach((candidate) => match.rejectedCandidates.push({ ...candidate, rejected: true, rejectionReason: invalidFiles.get(candidate.image.path.toLowerCase()), rejectionReasons: [invalidFiles.get(candidate.image.path.toLowerCase())] }));
+    match.candidates = match.candidates.filter((candidate) => !invalidFiles.has(candidate.image.path.toLowerCase()));
+    match.automatic = false;
+    match.conflict = true;
+    match.status = match.candidates.length ? "file-conflict" : "missing-image";
+    match.conflictReason = "One or more suggested images moved, changed, or are not available locally. Run lookup again after the files finish syncing.";
+  });
+
+  for (const saleId of targetSaleIds) {
+    const targetSale = state.sales.find((item) => item.id === saleId); if (!targetSale) continue;
+    const saleMatches = proposed.filter((match) => match.sale.id === saleId && match.candidates[0]);
+    const contentConflicts = await imageContentConflicts(saleMatches.map((match) => ({ path: match.candidates[0].image.path, cardId: match.card.id, slot: match.slot, label: `${match.card.ref} · ${match.card.name}` })), targetSale);
+    saleMatches.forEach((match) => {
+      const message = contentConflicts.get(match.candidates[0].image.path.toLowerCase());
+      if (!message) return;
+      match.automatic = false; match.conflict = true; match.status = "file-conflict"; match.conflictReason = message; match.selected = "";
+    });
+  }
+
   const targetRecordKeys = new Set(records.map((record) => `${record.sale.id}::${record.key}`));
   const used = new Set(imageMatchRecords(allCardRecords()).filter((record) => !targetRecordKeys.has(`${record.sale.id}::${record.key}`) && imagePathFor(record.card, record.slot)).map((record) => `${record.sale.id}::${imagePathFor(record.card, record.slot).toLowerCase()}`));
   const automatic = [];
@@ -2602,7 +2655,7 @@ async function autoMatchImages(options = {}) {
   });
 
   const reviewItems = review.map((match) => ({ ...match, status: match.automatic ? "strong-suggestion" : match.status, confirmed: false }));
-  pendingMatches = { review: reviewItems, scanned: images.length, filter: "all", query: "", scope: options.allSales ? "all sales" : records.length > 1 ? `${records.length} related cards` : sale.name };
+  pendingMatches = { review: reviewItems, scanned: images.length, filter: "all", query: "", scope: options.currentSale ? sale.name : records.length > 1 ? `${records.length} related cards` : sale.name };
   progressBar.style.width = "100%";
   progressText.textContent = `Complete · ${automatic.length} safe match${automatic.length === 1 ? "" : "es"} attached automatically`;
   if (automatic.length) saveSoon();
@@ -2636,10 +2689,11 @@ async function removeAndRematchImage(cardId, slot = "single") {
   await forceImageLookupForCard(cardId);
 }
 
-async function forceAllImageLookup() {
-  const count = allCardRecords().length;
-  if (!count || !window.confirm(`Re-run image lookup for all ${count} cards in every sale, including past sales? Existing confirmed links will be rechecked and uncertain matches will return to review.`)) return;
-  await autoMatchImages({ allSales: true, force: true });
+async function forceSaleImageLookup() {
+  const sale = activeSale();
+  const count = sale.cards.length;
+  if (!count || !window.confirm(`Re-run image lookup for all ${count} cards in ${sale.name}? Existing confirmed links in this sale will be rechecked and uncertain matches will return to review.`)) return;
+  await autoMatchImages({ currentSale: true, force: true });
 }
 
 function matchReviewExplanation(match) {
@@ -2723,24 +2777,45 @@ function openMissingImages() {
   $("#missingImagesDialog").showModal();
 }
 
-function renderImagePreflight() {
+async function renderImagePreflight() {
   const settings = lookupSettings();
   const folderCount = [settings.primaryFolder, ...settings.additionalFolders].filter(Boolean).length;
-  const indexed = Array.isArray(state.imageFolderIndex?.images) ? state.imageFolderIndex.images.length : 0;
   const missing = missingImageRecords().length;
   const checks = [
     [Boolean(settings.primaryFolder), "Primary image folder", settings.primaryFolder || "No folder selected yet"],
     [folderCount > 0, "Folders included", folderCount ? `${folderCount} folder location${folderCount === 1 ? "" : "s"} will be searched` : "Choose at least one folder"],
     [true, "Excluded folders", settings.excludedFolders.length ? `${settings.excludedFolders.length} folder${settings.excludedFolders.length === 1 ? "" : "s"} will be ignored` : "No folders are excluded"],
-    [indexed > 0, "Saved image index", indexed ? `${indexed} images were found during the last scan` : "Run lookup once to create the image index"],
+    [true, "Fresh folder scan", "CSM rescans the configured folders every time lookup runs"],
     [missing === 0, "Cards needing images", missing ? `${missing} image slot${missing === 1 ? "" : "s"} still need a file` : "Every card is complete"]
   ];
   $("#imagePreflightResults").innerHTML = checks.map(([ready, label, detail]) => `<div class="readiness-item ${ready ? "ready" : "warning"}"><span>${ready ? "✓" : "!"}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></div></div>`).join("");
   $("#preflightRunLookupBtn").disabled = !settings.primaryFolder || missing === 0;
   $("#preflightRunLookupBtn").title = !settings.primaryFolder ? "Choose a primary folder before running lookup." : missing === 0 ? "Every card already has its required images." : "";
+  if (!settings.primaryFolder) return;
+  $("#imagePreflightResults").insertAdjacentHTML("beforeend", `<div class="readiness-item"><span>…</span><div><strong>Folder coverage</strong><small>Checking the years and sport fallbacks needed by this sale…</small></div></div>`);
+  try {
+    const folders = await window.cardSale.inspectImageFolders({ folders: [settings.primaryFolder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders });
+    const years = [...new Set(activeSale().cards.map((card) => window.CSMImageMatcher.expectedYear(card.year)).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
+    const availableYears = years.filter((year) => folders.some((folder) => window.CSMImageMatcher.pathFolderYears(folder, year).includes(year)));
+    const missingYears = years.filter((year) => !availableYears.includes(year));
+    const availableSports = ["football", "basketball", "hockey"].filter((sport) => folders.some((folder) => window.CSMImageMatcher.pathFolderSports(folder, settings.sportFolderAliases).includes(sport)));
+    const fallbackCards = activeSale().cards.filter((card) => missingYears.includes(window.CSMImageMatcher.expectedYear(card.year)));
+    const unsetSport = fallbackCards.filter((card) => !window.CSMImageMatcher.expectedSport(card.sport)).length;
+    const missingSportFolders = [...new Set(fallbackCards.map((card) => window.CSMImageMatcher.expectedSport(card.sport)).filter((sport) => sport && !availableSports.includes(sport)))];
+    const coverage = [
+      [missingYears.length === 0, "Year-folder coverage", years.length ? (missingYears.length ? `Missing: ${missingYears.join(", ")} · Found: ${availableYears.join(", ") || "none"}` : `Found every required year: ${availableYears.join(", ")}`) : "No card years are set in this sale"],
+      [missingSportFolders.length === 0, "Sport-folder fallbacks", availableSports.length ? `Available: ${availableSports.map((sport) => sport[0].toUpperCase() + sport.slice(1)).join(", ")}${missingSportFolders.length ? ` · Missing: ${missingSportFolders.join(", ")}` : ""}` : (fallbackCards.length ? "No Football, Basketball, or Hockey fallback folders were found" : "No sport fallback is currently needed")],
+      [unsetSport === 0, "Cards missing Sport", unsetSport ? `${unsetSport} card${unsetSport === 1 ? " has" : "s have"} no usable year folder and no Football/Basketball/Hockey Sport value` : "Every card that may need a sport fallback has Sport set"]
+    ];
+    $("#imagePreflightResults").lastElementChild?.remove();
+    $("#imagePreflightResults").insertAdjacentHTML("beforeend", coverage.map(([ready, label, detail]) => `<div class="readiness-item ${ready ? "ready" : "warning"}"><span>${ready ? "✓" : "!"}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></div></div>`).join(""));
+  } catch (error) {
+    $("#imagePreflightResults").lastElementChild?.remove();
+    $("#imagePreflightResults").insertAdjacentHTML("beforeend", `<div class="readiness-item warning"><span>!</span><div><strong>Folder coverage unavailable</strong><small>${escapeHtml(error.message || "CSM could not inspect the configured folders.")}</small></div></div>`);
+  }
 }
 
-function openImagePreflight() { renderImagePreflight(); $("#imagePreflightDialog").showModal(); }
+function openImagePreflight() { $("#imagePreflightDialog").showModal(); renderImagePreflight(); }
 
 function saleReadinessChecks() {
   const sale = activeSale();
@@ -2791,7 +2866,7 @@ function renderMatchReview() {
     const selectedPath = match.selected !== undefined ? match.selected : (selectTop ? top.image.path : "");
     return `<article class="match-row ${match.conflict ? "match-conflict" : ""}" data-match-card="${match.card.id}" data-match-key="${match.key}">
       <label class="match-select-box"><input type="checkbox" data-select-match="${match.key}" ${selectedMatchIds.has(match.key) ? "checked" : ""} /> Select</label>
-      <div class="match-card-name"><strong>${escapeHtml(match.sale?.name || activeSale().name)} · ${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.year)} ${escapeHtml(match.card.set)} #${escapeHtml(match.card.number)} ${escapeHtml(match.card.name)} ${escapeHtml(duplicateInfo(match.card, match.sale || activeSale()).label)}</strong><span class="status ${match.conflict ? "pending" : "available"}">${escapeHtml(imageMatchStatusLabel(match.status))}</span>${saleImageMode(match.sale) === "front-back" ? `<span class="status available">${imageSlotLabel(match.slot)} scan</span>` : ""}<span>Flaws: ${escapeHtml(match.card.notes && !/^none$/i.test(match.card.notes) ? match.card.notes : "None listed")}</span><span>Purchase date: ${displayPurchaseDate(match.card.purchaseDate)}</span>${match.currentPath ? `<span title="${escapeHtml(match.currentPath)}">Current image: ${escapeHtml(fileName(match.currentPath))}</span>` : ""}${match.conflict ? `<span class="match-warning">${escapeHtml(match.conflictReason || "Choose the correct image manually.")}</span>` : ""}</div>
+      <div class="match-card-name"><strong>${escapeHtml(match.sale?.name || activeSale().name)} · ${escapeHtml(match.card.ref)} · ${escapeHtml(match.card.year)} ${escapeHtml(match.card.set)} #${escapeHtml(match.card.number)} ${escapeHtml(match.card.name)} ${escapeHtml(duplicateInfo(match.card, match.sale || activeSale()).label)}</strong><span class="status ${match.conflict ? "pending" : "available"}">${escapeHtml(imageMatchStatusLabel(match.status))}</span>${saleImageMode(match.sale) === "front-back" ? `<span class="status available">${imageSlotLabel(match.slot)} scan</span>` : ""}<span>Flaws: ${escapeHtml(match.card.notes && !/^none$/i.test(match.card.notes) ? match.card.notes : "None listed")}</span><span>Purchase date: ${displayPurchaseDate(match.card.purchaseDate)}</span>${match.currentPath ? `<span title="${escapeHtml(match.currentPath)}">Current image: ${escapeHtml(fileName(match.currentPath))}</span>` : ""}${match.conflict ? `<span class="match-warning">${escapeHtml(match.conflictReason || "Choose the correct image manually.")}</span>` : ""}${!match.candidates.length && !["Football", "Basketball", "Hockey"].includes(normalizeSport(match.card.sport)) ? `<div class="sport-retry"><strong>Sport fallback could not run. Set Sport and retry:</strong>${["Football", "Basketball", "Hockey"].map((sport) => `<button type="button" class="row-action" data-match-sport="${sport}" data-match-sport-card="${match.card.id}">${sport}</button>`).join("")}</div>` : ""}</div>
       <div class="candidate-picker"><img data-match-preview src="${selectedPath ? fileUrl(selectedPath) : "assets/favicon.svg"}" alt="" /><div><select data-match-select ${match.confirmed ? "disabled" : ""}><option value="">Leave unmatched</option>${match.candidates.map((candidate) => `<option value="${escapeHtml(candidate.image.path)}" ${selectedPath === candidate.image.path ? "selected" : ""}>${escapeHtml(candidate.image.name || fileName(candidate.image.path))} — ${escapeHtml(candidate.quality)} — ${escapeHtml(candidate.reasons.join(", "))}</option>`).join("")}</select><div class="match-why"><strong>${escapeHtml(explanation.suggested)}</strong><span>Why review is needed: ${escapeHtml(explanation.review)}</span>${top ? `<span title="${escapeHtml(top.image.path)}">Proposed file: ${escapeHtml(top.image.relativePath || top.image.path)}</span>` : ""}${match.rejectedCandidates?.length ? `<details><summary>${match.rejectedCandidates.length} rejected file${match.rejectedCandidates.length === 1 ? "" : "s"}</summary>${match.rejectedCandidates.map((candidate) => `<span title="${escapeHtml(candidate.image.path)}">${escapeHtml(candidate.image.name || candidate.image.path)} — ${escapeHtml(candidate.rejectionReason)}</span>`).join("")}</details>` : ""}<span>Drop an image file anywhere on this row to assign it.</span></div></div></div>
       <div class="match-confirm">${match.confirmed ? `<span class="status available">${escapeHtml(imageMatchStatusLabel(match.status))}</span><button type="button" class="row-action" data-reopen-match="${match.key}">Reopen</button>` : `<button type="button" class="primary" data-confirm-match="${match.key}">${selectedPath ? "Confirm match" : "Confirm no image"}</button>`}${match.candidates.length > 1 ? `<button type="button" class="secondary" data-pick-match="${match.key}">Compare all files</button>` : ""}<button type="button" class="row-action" data-clear-match="${match.key}">Remove association</button><button type="button" class="row-action" data-rematch-match="${match.card.id}">Re-run related</button></div>
     </article>`;
@@ -2807,10 +2882,18 @@ function renderMatchReview() {
   updateDisabledButtonExplanations();
 }
 
-function confirmMatch(match, selectedPath = match.selected) {
+async function confirmMatch(match, selectedPath = match.selected) {
   if (!match || match.confirmed) return false;
   match.selected = selectedPath || "";
   if (match.selected) {
+    const check = await validateImagePath(match.selected);
+    if (!check.valid) {
+      match.candidates = match.candidates.filter((candidate) => candidate.image.path.toLowerCase() !== match.selected.toLowerCase());
+      match.selected = ""; match.automatic = false; match.conflict = true; match.status = "file-conflict"; match.conflictReason = check.reason;
+      toast(check.reason); return false;
+    }
+    const contentConflicts = await imageContentConflicts([{ path: match.selected, cardId: match.card.id, slot: match.slot, label: `${match.card.ref} · ${match.card.name}` }], match.sale || activeSale());
+    if (contentConflicts.has(match.selected.toLowerCase())) { match.automatic = false; match.conflict = true; match.status = "file-conflict"; match.conflictReason = contentConflicts.get(match.selected.toLowerCase()); toast(match.conflictReason); return false; }
     const previousPath = imagePathFor(match.card, match.slot);
     if (!attachImage(match.card, match.selected, true, match.sale || activeSale(), match.slot)) return false;
     state.manualMatchMemory ||= {};
@@ -2833,26 +2916,26 @@ function confirmMatch(match, selectedPath = match.selected) {
   return true;
 }
 
-function confirmSelectedMatches(ids = selectedMatchIds) {
+async function confirmSelectedMatches(ids = selectedMatchIds) {
   let confirmed = 0;
   let conflicts = 0;
-  pendingMatches.review.filter((match) => ids.has(match.key)).forEach((match) => {
+  for (const match of pendingMatches.review.filter((item) => ids.has(item.key))) {
     const row = $(`[data-match-key="${CSS.escape(match.key)}"]`);
     const selected = row ? $("[data-match-select]", row)?.value : (match.selected ?? match.candidates[0]?.image.path ?? "");
-    if (confirmMatch(match, selected)) confirmed += 1;
+    if (await confirmMatch(match, selected)) confirmed += 1;
     else if (!match.confirmed) conflicts += 1;
-  });
+  }
   saveSoon(); renderImages(); renderListings(); renderMatchReview();
   toast(conflicts ? `${confirmed} confirmed; ${conflicts} skipped because an image was already in use.` : `${confirmed} match${confirmed === 1 ? "" : "es"} confirmed.`);
 }
 
-function confirmPerfectMatches() {
+async function confirmPerfectMatches() {
   const perfect = new Set(pendingMatches.review.filter((match) => !match.confirmed && !match.conflict && match.automatic && match.candidates.length === 1).map((match) => match.key));
   perfect.forEach((id) => {
     const match = pendingMatches.review.find((item) => item.key === id);
     if (match) match.selected = match.candidates[0]?.image.path || "";
   });
-  confirmSelectedMatches(perfect);
+  await confirmSelectedMatches(perfect);
 }
 
 async function deleteSelectedMatches() {
@@ -2886,6 +2969,9 @@ function renderFolderSettings() {
   $("#primaryFolderRow").innerHTML = settings.primaryFolder ? `<div class="folder-item"><span>${escapeHtml(settings.primaryFolder)}</span><button type="button" data-remove-primary>Remove</button></div>` : `<p class="folder-empty">No primary folder selected.</p>`;
   $("#additionalFolderList").innerHTML = settings.additionalFolders.length ? settings.additionalFolders.map((folder, index) => `<div class="folder-item"><span>${escapeHtml(folder)}</span><button type="button" data-remove-additional="${index}">Remove</button></div>`).join("") : `<p class="folder-empty">No additional folders.</p>`;
   $("#excludedFolderList").innerHTML = settings.excludedFolders.length ? settings.excludedFolders.map((folder, index) => `<div class="folder-item excluded"><span>${escapeHtml(folder)}</span><button type="button" data-remove-excluded="${index}">Remove</button></div>`).join("") : `<p class="folder-empty">No folders excluded.</p>`;
+  $("#footballFolderAliases").value = settings.sportFolderAliases.football.join(", ");
+  $("#basketballFolderAliases").value = settings.sportFolderAliases.basketball.join(", ");
+  $("#hockeyFolderAliases").value = settings.sportFolderAliases.hockey.join(", ");
 }
 
 async function chooseManualImage(cardId, slot = "single") {
@@ -2894,6 +2980,8 @@ async function chooseManualImage(cardId, slot = "single") {
   if (!card) return;
   const paths = await window.cardSale.chooseImages();
   if (!paths.length) return;
+  const contentConflicts = await imageContentConflicts([{ path: paths[0], cardId: card.id, slot, label: `${card.ref} · ${card.name}` }], activeSale());
+  if (contentConflicts.has(paths[0].toLowerCase())) return toast(contentConflicts.get(paths[0].toLowerCase()));
   const previousPath = imagePathFor(card, slot);
   if (!attachImage(card, paths[0], false, activeSale(), slot)) return;
   state.manualMatchMemory ||= {};
@@ -3021,7 +3109,7 @@ async function deleteActiveSale() {
   const deletedIndex = state.sales.findIndex((item) => item.id === sale.id);
   state.archivedSales ||= [];
   const archivedSale = { ...clone(sale), archivedAt: new Date().toISOString(), archivedFromIndex: deletedIndex, archiveReason: "deleted" };
-  if (Array.isArray(archivedSale.facebookCaptures)) archivedSale.facebookCaptures = archivedSale.facebookCaptures.map(({ commentId, pageUrl, contextText, ...record }) => ({ ...record, sourceDetailsRemovedAt: new Date().toISOString() }));
+  if (Array.isArray(archivedSale.facebookCaptures)) archivedSale.facebookCaptures = archivedSale.facebookCaptures.map(({ commentId, parentCommentId, pageUrl, contextText, contextCandidates, contextPreview, ...record }) => ({ ...record, sourceDetailsRemovedAt: new Date().toISOString() }));
   state.archivedSales = state.archivedSales.filter((item) => item.id !== sale.id);
   state.archivedSales.unshift(archivedSale);
   undoStack.push({ deletedSale: clone(sale), deletedIndex, archivedSaleId: sale.id });
@@ -4368,7 +4456,7 @@ function bindEvents() {
   $("#orderedImageDropZone").addEventListener("drop", async (event) => { event.preventDefault(); await addOrderedImagePaths(await droppedImagePaths(event.dataTransfer)); });
   $("#addFolderBtn").addEventListener("click", () => addImages("folder"));
   $("#autoMatchBtn").addEventListener("click", () => { if (isBeginnerMode()) openImagePreflight(); else autoMatchImages(); });
-  $("#forceAllImageLookupBtn").addEventListener("click", forceAllImageLookup);
+  $("#forceAllImageLookupBtn").addEventListener("click", forceSaleImageLookup);
   $("#missingImagesBtn").addEventListener("click", openMissingImages);
   $("#missingImagesSearch").addEventListener("input", renderMissingImages);
   $("#missingImagesPreflightBtn").addEventListener("click", openImagePreflight);
@@ -4587,8 +4675,15 @@ function bindEvents() {
     const match = pendingMatches?.review.find((item) => item.key === row.dataset.matchKey);
     if (match) { match.selected = event.target.value; reservePendingSuggestion(match, match.selected); renderMatchReview(); }
   });
-  $("#matchReviewList").addEventListener("click", (event) => {
+  $("#matchReviewList").addEventListener("click", async (event) => {
     if (!pendingMatches) return;
+    const sportCardId = event.target.dataset.matchSportCard;
+    const sport = event.target.dataset.matchSport;
+    if (sportCardId && sport) {
+      const record = cardRecord(sportCardId); if (!record) return;
+      record.card.sport = normalizeSport(sport); recordAudit("edit", `Set Sport to ${record.card.sport} for ${record.card.ref} · ${record.card.name}`, { cardId: record.card.id }, record.sale); saveSoon();
+      toast(`Sport set to ${record.card.sport}. Re-running this card now.`); await forceImageLookupForCard(sportCardId); return;
+    }
     const pickKey = event.target.closest("[data-pick-match]")?.dataset.pickMatch;
     if (pickKey) { openPickImage(pickKey); return; }
     const rematchId = event.target.dataset.rematchMatch;
@@ -4607,7 +4702,7 @@ function bindEvents() {
     if (confirmId) {
       const row = event.target.closest("[data-match-card]");
       match.selected = $("[data-match-select]", row).value;
-      if (!confirmMatch(match, match.selected)) return toast("That image is already linked to another card.");
+      if (!await confirmMatch(match, match.selected)) return;
       saveSoon(); renderImages(); renderListings(); renderMatchReview(); toast(`${match.card.ref} confirmed.`);
     }
     if (reopenId) { match.confirmed = false; renderMatchReview(); }
@@ -4750,6 +4845,10 @@ function bindEvents() {
   $("#choosePrimaryFolderBtn").addEventListener("click", async () => { const folder = await window.cardSale.chooseLookupFolder(); if (folder) { lookupSettings().primaryFolder = folder; renderFolderSettings(); renderImages(); saveSoon(); } });
   $("#addLookupFolderBtn").addEventListener("click", async () => { const folders = await window.cardSale.chooseLookupFolders("Choose image lookup folders"); const settings = lookupSettings(); folders.forEach((folder) => { if (folder !== settings.primaryFolder && !settings.additionalFolders.includes(folder)) settings.additionalFolders.push(folder); }); if (folders.length) { renderFolderSettings(); renderImages(); saveSoon(); } });
   $("#addExcludedFolderBtn").addEventListener("click", async () => { const folders = await window.cardSale.chooseLookupFolders("Choose folders to exclude"); const settings = lookupSettings(); folders.forEach((folder) => { if (!settings.excludedFolders.includes(folder)) settings.excludedFolders.push(folder); }); if (folders.length) { renderFolderSettings(); renderImages(); saveSoon(); } });
+  [["#footballFolderAliases", "football"], ["#basketballFolderAliases", "basketball"], ["#hockeyFolderAliases", "hockey"]].forEach(([selector, sport]) => $(selector).addEventListener("change", () => {
+    lookupSettings().sportFolderAliases[sport] = [...new Set($(selector).value.split(/[,;]+/).map((value) => value.trim()).filter(Boolean))];
+    state.imageFolderIndex = null; saveSoon(); renderFolderSettings(); toast("Sport-folder aliases saved.");
+  }));
   $("#folderSettingsDialog").addEventListener("click", (event) => {
     const settings = lookupSettings();
     if (event.target.dataset.removePrimary !== undefined) settings.primaryFolder = "";

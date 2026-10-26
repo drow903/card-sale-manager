@@ -91,10 +91,40 @@
     return [...new Set((String(value || "").match(/(?:18|19|20)\d{2}/g) || []))];
   }
 
-  function pathFolderYears(image) {
+  function pathFolderYears(image, expected = "") {
     const relative = String(image?.relativePath || image?.path || "").replace(/\\/g, "/");
-    const folders = relative.split("/").slice(0, -1).join("/");
-    return yearTokens(folders);
+    const generic = new Set(["card", "cards", "image", "images", "scan", "scans", "photo", "photos", "baseball", "football", "basketball", "hockey"]);
+    const found = [];
+    relative.split("/").slice(0, -1).forEach((folder) => {
+      const normalized = normalizeText(folder);
+      const fourDigit = yearTokens(normalized);
+      if (fourDigit.length === 1) {
+        const remaining = normalized.replace(fourDigit[0], " ").split(" ").filter(Boolean);
+        if (!remaining.length || remaining.every((token) => generic.has(token))) found.push(fourDigit[0]);
+      }
+      if (expected && /^\d{2}(?:\s+(?:card|cards|image|images|scan|scans|photo|photos))?$/.test(normalized) && normalized.slice(0, 2) === String(expected).slice(-2)) found.push(String(expected));
+    });
+    return [...new Set(found)];
+  }
+
+  function expectedSport(value) {
+    const sport = normalizeText(value);
+    return ["football", "basketball", "hockey"].includes(sport) ? sport : "";
+  }
+
+  function sportAliases(input = {}) {
+    const defaults = { football: ["football", "nfl"], basketball: ["basketball", "nba"], hockey: ["hockey", "nhl"] };
+    return Object.fromEntries(Object.entries(defaults).map(([sport, fallback]) => {
+      const provided = Array.isArray(input?.[sport]) ? input[sport] : [];
+      return [sport, [...new Set([...fallback, ...provided].map(normalizeText).filter(Boolean))]];
+    }));
+  }
+
+  function pathFolderSports(image, inputAliases = {}) {
+    const relative = String(image?.relativePath || image?.path || "").replace(/\\/g, "/");
+    const segments = relative.split("/").slice(0, -1).map(normalizeText);
+    const aliases = sportAliases(inputAliases);
+    return Object.entries(aliases).filter(([, names]) => segments.some((segment) => names.some((name) => segment === name || segment === `${name} cards` || segment === `${name} images`))).map(([sport]) => sport);
   }
 
   function filenameYears(image) {
@@ -207,12 +237,15 @@
     return brandTokens.length > 0 && brandTokens.some((token) => haystack.includes(token));
   }
 
-  function evaluateCandidate({ card, image, sale, slot = "single", cards = [] }) {
+  function evaluateCandidate({ card, image, sale, slot = "single", cards = [], folderAliases = {} }) {
     const mode = sale?.imageMode === "front-back" ? "front-back" : "single";
     const expected = expectedYear(card?.year);
-    const folderYears = pathFolderYears(image);
+    const folderYears = pathFolderYears(image, expected);
     const fileYears = filenameYears(image);
     const folderMatch = Boolean(expected && folderYears.includes(expected));
+    const sport = expectedSport(card?.sport);
+    const sportFolderMatch = Boolean(sport && folderYears.length === 0 && pathFolderSports(image, folderAliases).includes(sport));
+    const fileYearMatch = Boolean(expected && fileYears.includes(expected));
     const fileYearConflict = Boolean(expected && fileYears.some((year) => year !== expected));
     const date = normalizeDate(card?.purchaseDate);
     const dates = extractDateInfo(image);
@@ -228,21 +261,26 @@
     const reviewReasons = [];
     const rejectionReasons = [];
     if (folderMatch) reasons.push("expected year folder");
+    if (sportFolderMatch) reasons.push(`${sport} fallback folder`);
+    if (fileYearMatch) reasons.push("filename year");
     if (name.matched) reasons.push(name.kind);
     if (number.matched) reasons.push("card number");
     if (dateMatch) reasons.push("purchase date");
     if (brandMatch) reasons.push("brand");
     if (side) reasons.push(`${side} marker`);
     if (image?.readable === false) rejectionReasons.push("image file is unreadable");
+    if ((expected || sport) && !folderMatch && !sportFolderMatch) rejectionReasons.push(expected ? (sport ? `not inside the ${expected} year folder or ${sport} fallback folder` : `not inside the ${expected} year folder`) : `not inside the ${sport} fallback folder`);
+    if (sportFolderMatch && fileYearConflict) rejectionReasons.push("filename year conflicts with the card year in the sport fallback folder");
     if (dateConflict) rejectionReasons.push("purchase date conflicts");
     if (sideConflict) rejectionReasons.push(slot === "back" ? "not identified as a back image" : "identified as a back image");
     if (!name.matched && !number.matched) rejectionReasons.push("player/team and card number do not match");
     if (number.conflict) rejectionReasons.push("card number conflicts");
-    if (!folderMatch) reviewReasons.push("outside the expected year folder");
     if (fileYearConflict) reviewReasons.push("filename year conflicts with the folder/card year");
     if (dates.ambiguous && !dateMatch) reviewReasons.push("filename contains an ambiguous date");
     if (sideNeedsReview) reviewReasons.push("front/back sale file has no side marker");
     if (name.kind === "initial and surname" && !(number.matched && dateMatch)) reviewReasons.push("initial and surname need card-number/date support");
+    const sportFallbackStrong = !sportFolderMatch || dateMatch || fileYearMatch || number.matched || name.strength >= 4;
+    if (!sportFallbackStrong) reviewReasons.push(`${sport} fallback has only a surname; add a card number, purchase date, filename year, or full player name to auto-confirm`);
     const sameYearCards = cards.filter((item) => expectedYear(item.year) === expected);
     const numberUnique = number.matched && sameYearCards.filter((item) => normalizeCardNumber(item.number) === normalizeCardNumber(card.number)).length === 1;
     const surnameKeys = nameParts(card.name).surnames;
@@ -250,11 +288,11 @@
     const identityStrength = name.matched && number.matched ? 5 : (name.matched && dateMatch) || (number.matched && dateMatch) ? 4 : name.matched && nameUnique ? 3 : number.matched && numberUnique ? 3 : name.matched || number.matched ? 2 : 0;
     if (identityStrength < 3) reviewReasons.push("filename does not uniquely identify one sale card");
     const sequence = sequenceNumber(image, card);
-    const rank = (folderMatch ? 100000 : 0) + identityStrength * 10000 + (dateMatch ? 2000 : 0) + (sequence != null ? 300 : 0) + (brandMatch ? 100 : 0) + (side ? 25 : 0);
+    const rank = (folderMatch ? 100000 : sportFolderMatch ? 90000 : 0) + identityStrength * 10000 + (dateMatch ? 2000 : 0) + (fileYearMatch ? 500 : 0) + (sequence != null ? 300 : 0) + (brandMatch ? 100 : 0) + (side ? 25 : 0);
     return {
       image, eligible: rejectionReasons.length === 0, rejected: rejectionReasons.length > 0,
       rejectionReason: rejectionReasons.join("; "), rejectionReasons, reasons, reviewReasons,
-      folderMatch, fileYearConflict, dateMatch, dateConflict, side, sideNeedsReview,
+      folderMatch, sportFolderMatch, fileYearMatch, fileYearConflict, dateMatch, dateConflict, side, sideNeedsReview,
       nameMatch: name.matched, nameKind: name.kind, numberMatch: number.matched, brandMatch,
       sequence, identityStrength, rank,
       quality: identityStrength >= 5 ? "Exact identity" : dateMatch ? "Date-supported match" : nameUnique ? "Unique player/team" : numberUnique ? "Unique card number" : "Needs review"
@@ -265,13 +303,15 @@
     return [expectedYear(card?.year), normalizeText(card?.set), normalizeCardNumber(card?.number), normalizeText(card?.name), normalizeDate(card?.purchaseDate) || "undated"].join("|");
   }
 
-  function propose({ card, images, sale, slot = "single" }) {
+  function propose({ card, images, sale, slot = "single", folderAliases = {} }) {
     const cards = sale?.cards || [];
-    const evaluated = images.map((image) => evaluateCandidate({ card, image, sale, slot, cards }));
+    const evaluated = images.map((image) => evaluateCandidate({ card, image, sale, slot, cards, folderAliases }));
     const rejectedCandidates = evaluated.filter((item) => item.rejected).sort((a, b) => String(a.image.path).localeCompare(String(b.image.path), undefined, { numeric: true }));
     let candidates = evaluated.filter((item) => item.eligible).sort((a, b) => b.rank - a.rank || String(a.image.path).localeCompare(String(b.image.path), undefined, { numeric: true }));
     const expectedFolder = candidates.filter((item) => item.folderMatch);
+    const sportFolder = candidates.filter((item) => item.sportFolderMatch);
     if (expectedFolder.length) candidates = expectedFolder;
+    else if (sportFolder.length) candidates = sportFolder;
     const bestRank = candidates[0]?.rank;
     const plausible = candidates.filter((item) => item.rank >= bestRank - 500);
     candidates = candidates.slice(0, 12);
@@ -286,7 +326,7 @@
       });
     }
     const top = candidates[0];
-    const automatic = Boolean(top && candidates.length === 1 && top.folderMatch && !top.reviewReasons.length && !duplicateReview);
+    const automatic = Boolean(top && candidates.length === 1 && (top.folderMatch || top.sportFolderMatch) && !top.reviewReasons.length && !duplicateReview);
     const reviewReasons = [...new Set([...(top?.reviewReasons || []), ...(duplicateReview ? ["identical copies require group review"] : []), ...(plausible.length > 1 ? ["more than one eligible file remains"] : [])])];
     return {
       card, sale, slot, candidates, rejectedCandidates, automatic,
@@ -300,7 +340,7 @@
 
   return {
     normalizeText, normalizeCardNumber, normalizeDate, validDateCode, dateOptions, extractDateInfo,
-    expectedYear, pathFolderYears, filenameYears, nameParts, detectName, sequenceNumber, detectSide,
+    expectedYear, pathFolderYears, expectedSport, sportAliases, pathFolderSports, filenameYears, nameParts, detectName, sequenceNumber, detectSide,
     duplicateKey, evaluateCandidate, propose
   };
 });

@@ -19,7 +19,9 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Adds sale-preparation badges, grouped Fix Center review, and a Fix next problem action for incomplete card data, images, and optional teams.
 - Uses a complete Card Sale Manager identity across the Windows icon, sidebar, light and dark themes, onboarding, walkthrough, Help guide, and default packing-slip design.
 - Formats each card into a copy-ready sale listing.
-- Matches local images using year folders, player names, card numbers, six- to eight-digit purchase-date codes (including `MMDDYY` such as `091326`), and duplicate sequence numbers.
+- Matches local images year-folder first, including matching two-digit year folders, with editable Football/NFL, Basketball/NBA, or Hockey/NHL folder fallbacks when that sport is set and no valid year-folder match exists; then uses player names, card numbers, six- to eight-digit purchase-date codes (including `MMDDYY` such as `091326`), and duplicate sequence numbers.
+- Rescans lookup folders each time and revalidates files before attachment so stale indexes, renamed files, and unavailable cloud placeholders cannot create silent bad links.
+- Reports year- and sport-folder coverage before lookup, offers Set Sport and retry directly from Image Review, and fingerprints file contents so identical renamed copies cannot be attached to separate listings.
 - Auto-confirms a purchase-date filename match when that date identifies only one copy of the card; duplicate same-date copies still require review.
 - Hard-rejects an image when its valid filename date conflicts with the card purchase date, keys remembered matches by card, date, and image side, and assigns duplicate groups one-to-one instead of greedily reusing the strongest file.
 - Re-runs lookup for one card together with every card that shared its suggested image, or deliberately rechecks confirmed images across every current and past sale.
