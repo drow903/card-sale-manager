@@ -96,6 +96,31 @@ corner. Before rendering, CSM checks every selected image. Missing or unreadable
 files are listed by card and filename, then skipped so valid cards can still be
 used. The original images and music files are never changed.
 
+VERSION 2.2 ORDER AND MESSAGE TOOLS
+
+Buyer Orders can be arranged alphabetically or in collapsible status groups,
+with unpaid and attention-needed orders ahead of shipped orders. Compact and
+expanded views are remembered. Each order includes a readiness checklist and
+shows purchase dates privately for the seller.
+
+Use Additional line items for cards or other items sold outside the original
+sale. Enter a name, price, and optional quantity. CSM includes these add-ons in
+order totals, buyer summaries, packing slips, and packing checkboxes. Shipped
+orders are locked against accidental changes; use Reopen order before editing.
+Cancel or move order can return selected cards to the open pool, mark them
+unsold, or transfer them while keeping an audit record.
+
+Quick messages is available at the top of every screen. Create unlimited
+templates, categories, pinned favorites, conditional sections, and one-time
+preview edits. Search, duplicate, reorder, restore earlier versions, or reset a
+single built-in message. CSM never exposes purchase cost, purchase date, profit,
+private notes, tags, or private custom fields as customer-message placeholders.
+
+PO-box delivery reminders can be dismissed after checking the carrier. The
+reminder returns if the address or shipping method changes. CSM also warns
+before creating a likely duplicate buyer; use Merge Buyers to combine profiles
+and orders after reviewing the preview.
+
 1. Double-click Card Sale Manager.exe.
 2. Choose New sale and give the sale a name.
 3. Choose Guided sale setup when you have both a spreadsheet and images. Drop

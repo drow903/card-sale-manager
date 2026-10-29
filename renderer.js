@@ -25,7 +25,7 @@ const DEFAULT_PACKING_DESIGN = {
   sectionOrder: PACKING_SECTIONS.map(([id]) => id)
 };
 const DEFAULT_MESSAGE_TEMPLATES = {
-  orderSummary: "Hi {firstName} — here’s your total from the sale:\n\n{cardList}\n\nCards ({cardCount}): {subtotal}\nShipping ({shippingMethod}): {shipping}\n{discountLine}Total: {total}\n\nPlease confirm your mailing address when you send payment. Thanks!",
+  orderSummary: "Hi {firstName} — here’s your total from the sale:\n\n{cardList}{addOnSection}\n\nCards ({cardCount}): {subtotal}\n{addOnTotalLine}Shipping ({shippingMethod}): {shipping}\n{discountLine}Total: {total}\n\nPlease confirm your mailing address when you send payment. Thanks!",
   paymentDue: "Hi {firstName} — your total is {total} including {shippingMethod} shipping. Please send payment and confirm your mailing address. Thanks!",
   paymentReceived: "Hi {firstName} — payment received. Thank you! I’ll get your cards packed and will send tracking when available.",
   shipped: "Hi {firstName} — your cards have shipped!\n\n{trackingLine}\n\nThanks again for your purchase!",
@@ -35,6 +35,11 @@ const DEFAULT_MESSAGE_TEMPLATES = {
 const MESSAGE_TEMPLATE_FIELDS = [
   ["orderSummary", "Order confirmation"], ["paymentDue", "Payment due"], ["paymentReceived", "Payment received"],
   ["shipped", "Shipping confirmation"], ["delayed", "Shipping delayed"], ["counterOffer", "Counter offer"]
+];
+const QUICK_MESSAGE_BUILTINS = [
+  ["orderSummary", "Order confirmation", "Orders"], ["paymentDue", "Payment due", "Payments"],
+  ["paymentReceived", "Payment received", "Payments"], ["shipped", "Shipping confirmation", "Shipping"],
+  ["delayed", "Shipping delayed", "Shipping"], ["counterOffer", "Counter offer", "Offers"]
 ];
 const DEFAULT_SALE_REPLIES = {
   claim: "You got it, {firstName} — thank you!",
@@ -103,6 +108,8 @@ let ownerGestureClicks = [];
 let detailedGuideContent = null;
 let lastClaimCardId = "";
 let imageLookupCancelled = false;
+let selectedQuickMessageId = "builtin-orderSummary";
+let quickMessageDraft = null;
 const runtimeErrors = [];
 const scrubDiagnosticText = (value) => String(value ?? "").replace(/file:\/{2,3}[^\s)]+/gi, "[local path]").replace(/[A-Za-z]:[\\/][^\n\r]*/g, "[local path]").slice(0, 2000);
 window.addEventListener("error", (event) => { runtimeErrors.push({ at: new Date().toISOString(), type: "error", message: scrubDiagnosticText(event.message || "Unknown renderer error").slice(0, 500) }); if (runtimeErrors.length > 25) runtimeErrors.shift(); });
@@ -227,7 +234,7 @@ function allBuyerNames() {
   return [...new Set([...Object.keys(state.buyerProfiles || {}), ...historicalSales().flatMap((sale) => sale.cards.filter(cardInOrder).map((card) => card.buyer).filter(Boolean))])].sort((a, b) => a.localeCompare(b));
 }
 
-function blankBuyerProfile() { return { notes: "", address: "", validatedAddress: "", addressValidatedAt: "", tags: [], aliases: [], previousAddresses: [], manuallySaved: false }; }
+function blankBuyerProfile() { return { notes: "", address: "", validatedAddress: "", addressValidatedAt: "", tags: [], aliases: [], previousAddresses: [], dismissedPoBoxWarnings: [], manuallySaved: false }; }
 
 function buyerProfile(name, create = false) {
   state.buyerProfiles ||= {};
@@ -236,6 +243,7 @@ function buyerProfile(name, create = false) {
   profile.tags ||= [];
   profile.aliases ||= [];
   profile.previousAddresses ||= [];
+  profile.dismissedPoBoxWarnings ||= [];
   profile.validatedAddress ||= "";
   profile.addressValidatedAt ||= "";
   return profile;
@@ -252,6 +260,11 @@ function canonicalBuyerName(name) {
 
 function normalizedAddress(value) { return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
 
+function poBoxWarningKey(buyer, address = buyerProfile(buyer).address) {
+  const method = activeSale()?.orders?.[buyer]?.shippingMethod || "unselected";
+  return `${normalizedAddress(address)}|${String(method).toLowerCase()}`;
+}
+
 function addressWarnings(buyer, address = buyerProfile(buyer).address) {
   const value = String(address || "").trim();
   const warnings = [];
@@ -265,7 +278,7 @@ function addressWarnings(buyer, address = buyerProfile(buyer).address) {
   else if (!states.has(stateZip[1].toUpperCase())) warnings.push(`${stateZip[1].toUpperCase()} is not a recognized U.S. state abbreviation`);
   if (lines.length < 2) warnings.push("Recipient/street and city/state/ZIP may not be on separate lines");
   if (new Set(lines.map(normalizedAddress)).size !== lines.length) warnings.push("The address contains a duplicate line");
-  if (/\bP\.?\s*O\.?\s*Box\b/i.test(value)) warnings.push("PO box detected — confirm the selected shipping service can deliver there");
+  if (/\bP\.?\s*O\.?\s*Box\b/i.test(value) && !buyerProfile(buyer).dismissedPoBoxWarnings.includes(poBoxWarningKey(buyer, value))) warnings.push("PO box detected — confirm the selected shipping service can deliver there");
   if (/\b(?:apt|apartment|unit|suite|ste)\b\s*$/i.test(value)) warnings.push("Apartment or unit number is incomplete");
   const key = normalizedAddress(value);
   const duplicate = key && Object.keys(state.buyerProfiles || {}).find((name) => name !== buyer && normalizedAddress(buyerProfile(name).address) === key);
@@ -290,6 +303,30 @@ function ensureMessageTemplates() {
   if (state.preferences.messageTemplates.orderSummary === legacySummary) state.preferences.messageTemplates.orderSummary = DEFAULT_MESSAGE_TEMPLATES.orderSummary;
   Object.entries(DEFAULT_MESSAGE_TEMPLATES).forEach(([key, value]) => { state.preferences.messageTemplates[key] ??= value; });
   return state.preferences.messageTemplates;
+}
+
+function ensureQuickMessages() {
+  const templates = ensureMessageTemplates();
+  state.preferences.quickMessages ||= QUICK_MESSAGE_BUILTINS.map(([key, name, category], index) => ({ id: `builtin-${key}`, builtInKey: key, name, category, body: templates[key], pinned: index === 0, versions: [], updatedAt: "" }));
+  QUICK_MESSAGE_BUILTINS.forEach(([key, name, category]) => {
+    let item = state.preferences.quickMessages.find((message) => message.builtInKey === key);
+    if (!item) { item = { id: `builtin-${key}`, builtInKey: key, name, category, body: templates[key], pinned: false, versions: [], updatedAt: "" }; state.preferences.quickMessages.push(item); }
+    item.name ||= name; item.category ||= category; item.body ||= templates[key]; item.versions ||= [];
+    templates[key] = item.body;
+  });
+  state.preferences.recentQuickMessages ||= [];
+  return state.preferences.quickMessages;
+}
+
+function quickMessageById(id) { return ensureQuickMessages().find((message) => message.id === id); }
+
+function quickMessageRecommendationIds(buyer = state.selectedBuyer) {
+  if (!buyer || !buyers().includes(buyer)) return ["builtin-orderSummary"];
+  const order = orderFor(buyer);
+  if (order.status === "shipped") return ["builtin-shipped"];
+  if (order.status === "packed") return ["builtin-shipped", "builtin-delayed"];
+  if (["paid"].includes(order.status)) return ["builtin-paymentReceived", "builtin-delayed"];
+  return ["builtin-orderSummary", "builtin-paymentDue"];
 }
 
 function ensureSaleIntroTemplate() {
@@ -322,7 +359,10 @@ function offerDeskSettings() {
 
 function orderDeskSettings() {
   state.preferences ||= {};
-  state.preferences.orderDesk ||= { query: "", status: "all" };
+  state.preferences.orderDesk ||= { query: "", status: "all", groupMode: "alphabetical", viewMode: "compact", collapsedGroups: {} };
+  state.preferences.orderDesk.groupMode ||= "alphabetical";
+  state.preferences.orderDesk.viewMode ||= "compact";
+  state.preferences.orderDesk.collapsedGroups ||= {};
   return state.preferences.orderDesk;
 }
 
@@ -354,6 +394,9 @@ function applyDisplayPreferences() {
   document.documentElement.dataset.reducedMotion = String(Boolean(state.preferences.reducedMotion));
   document.body.classList.toggle("compact-mode", Boolean(state.preferences.compact));
   document.body.classList.toggle("beginner-mode", isBeginnerMode());
+  const privacyActive = currentLicense.owner === true && Boolean(state.preferences.privacyMode);
+  document.body.classList.toggle("privacy-mode", privacyActive);
+  const privacyButton = $("#privacyModeBtn"); if (privacyButton) privacyButton.textContent = `Privacy mode: ${privacyActive ? "On" : "Off"}`;
   const performance = performanceModeActive();
   document.body.classList.toggle("performance-mode", performance);
   document.documentElement.style.setProperty("--claim-activity-width", `${Math.max(260, Math.min(520, Number(state.preferences.claimActivityWidth || 330)))}px`);
@@ -635,17 +678,61 @@ function ensureShippingRules(sale = activeSale()) {
   return sale.shippingRules;
 }
 
+function normalizeOrderAddOns(order) {
+  order.addOns ||= [];
+  order.addOns.forEach((item) => {
+    item.id ||= uid(); item.name = String(item.name || "Additional item").trim();
+    item.price = Math.max(0, Number(item.price || 0)); item.quantity = Math.max(1, Math.floor(Number(item.quantity || 1)));
+    item.packed = Boolean(item.packed);
+  });
+  return order.addOns;
+}
+
+function addOnsForBuyer(buyer, sale = activeSale()) { return normalizeOrderAddOns(sale.orders?.[buyer] || (sale.orders ||= {}, sale.orders[buyer] ||= {})); }
+function addOnQuantity(buyer, sale = activeSale()) { return addOnsForBuyer(buyer, sale).reduce((sum, item) => sum + Number(item.quantity || 1), 0); }
+function addOnSubtotal(buyer, sale = activeSale()) { return addOnsForBuyer(buyer, sale).reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0); }
+function orderItemsPacked(buyer) { return cardsForBuyer(buyer).every((card) => card.packed) && addOnsForBuyer(buyer).every((item) => item.packed); }
+function orderItemCount(buyer) { return cardsForBuyer(buyer).length + addOnQuantity(buyer); }
+function orderTotals(buyer) {
+  const cards = cardsForBuyer(buyer); const order = orderFor(buyer);
+  const cardSubtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
+  const extras = addOnSubtotal(buyer); const shipping = shippingAmount(order); const discount = Number(order.discount || 0);
+  return { cardSubtotal, addOnSubtotal: extras, shipping, discount, total: cardSubtotal + extras + shipping - discount, cardCount: cards.length, addOnCount: addOnQuantity(buyer), itemCount: cards.length + addOnQuantity(buyer) };
+}
+
+const ORDER_GROUPS = [["attention", "Needs attention"], ["unpaid", "Unpaid"], ["paid", "Paid"], ["ready", "Ready to ship"], ["packed", "Packed"], ["shipped", "Shipped"]];
+function orderStatusGroup(buyer) {
+  const order = orderFor(buyer);
+  if (order.status === "shipped") return "shipped";
+  if (order.status === "packed") return "packed";
+  if (orderFlags(buyer).some((flag) => !/Unpaid balance/i.test(flag))) return "attention";
+  if (!["paid", "packed", "shipped"].includes(order.status)) return "unpaid";
+  return orderItemsPacked(buyer) && order.shippingMethod && buyerProfile(buyer).address?.trim() ? "ready" : "paid";
+}
+
+function orderReadiness(buyer) {
+  const order = orderFor(buyer); const profile = buyerProfile(buyer); const cards = cardsForBuyer(buyer);
+  return [
+    ["Address", Boolean(profile.address?.trim())], ["Shipping selected", Boolean(order.shippingMethod)],
+    ["Payment recorded", ["paid", "packed", "shipped"].includes(order.status)], ["Cards pulled", !cards.length || cards.every((card) => card.pulled)],
+    ["Everything packed", orderItemCount(buyer) > 0 && orderItemsPacked(buyer)], ["Tracking", order.shippingMethod === "PWE" || Boolean(order.trackingNumber)]
+  ];
+}
+
 function pmwtRequired(buyer, sale = activeSale()) {
   const rules = ensureShippingRules(sale);
   const cards = sale.cards.filter((card) => card.buyer === buyer && cardInOrder(card));
-  const value = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
-  return (rules.cardCountEnabled && cards.length > rules.maxPweCards) || (rules.valueEnabled && value > rules.maxPweValue);
+  const addOns = sale.orders?.[buyer]?.addOns || [];
+  const quantity = addOns.reduce((sum, item) => sum + Math.max(1, Number(item.quantity || 1)), 0);
+  const value = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0) + addOns.reduce((sum, item) => sum + Number(item.price || 0) * Math.max(1, Number(item.quantity || 1)), 0);
+  return (rules.cardCountEnabled && cards.length + quantity > rules.maxPweCards) || (rules.valueEnabled && value > rules.maxPweValue);
 }
 
 function shippingRuleExplanation(buyer, sale = activeSale()) {
   const rules = ensureShippingRules(sale); const cards = sale.cards.filter((card) => card.buyer === buyer && cardInOrder(card));
-  const value = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0); const reasons = [];
-  if (rules.cardCountEnabled && cards.length > rules.maxPweCards) reasons.push(`${cards.length} cards exceeds the ${rules.maxPweCards}-card PWE limit`);
+  const quantity = (sale.orders?.[buyer]?.addOns || []).reduce((sum, item) => sum + Math.max(1, Number(item.quantity || 1)), 0);
+  const value = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0) + (sale.orders?.[buyer]?.addOns || []).reduce((sum, item) => sum + Number(item.price || 0) * Math.max(1, Number(item.quantity || 1)), 0); const reasons = [];
+  if (rules.cardCountEnabled && cards.length + quantity > rules.maxPweCards) reasons.push(`${cards.length + quantity} items exceeds the ${rules.maxPweCards}-card PWE limit`);
   if (rules.valueEnabled && value > rules.maxPweValue) reasons.push(`${money(value)} exceeds the ${money(rules.maxPweValue)} PWE value limit`);
   return reasons.length ? `PMWT recommended because ${reasons.join(" and ")}. You can still override it.` : "No automatic shipping rule was triggered; choose PWE or PMWT manually.";
 }
@@ -656,8 +743,10 @@ function orderFor(buyer) {
   sale.pweShipping ??= 1;
   sale.pmwtShipping ??= sale.shipping ?? 5;
   sale.orders ||= {};
-  sale.orders[buyer] ||= { status: "shopping", shippingMethod: pmwtRequired(buyer) ? "PMWT" : "", shippingAutoSelected: pmwtRequired(buyer), discount: 0 };
+  sale.orders[buyer] ||= { status: "shopping", shippingMethod: pmwtRequired(buyer) ? "PMWT" : "", shippingAutoSelected: pmwtRequired(buyer), discount: 0, addOns: [] };
   const order = sale.orders[buyer];
+  normalizeOrderAddOns(order);
+  order.locked ??= order.status === "shipped";
   if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : (pmwtRequired(buyer) ? "PMWT" : "");
   if (!order.shippingMethod && pmwtRequired(buyer)) { order.shippingMethod = "PMWT"; order.shippingAutoSelected = true; }
   return order;
@@ -681,7 +770,8 @@ function cardsForBuyer(buyer) {
 }
 
 function buyers() {
-  return [...new Set(activeSale().cards.filter(cardInOrder).map((card) => card.buyer))].sort((a, b) => a.localeCompare(b));
+  const sale = activeSale();
+  return [...new Set([...sale.cards.filter(cardInOrder).map((card) => card.buyer), ...Object.entries(sale.orders || {}).filter(([, order]) => (order?.addOns || []).length).map(([buyer]) => buyer)])].filter(Boolean).sort((a, b) => a.localeCompare(b));
 }
 
 async function saveNow() {
@@ -875,6 +965,8 @@ function applyLicenseEntitlements(status = {}) {
   const showCatalog = currentLicense.owner === true && currentLicense.catalogVisible === true;
   $$('[data-owner-catalog]').forEach((element) => element.classList.toggle("hidden", !showCatalog));
   $$('[data-owner-facebook]').forEach((element) => element.classList.toggle("hidden", currentLicense.owner !== true));
+  $$('[data-owner-privacy]').forEach((element) => element.classList.toggle("hidden", currentLicense.owner !== true));
+  if (currentLicense.owner !== true && state.preferences) state.preferences.privacyMode = false;
   $$(".help-reference-grid > div").filter((element) => /Publish a catalog|Customer privacy/.test(element.textContent)).forEach((element) => element.classList.toggle("hidden", !showCatalog));
   if (!showCatalog && $("#catalogView")?.classList.contains("active")) showView("sale");
   ["#importBtn", "#guidedSetupBtn", "#setupChooseSpreadsheetBtn", "#setupChooseImagesBtn", "#setupChooseImageFolderBtn", "#continueGuidedSetupBtn", "#addImagesBtn", "#imageInboxBtn", "#imageInboxAddBtn", "#imageInboxOrderedBtn", "#addSingleCardBtn", "#confirmImportBtn", "#confirmAddCardBtn", "#addFolderBtn", "#autoMatchBtn", "#forceAllImageLookupBtn", "#choosePrimaryFolderBtn", "#addLookupFolderBtn", "#addExcludedFolderBtn", "#setupChooseFolderBtn", "#workflowAutoMatchBtn", "#workflowOrderedBtn", "#workflowManualBtn", "#workflowChooseFilesBtn", "#attachOrderedImagesBtn", "#chooseOrderedImagesBtn", "#applyOrderedImagesBtn", "#missingImagesLookupBtn", "#preflightChooseFolderBtn", "#preflightRunLookupBtn"].forEach((selector) => {
@@ -888,6 +980,7 @@ function applyLicenseEntitlements(status = {}) {
     button.title = importsAllowed ? "" : "Activate Card Sale Manager to add or import cards.";
   });
   $("#licenseBtn").textContent = !currentLicense.configured ? "License setup" : currentLicense.owner ? "License: Owner" : currentLicense.licensed ? "License: Active" : "License";
+  applyDisplayPreferences();
   renumberSidebar();
 }
 
@@ -1388,6 +1481,8 @@ function renderOrders() {
   const settings = orderDeskSettings();
   $("#orderSearch").value = settings.query;
   $("#orderStatusFilter").value = settings.status;
+  $("#orderGroupMode").value = settings.groupMode;
+  $("#orderViewMode").value = settings.viewMode;
   const query = settings.query.trim().toLowerCase();
   const names = allNames.filter((buyer) => {
     const order = orderFor(buyer); const flags = orderFlags(buyer);
@@ -1398,16 +1493,24 @@ function renderOrders() {
     if (settings.status === "missing-address" && buyerProfile(buyer).address?.trim()) return false;
     return true;
   });
-  if (!allNames.includes(state.selectedBuyer)) state.selectedBuyer = allNames[0] || "";
+  if (!names.includes(state.selectedBuyer)) state.selectedBuyer = names[0] || allNames[0] || "";
   $("#buyerCount").textContent = names.length === allNames.length ? `${allNames.length} active order${allNames.length === 1 ? "" : "s"}` : `${names.length} of ${allNames.length} orders shown`;
-  $("#buyerList").innerHTML = names.length ? names.map((buyer) => {
-    const cards = cardsForBuyer(buyer);
-    const total = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price), 0);
+  const buyerButton = (buyer) => {
+    const cards = cardsForBuyer(buyer); const totals = orderTotals(buyer);
     const order = orderFor(buyer);
     const flags = orderFlags(buyer);
     const visualStatus = ["paid", "packed", "shipped"].includes(order.status) ? order.status : "unpaid";
-    return `<button class="buyer-button order-${visualStatus} ${flags.length ? "has-warning" : ""} ${buyer === state.selectedBuyer ? "active" : ""}" data-buyer="${escapeHtml(buyer)}"><strong>${escapeHtml(buyer)}</strong><span class="buyer-total">${money(total + shippingAmount(order) - Number(order.discount))}</span><small>${cards.length} cards · ${escapeHtml(order.shippingMethod || "Shipping needed")} · ${escapeHtml(order.status)}${flags.length ? ` · ⚑ ${flags.length}` : ""}</small><span class="order-state-badge">${escapeHtml(flags.length ? "Needs attention" : visualStatus)}</span></button>`;
-  }).join("") : `<div class="empty-state"><h3>${allNames.length ? "No orders match these filters" : "No buyer orders yet"}</h3><p>${allNames.length ? "Clear or change the order filters." : "Assign a full-price claim or accept an offer to create the first order."}</p>${allNames.length ? "" : '<button type="button" class="primary" data-empty-action="claims">Open Claims Desk</button>'}</div>`;
+    const thumbnails = settings.viewMode === "expanded" ? `<span class="buyer-order-thumbs">${cards.slice(0, 4).map((card) => card.imagePath ? `<img src="${fileUrl(card.imagePath)}" alt="" />` : `<i>${escapeHtml(card.ref)}</i>`).join("")}</span>` : "";
+    return `<button class="buyer-button order-${visualStatus} ${flags.length ? "has-warning" : ""} ${buyer === state.selectedBuyer ? "active" : ""}" data-buyer="${escapeHtml(buyer)}"><strong data-private="buyer">${escapeHtml(buyer)}</strong><span class="buyer-total">${money(totals.total)}</span><small>${totals.cardCount} cards${totals.addOnCount ? ` + ${totals.addOnCount} add-ons` : ""} · ${escapeHtml(order.shippingMethod || "Shipping needed")} · ${escapeHtml(order.status)}${flags.length ? ` · ⚑ ${flags.length}` : ""}</small>${thumbnails}<span class="order-state-badge">${escapeHtml(flags.length ? "Needs attention" : visualStatus)}</span></button>`;
+  };
+  if (!names.length) $("#buyerList").innerHTML = `<div class="empty-state"><h3>${allNames.length ? "No orders match these filters" : "No buyer orders yet"}</h3><p>${allNames.length ? "Clear or change the order filters." : "Assign a full-price claim or accept an offer to create the first order."}</p>${allNames.length ? "" : '<button type="button" class="primary" data-empty-action="claims">Open Claims Desk</button>'}</div>`;
+  else if (settings.groupMode === "status") {
+    $("#buyerList").innerHTML = ORDER_GROUPS.map(([key, label]) => {
+      const group = names.filter((buyer) => orderStatusGroup(buyer) === key); if (!group.length) return "";
+      const collapsed = Boolean(settings.collapsedGroups[key]); const total = group.reduce((sum, buyer) => sum + orderTotals(buyer).total, 0);
+      return `<section class="buyer-status-group ${collapsed ? "collapsed" : ""}"><button type="button" class="buyer-group-heading" data-order-group="${key}"><span>${collapsed ? "▸" : "▾"} ${label}</span><small>${group.length} order${group.length === 1 ? "" : "s"} · ${money(total)}</small></button><div>${group.map(buyerButton).join("")}</div></section>`;
+    }).join("");
+  } else $("#buyerList").innerHTML = names.map(buyerButton).join("");
   renderOrderDetail();
 }
 
@@ -1419,7 +1522,7 @@ function orderFlags(buyer) {
   addressWarnings(buyer, profile.address).forEach((warning) => flags.push(warning));
   if (!order.shippingMethod) flags.push("Shipping not selected");
   if (!["paid", "packed", "shipped"].includes(order.status)) flags.push("Unpaid balance");
-  if (["paid", "packed", "shipped"].includes(order.status) && cards.some((card) => !card.packed)) flags.push("Packing incomplete");
+  if (["paid", "packed", "shipped"].includes(order.status) && !orderItemsPacked(buyer)) flags.push("Packing incomplete");
   if (!pweEligible(buyer) && order.shippingMethod === "PWE") flags.push("PWE limit exceeded");
   return flags;
 }
@@ -1437,6 +1540,30 @@ function repeatBuyerMatches(buyer) {
   return activeSale().cards.filter((card) => card.status === "available" && (card.name === history.player || card.set === history.brand || card.year === history.year)).slice(0, 5);
 }
 
+function openCancelOrder(buyer) {
+  const cards = cardsForBuyer(buyer);
+  $("#cancelOrderCards").innerHTML = cards.map((card) => `<label class="check-label"><input type="checkbox" data-cancel-card="${card.id}" checked /> ${escapeHtml(card.ref)} · ${escapeHtml(card.name)}</label>`).join("") || `<p class="muted">This order contains only additional line items.</p>`;
+  $("#cancelOrderScope").value = "all"; $("#cancelOrderAction").value = "open"; $("#cancelOrderBuyer").value = ""; $("#cancelOrderBuyerLabel").classList.add("hidden");
+  $("#cancelOrderDialog").showModal();
+}
+
+function applyCancelOrder() {
+  const buyer = state.selectedBuyer; const action = $("#cancelOrderAction").value;
+  const all = cardsForBuyer(buyer); const selected = new Set($$("[data-cancel-card]:checked", $("#cancelOrderCards")).map((box) => box.dataset.cancelCard));
+  const cards = $("#cancelOrderScope").value === "all" ? all : all.filter((card) => selected.has(card.id));
+  if (!cards.length && !$("#cancelOrderRemoveAddOns").checked) return toast("Choose at least one card or remove the add-ons.");
+  const target = $("#cancelOrderBuyer").value.trim(); if (action === "move" && !target) return toast("Enter the buyer receiving these cards.");
+  snapshotSale(`Before changing ${buyer}'s order`);
+  cards.forEach((card) => {
+    if (action === "move") { card.buyer = target; card.status = "claimed"; card.claimUpdatedAt = new Date().toISOString(); ensureBuyerProfile(target); orderFor(target); }
+    else { card.status = action === "unsold" ? "unsold" : "available"; card.unsold = action === "unsold"; ["buyer", "claimPrice", "claimType", "claimNote", "offerPrice", "offerStatus", "counterPrice", "claimedAt", "packed", "pulled"].forEach((key) => delete card[key]); }
+  });
+  const order = orderFor(buyer); if ($("#cancelOrderRemoveAddOns").checked) order.addOns = [];
+  order.cancelHistory ||= []; order.cancelHistory.push({ at: new Date().toISOString(), action, target, cardIds: cards.map((card) => card.id), paymentMethod: order.paymentMethod || "", notes: order.packingNotes || "" });
+  recordAudit("order-cancel", `${buyer}: ${cards.length} card${cards.length === 1 ? "" : "s"} ${action === "move" ? `moved to ${target}` : action === "unsold" ? "marked unsold" : "returned to the open pool"}`, { buyer, target });
+  $("#cancelOrderDialog").close(); saveSoon(); render(); toast("Order changes saved with audit history.");
+}
+
 function renderOrderDetail() {
   const buyer = state.selectedBuyer;
   if (!buyer) {
@@ -1445,36 +1572,39 @@ function renderOrderDetail() {
   }
   const cards = cardsForBuyer(buyer);
   const order = orderFor(buyer);
-  const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price), 0);
-  const shipping = shippingAmount(order);
-  const total = subtotal + shipping - Number(order.discount || 0);
+  const totals = orderTotals(buyer); const addOns = addOnsForBuyer(buyer); const locked = order.status === "shipped" || order.locked;
   const profile = buyerProfile(buyer);
   const flags = orderFlags(buyer);
   const repeatMatches = repeatBuyerMatches(buyer);
-  $("#orderDetail").innerHTML = `<div class="panel-header"><div><h2>${escapeHtml(buyer)}</h2><p>${cards.length} claimed card${cards.length === 1 ? "" : "s"}</p></div><span class="status ${order.status === "paid" ? "paid" : "claimed"}">${escapeHtml(order.status)}</span></div>
+  $("#orderDetail").innerHTML = `<div class="panel-header"><div><h2 data-private="buyer">${escapeHtml(buyer)}</h2><p>${cards.length} claimed card${cards.length === 1 ? "" : "s"}${addOns.length ? ` · ${addOns.length} add-on${addOns.length === 1 ? "" : "s"}` : ""}</p></div><span class="status ${order.status === "paid" ? "paid" : "claimed"}">${escapeHtml(order.status)}</span></div>
+    ${locked ? `<div class="order-lock-notice"><strong>This shipped order is locked.</strong><span>Reopen it before changing prices, cards, shipping, address, or payment details.</span><button type="button" class="secondary" id="reopenOrderBtn">Reopen order</button></div>` : ""}
     <div class="order-summary">
-      <div class="order-items">${cards.map((card) => `<article class="order-item">${card.imagePath ? `<div class="order-thumb"><img src="${fileUrl(card.imagePath)}" alt="" /><small title="${escapeHtml(card.imagePath)}">${escapeHtml(card.imagePath.split(/[\\/]/).pop())}</small></div>` : `<div class="thumb">${escapeHtml(card.ref)}</div>`}<div><strong>${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><div class="card-line">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)}</div><span class="type-badge ${card.claimType === "offer" ? "offer" : "claim"}">${card.claimType === "offer" ? "Offer" : "Claim"}</span>${card.claimType === "offer" ? `<small class="offer-note">Accepted offer · listed ${money(card.price)}${Number(card.purchasePrice) > 0 && Number(card.claimPrice) < Number(card.purchasePrice) ? ` · <span class="cost-warning">below ${money(card.purchasePrice)} cost</span>` : ""}</small>` : ""}</div><strong>${money(card.claimPrice ?? card.price)}</strong></article>`).join("")}</div>
+      <div class="order-items">${cards.map((card) => `<article class="order-item">${card.imagePath ? `<div class="order-thumb"><img src="${fileUrl(card.imagePath)}" alt="" /><small title="${escapeHtml(card.imagePath)}">${escapeHtml(card.imagePath.split(/[\\/]/).pop())}</small></div>` : `<div class="thumb">${escapeHtml(card.ref)}</div>`}<div><strong>${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><div class="card-line">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)}</div><small class="seller-only">Purchased ${escapeHtml(displayPurchaseDate(card.purchaseDate))}</small><span class="type-badge ${card.claimType === "offer" ? "offer" : "claim"}">${card.claimType === "offer" ? "Offer" : "Claim"}</span>${card.claimType === "offer" ? `<small class="offer-note">Accepted offer · listed ${money(card.price)}${Number(card.purchasePrice) > 0 && Number(card.claimPrice) < Number(card.purchasePrice) ? ` · <span class="cost-warning">below ${money(card.purchasePrice)} cost</span>` : ""}</small>` : ""}</div><strong>${money(card.claimPrice ?? card.price)}</strong></article>`).join("")}
+      <section class="order-add-ons"><div class="panel-header compact"><div><h3>Additional line items</h3><p>Items sold outside the original card list.</p></div></div>${addOns.map((item) => `<article class="add-on-item"><div><strong>${escapeHtml(item.name)}</strong><small>Quantity ${item.quantity}</small></div><strong>${money(item.price * item.quantity)}</strong><button type="button" class="row-action" data-edit-addon="${item.id}" ${locked ? "disabled" : ""}>Edit</button><button type="button" class="row-action danger-button" data-delete-addon="${item.id}" ${locked ? "disabled" : ""}>Remove</button></article>`).join("") || `<p class="muted">No additional items.</p>`}<form id="addOnForm" class="add-on-form"><input id="addOnName" placeholder="Item name" ${locked ? "disabled" : ""} /><input id="addOnPrice" type="number" min="0" step="0.01" placeholder="Price" ${locked ? "disabled" : ""} /><input id="addOnQuantity" type="number" min="1" step="1" value="1" title="Quantity" ${locked ? "disabled" : ""} /><button type="submit" class="secondary" ${locked ? "disabled" : ""}>Add item</button></form></section></div>
       <aside class="order-sidebar">
         <div class="totals">
-          <div class="total-line"><span>Cards (${cards.length})</span><strong>${money(subtotal)}</strong></div>
-          <label>Shipping option<select id="orderShippingMethod"><option value="" ${order.shippingMethod ? "" : "selected"} disabled>Select PWE or PMWT…</option><option value="PMWT" ${order.shippingMethod === "PMWT" ? "selected" : ""}>PMWT — ${money(activeSale().pmwtShipping)}${order.shippingAutoSelected ? " (auto-selected by rule)" : ""}</option><option value="PWE" ${order.shippingMethod === "PWE" ? "selected" : ""}>PWE — ${money(activeSale().pweShipping)}${pweEligible(buyer) ? "" : " (manual override)"}</option></select></label>
+          <div class="total-line"><span>Cards (${cards.length})</span><strong>${money(totals.cardSubtotal)}</strong></div>
+          <div class="total-line"><span>Add-ons (${totals.addOnCount})</span><strong>${money(totals.addOnSubtotal)}</strong></div>
+          <label>Shipping option<select id="orderShippingMethod" ${locked ? "disabled" : ""}><option value="" ${order.shippingMethod ? "" : "selected"} disabled>Select PWE or PMWT…</option><option value="PMWT" ${order.shippingMethod === "PMWT" ? "selected" : ""}>PMWT — ${money(activeSale().pmwtShipping)}${order.shippingAutoSelected ? " (auto-selected by rule)" : ""}</option><option value="PWE" ${order.shippingMethod === "PWE" ? "selected" : ""}>PWE — ${money(activeSale().pweShipping)}${pweEligible(buyer) ? "" : " (manual override)"}</option></select></label>
           <small class="shipping-rule-explanation">${escapeHtml(shippingRuleExplanation(buyer))}</small>
-          <div class="total-line shipping-total"><span>${escapeHtml(order.shippingMethod || "Shipping not selected")}</span><strong>${order.shippingMethod ? money(shipping) : "—"}</strong></div>
-          <label>Discount<input id="orderDiscount" type="number" min="0" step="0.01" value="${Number(order.discount || 0)}" /></label>
-          <div class="total-line grand"><span>Total</span><span>${money(total)}</span></div>
+          <div class="total-line shipping-total"><span>${escapeHtml(order.shippingMethod || "Shipping not selected")}</span><strong>${order.shippingMethod ? money(totals.shipping) : "—"}</strong></div>
+          <label>Discount<input id="orderDiscount" type="number" min="0" step="0.01" value="${Number(order.discount || 0)}" ${locked ? "disabled" : ""} /></label>
+          <div class="total-line grand"><span>Total</span><span>${money(totals.total)}</span></div>
         </div>
-        ${flags.length ? `<div class="order-flags">${flags.map((flag) => `<span>⚑ ${escapeHtml(flag)}</span>`).join("")}</div>` : ""}
+        <div class="readiness-checklist">${orderReadiness(buyer).map(([label, ready]) => `<span class="${ready ? "ready" : "pending"}">${ready ? "✓" : "○"} ${escapeHtml(label)}</span>`).join("")}</div>
+        ${flags.length ? `<div class="order-flags">${flags.map((flag) => `<span>⚑ ${escapeHtml(flag)}${/PO box/i.test(flag) ? ` <button type="button" class="row-action" id="dismissPoBoxWarningBtn">Dismiss</button>` : ""}</span>`).join("")}</div>` : ""}
         <div class="slip-status"><strong>Packing slip</strong><span>${order.packingSlipPrintCount ? `Printed ${order.packingSlipPrintCount}× · ${new Date(order.packingSlipPrintedAt).toLocaleString()}` : "Not printed"}</span></div>
         ${repeatMatches.length ? `<div class="repeat-alert"><strong>Repeat-buyer alert</strong><span>${repeatMatches.length} available card${repeatMatches.length === 1 ? "" : "s"} match this buyer’s history.</span><button class="row-action" data-open-buyer-profile="${escapeHtml(buyer)}">View profile</button></div>` : ""}
-        <label>Payment method<select id="orderPaymentMethod"><option value="">Not recorded</option>${["Cash", "PayPal", "Venmo", "Other"].map((method) => `<option ${order.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
-        <label>Mailing address<textarea id="buyerAddress" data-original-address="${escapeHtml(profile.address || "")}" rows="3">${escapeHtml(profile.address || "")}</textarea></label>
-        <label>Buyer notes<textarea id="buyerNotes" rows="3">${escapeHtml(profile.notes || "")}</textarea></label>
+        <label>Payment method<select id="orderPaymentMethod" ${locked ? "disabled" : ""}><option value="">Not recorded</option>${["Cash", "PayPal", "Venmo", "Other"].map((method) => `<option ${order.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label>
+        <label>Mailing address<textarea id="buyerAddress" data-private="address" data-original-address="${escapeHtml(profile.address || "")}" rows="3" ${locked ? "disabled" : ""}>${escapeHtml(profile.address || "")}</textarea></label>
+        <label>Buyer notes<textarea id="buyerNotes" data-private="notes" rows="3" ${locked ? "disabled" : ""}>${escapeHtml(profile.notes || "")}</textarea></label>
         ${order.trackingNumber ? `<button class="secondary full" data-open-tracking="${escapeHtml(trackingUrl(order.trackingNumber))}">Track package ↗</button>` : ""}
-        <div class="status-actions">
+        <div class="status-actions ${locked ? "hidden" : ""}">
           <button class="secondary" data-order-status="shopping">Still shopping</button>
           <button class="secondary" data-order-status="awaiting">Awaiting payment</button>
           <button class="primary" data-order-status="paid">Mark paid</button>
         </div>
+        <button type="button" class="secondary danger-button full" id="cancelOrderBtn" ${locked ? "disabled" : ""}>Cancel or move order</button>
         <button class="secondary full copy-summary" id="copySummaryBtn">Copy buyer summary</button>
         <button class="secondary full" data-visual-order-card>Create visual order cards</button>
         <div class="message-grid"><button class="secondary" data-copy-message="payment-due">Payment due</button><button class="secondary" data-copy-message="payment-received">Payment received</button><button class="secondary" data-copy-message="shipped">Shipped</button><button class="secondary" data-copy-message="delayed">Delayed</button></div>
@@ -1536,7 +1666,7 @@ function renderPulling() {
   cards.forEach((card) => { const label = pullGroupLabel(card, pullingSettings().group); if (!groups.has(label)) groups.set(label, []); groups.get(label).push(card); });
   $("#pullingCards").innerHTML = groups.size ? [...groups].map(([label, groupCards]) => `<section class="pulling-group"><h3><span>${escapeHtml(label)} · ${groupCards.filter((card) => card.pulled).length}/${groupCards.length}</span><button type="button" class="row-action" data-pull-group="${escapeHtml(label)}">${groupCards.every((card) => card.pulled) ? "Unpull group" : "Pull group"}</button></h3>${groupCards.map((card) => {
     const custom = customFields().filter((field) => customFieldValue(card, field.key) !== "").map((field) => `<span>${escapeHtml(field.label)}: ${escapeHtml(customFieldValue(card, field.key))}</span>`).join("");
-    return `<label class="pull-card ${card.pulled ? "pulled" : ""}"><input type="checkbox" data-pull-card="${card.id}" ${card.pulled ? "checked" : ""} />${card.imagePath ? `<img src="${fileUrl(card.imagePath)}" alt="" />` : `<span class="pull-thumb">${escapeHtml(card.ref)}</span>`}<span><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)}</strong><small>${escapeHtml(card.condition || "No grade")} · ${escapeHtml(card.buyer || "No buyer")}</small></span><span class="pull-meta">${custom || "No custom location data"}</span><strong>${money(card.claimPrice ?? card.price)}</strong></label>`;
+    return `<label class="pull-card ${card.pulled ? "pulled" : ""}"><input type="checkbox" data-pull-card="${card.id}" ${card.pulled ? "checked" : ""} />${card.imagePath ? `<img src="${fileUrl(card.imagePath)}" alt="" />` : `<span class="pull-thumb">${escapeHtml(card.ref)}</span>`}<span><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)}</strong><small>${escapeHtml(card.condition || "No grade")} · <span data-private="buyer">${escapeHtml(card.buyer || "No buyer")}</span> · Purchased ${escapeHtml(displayPurchaseDate(card.purchaseDate))}</small></span><span class="pull-meta">${custom || "No custom location data"}</span><strong>${money(card.claimPrice ?? card.price)}</strong></label>`;
   }).join("")}</section>`).join("") : `<div class="empty-state"><h3>No cards match this pulling view</h3><p>Adjust the buyer, search, or Hide pulled setting.</p></div>`;
 }
 
@@ -1562,17 +1692,17 @@ function renderPacking() {
     return;
   }
   const cards = cardsForBuyer(buyer);
-  const packed = cards.filter((card) => card.packed).length;
-  const percent = cards.length ? Math.round((packed / cards.length) * 100) : 0;
+  const addOns = addOnsForBuyer(buyer); const totalItems = cards.length + addOns.length;
+  const packed = cards.filter((card) => card.packed).length + addOns.filter((item) => item.packed).length;
+  const percent = totalItems ? Math.round((packed / totalItems) * 100) : 0;
   const order = orderFor(buyer);
   const profile = buyerProfile(buyer);
-  const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
-  const total = subtotal + shippingAmount(order) - Number(order.discount || 0);
-  const warnings = [!profile.address && "Missing address", !order.shippingMethod && "Shipping not selected", !["paid", "packed", "shipped"].includes(order.status) && "Unpaid balance", ["paid", "packed", "shipped"].includes(order.status) && !order.paymentMethod && "Payment method missing", cards.some((card) => !card.packed) && "Packing incomplete"].filter(Boolean);
+  const totals = orderTotals(buyer);
+  const warnings = [!profile.address && "Missing address", !order.shippingMethod && "Shipping not selected", !["paid", "packed", "shipped"].includes(order.status) && "Unpaid balance", ["paid", "packed", "shipped"].includes(order.status) && !order.paymentMethod && "Payment method missing", !orderItemsPacked(buyer) && "Packing incomplete"].filter(Boolean);
   $("#packingWarnings").innerHTML = warnings.length ? warnings.map((warning) => `<span>${escapeHtml(warning)}</span>`).join("") : `<span class="valid-text">Order ready</span>`;
   const firstImage = cards.find((card) => card.imagePath)?.imagePath;
   const printed = Number(order.packingSlipPrintCount || 0);
-  $("#packingContent").innerHTML = `<section class="packing-card"><div class="packing-progress"><div><h2>${escapeHtml(buyer)}</h2><p>${packed} of ${cards.length} cards verified · ${escapeHtml(order.shippingMethod)}${profile.address ? "" : " · Missing address"}${printed ? ` · Slip printed ${printed}×` : ""}</p><div class="progress-track"><div class="progress-bar" style="width:${percent}%"></div></div></div><div class="packing-actions"><button class="secondary" id="previewPackingSlipBtn">Preview PDF</button><button class="secondary" id="printPackingSlipBtn">${printed ? "Reprint" : "Print"} packing slip</button><button class="secondary" id="checkAllCardsBtn">${packed === cards.length ? "Uncheck all" : "Check all cards"}</button><button class="secondary" id="completePackingBtn" ${packed !== cards.length || order.status === "shipped" ? "disabled" : ""}>${order.status === "packed" ? "Package complete" : "Complete package"}</button><button class="primary" id="markShippedBtn" ${packed !== cards.length || order.status === "shipped" ? "disabled" : ""}>${order.status === "shipped" ? "Shipped" : "Mark shipped"}</button></div></div><div class="packing-order-summary">${firstImage ? `<img src="${fileUrl(firstImage)}" alt="First card in order" />` : `<div class="placeholder-thumb">No image</div>`}<div><strong>${escapeHtml(activeSale().name)}</strong><p>${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p><div class="packing-order-stats"><span><strong>${cards.length}</strong><br>cards</span><span><strong>${money(total)}</strong><br>order total</span><span><strong>${escapeHtml(order.status || "awaiting")}</strong><br>status</span></div></div></div><div class="pack-list">${cards.map((card) => `<label class="pack-item ${card.packed ? "checked" : ""}" data-pack-row="${card.id}"><input type="checkbox" data-pack-card="${card.id}" ${card.packed ? "checked" : ""} /><span><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><small>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)} · ${card.claimType === "offer" ? "Offer" : "Claim"}</small></span><strong>${money(card.claimPrice ?? card.price)}</strong></label>`).join("")}</div><div class="packing-notes"><label>Internal packing notes<textarea id="packingInternalNotes" placeholder="Private notes — never printed">${escapeHtml(order.packingNotes || "")}</textarea></label><label>Buyer-facing slip note<textarea id="packingBuyerNote" placeholder="Optional note printed on this buyer’s slip">${escapeHtml(order.packingSlipNote || "")}</textarea></label></div><div class="tracking-panel"><label>Tracking number<input id="trackingNumber" value="${escapeHtml(order.trackingNumber || "")}" placeholder="Enter USPS or carrier tracking number" /></label><div class="tracking-actions"><button class="secondary" id="copyTrackingMessageBtn" ${order.trackingNumber ? "" : "disabled"}>Copy shipping message</button><button class="secondary" id="openTrackingBtn" data-open-tracking="${escapeHtml(trackingUrl(order.trackingNumber))}" ${order.trackingNumber ? "" : "disabled"}>Track package ↗</button></div></div></section>`;
+  $("#packingContent").innerHTML = `<section class="packing-card"><div class="packing-progress"><div><h2 data-private="buyer">${escapeHtml(buyer)}</h2><p>${packed} of ${totalItems} line items verified · ${escapeHtml(order.shippingMethod)}${profile.address ? "" : " · Missing address"}${printed ? ` · Slip printed ${printed}×` : ""}</p><div class="progress-track"><div class="progress-bar" style="width:${percent}%"></div></div></div><div class="packing-actions"><button class="secondary" id="previewPackingSlipBtn">Preview PDF</button><button class="secondary" id="printPackingSlipBtn">${printed ? "Reprint" : "Print"} packing slip</button><button class="secondary" id="checkAllCardsBtn">${packed === totalItems ? "Uncheck all" : "Check all items"}</button><button class="secondary" id="completePackingBtn" ${packed !== totalItems || order.status === "shipped" ? "disabled" : ""}>${order.status === "packed" ? "Package complete" : "Complete package"}</button><button class="primary" id="markShippedBtn" ${packed !== totalItems || order.status === "shipped" ? "disabled" : ""}>${order.status === "shipped" ? "Shipped" : "Mark shipped"}</button></div></div><div class="packing-order-summary">${firstImage ? `<img src="${fileUrl(firstImage)}" alt="First card in order" />` : `<div class="placeholder-thumb">No image</div>`}<div><strong>${escapeHtml(activeSale().name)}</strong><p data-private="address">${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p><div class="packing-order-stats"><span><strong>${cards.length}</strong><br>cards</span><span><strong>${addOns.length}</strong><br>add-ons</span><span><strong>${money(totals.total)}</strong><br>order total</span><span><strong>${escapeHtml(order.status || "awaiting")}</strong><br>status</span></div></div></div><div class="pack-list">${cards.map((card) => `<label class="pack-item ${card.packed ? "checked" : ""}" data-pack-row="${card.id}"><input type="checkbox" data-pack-card="${card.id}" ${card.packed ? "checked" : ""} /><span><strong>${escapeHtml(card.ref)} · ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong><small>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} · ${escapeHtml(card.condition)} · ${card.claimType === "offer" ? "Offer" : "Claim"}</small></span><strong>${money(card.claimPrice ?? card.price)}</strong></label>`).join("")}${addOns.map((item) => `<label class="pack-item add-on ${item.packed ? "checked" : ""}"><input type="checkbox" data-pack-addon="${item.id}" ${item.packed ? "checked" : ""} /><span><strong>Add-on · ${escapeHtml(item.name)}</strong><small>Quantity ${item.quantity}</small></span><strong>${money(item.price * item.quantity)}</strong></label>`).join("")}</div><div class="packing-notes"><label>Internal packing notes<textarea id="packingInternalNotes" data-private="notes" placeholder="Private notes — never printed">${escapeHtml(order.packingNotes || "")}</textarea></label><label>Buyer-facing slip note<textarea id="packingBuyerNote" placeholder="Optional note printed on this buyer’s slip">${escapeHtml(order.packingSlipNote || "")}</textarea></label></div><div class="tracking-panel"><label>Tracking number<input id="trackingNumber" data-private="tracking" value="${escapeHtml(order.trackingNumber || "")}" placeholder="Enter USPS or carrier tracking number" /></label><div class="tracking-actions"><button class="secondary" id="copyTrackingMessageBtn" ${order.trackingNumber ? "" : "disabled"}>Copy shipping message</button><button class="secondary" id="openTrackingBtn" data-open-tracking="${escapeHtml(trackingUrl(order.trackingNumber))}" ${order.trackingNumber ? "" : "disabled"}>Track package ↗</button></div></div></section>`;
   const legacyProgress = $(".packing-card .progress-track");
   if (legacyProgress) {
     const meter = document.createElement("progress");
@@ -3168,10 +3298,17 @@ function restoreArchivedSale(saleId) {
   toast(`${sale.name} restored to the active sale list.`);
 }
 
+function likelyDuplicateBuyer(name) {
+  const normalized = normalizeMatchText(name); if (!normalized) return "";
+  return allBuyerNames().find((existing) => { const candidate = normalizeMatchText(existing); if (!candidate || candidate === normalized) return false; const a = normalized.replace(/\s+/g, ""); const b = candidate.replace(/\s+/g, ""); return a.includes(b) || b.includes(a) || (normalized.split(" ").at(-1) === candidate.split(" ").at(-1) && normalized[0] === candidate[0]); }) || "";
+}
+
 function assignBuyer(cardId, buyerName, offeredPrice, claimType = "claim", claimNote = "", conflictConfirmed = false) {
   const card = activeSale().cards.find((item) => item.id === cardId);
   const buyer = canonicalBuyerName(buyerName);
   if (!card || !buyer) return toast("Enter a buyer name first.");
+  const duplicate = !state.buyerProfiles?.[buyer] && likelyDuplicateBuyer(buyer);
+  if (!conflictConfirmed && duplicate && !window.confirm(`“${buyer}” looks similar to existing buyer “${duplicate}”.\n\nChoose OK to create/assign ${buyer} anyway, or Cancel and select ${duplicate}.`)) return;
   if (unresolvedBundleForCard(card)) return toast("Manage this card through its bundle in the Offers tab.");
   const hasOffer = claimType === "offer";
   const wasAcceptedOffer = hasOffer && card.offerStatus === "accepted";
@@ -3533,23 +3670,31 @@ async function copyText(text, message = "Copied") {
 
 function messageTemplateValues(buyer) {
   const cards = cardsForBuyer(buyer); const order = orderFor(buyer);
-  const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price), 0);
-  const shipping = shippingAmount(order);
-  const total = subtotal + shipping - Number(order.discount || 0);
+  const totals = orderTotals(buyer); const addOns = addOnsForBuyer(buyer);
+  const offerCard = activeSale().cards.find((card) => card.buyer === buyer && card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus));
   const firstName = String(buyer || "").trim().split(/\s+/)[0] || buyer;
   return {
     buyer, firstName, saleName: activeSale().name, cardCount: String(cards.length),
     cardList: cards.map((card) => `${card.year} ${card.set} ${numberLabel(card)} ${card.name}${duplicateInfo(card).label ? ` ${duplicateInfo(card).label}` : ""} — ${money(card.claimPrice ?? card.price)} (${card.claimType === "offer" ? "accepted offer" : "claim"})`.replace(/\s+/g, " ").trim()).join("\n"),
-    subtotal: money(subtotal), discount: money(order.discount || 0), discountLine: order.discount ? `Discount: -${money(order.discount)}\n` : "",
-    shippingMethod: order.shippingMethod || "Not selected", shipping: order.shippingMethod ? money(shipping) : "—", total: money(total),
-    trackingNumber: order.trackingNumber || "", trackingLine: order.trackingNumber ? `Tracking number: ${order.trackingNumber}` : ""
+    subtotal: money(totals.cardSubtotal), addOnCount: String(totals.addOnCount), addOnTotal: money(totals.addOnSubtotal),
+    addOnSection: addOns.length ? `Additional items:\n${addOns.map((item) => `${item.quantity} × ${item.name} — ${money(item.price * item.quantity)}`).join("\n")}\n` : "",
+    addOnTotalLine: addOns.length ? `Add-ons: ${money(totals.addOnSubtotal)}\n` : "",
+    discount: money(order.discount || 0), discountLine: order.discount ? `Discount: -${money(order.discount)}\n` : "",
+    shippingMethod: order.shippingMethod || "Not selected", shipping: order.shippingMethod ? money(totals.shipping) : "—", total: money(totals.total),
+    trackingNumber: order.trackingNumber || "", trackingLine: order.trackingNumber ? `Tracking number: ${order.trackingNumber}` : "",
+    card: offerCard ? `${offerCard.year} ${offerCard.set} ${numberLabel(offerCard)} ${offerCard.name}`.replace(/\s+/g, " ").trim() : "this card", listPrice: money(offerCard?.price), offerPrice: money(offerCard?.offerPrice), counterPrice: money(offerCard?.counterPrice)
   };
+}
+
+function renderConditionalMessage(template, values, buyer) {
+  const order = orderFor(buyer); const conditions = { tracking: Boolean(values.trackingNumber), addOns: Number(values.addOnCount) > 0, paid: ["paid", "packed", "shipped"].includes(order.status), unpaid: !["paid", "packed", "shipped"].includes(order.status), shipping: Boolean(order.shippingMethod) };
+  return String(template || "").replace(/\[\[if:(tracking|addOns|paid|unpaid|shipping)\]\]([\s\S]*?)\[\[\/if\]\]/g, (_match, key, body) => conditions[key] ? body : "");
 }
 
 function renderBuyerMessageTemplate(key, buyer) {
   const values = messageTemplateValues(buyer);
   const template = ensureMessageTemplates()[key] || DEFAULT_MESSAGE_TEMPLATES[key] || "";
-  return template.replace(/\{(buyer|firstName|saleName|cardCount|cardList|subtotal|discount|discountLine|shippingMethod|shipping|total|trackingNumber|trackingLine)\}/g, (_match, name) => values[name] ?? "")
+  return renderConditionalMessage(template, values, buyer).replace(/\{(buyer|firstName|saleName|cardCount|cardList|subtotal|addOnCount|addOnTotal|addOnSection|addOnTotalLine|discount|discountLine|shippingMethod|shipping|total|trackingNumber|trackingLine|card|listPrice|offerPrice|counterPrice)\}/g, (_match, name) => values[name] ?? "")
     .replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -3585,6 +3730,50 @@ function resetMessageTemplates() {
   toast("Default messages restored. Save to keep them.");
 }
 
+const PUBLIC_MESSAGE_FIELDS = new Set(["buyer", "firstName", "saleName", "cardCount", "cardList", "subtotal", "addOnCount", "addOnTotal", "addOnSection", "addOnTotalLine", "discount", "discountLine", "shippingMethod", "shipping", "total", "trackingNumber", "trackingLine", "card", "listPrice", "offerPrice", "counterPrice"]);
+function quickMessageText(message, buyer) {
+  const values = messageTemplateValues(buyer); const unknown = [];
+  const text = renderConditionalMessage(message?.body || "", values, buyer).replace(/\{([^{}]+)\}/g, (match, key) => { if (!PUBLIC_MESSAGE_FIELDS.has(key)) { unknown.push(key); return `⚠ Missing: ${key}`; } return values[key] ?? ""; }).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return { text, unknown: [...new Set(unknown)] };
+}
+
+function openQuickMessages(id = "", buyer = state.selectedBuyer) {
+  ensureQuickMessages(); selectedQuickMessageId = id || quickMessageRecommendationIds(buyer)[0] || ensureQuickMessages()[0]?.id;
+  $("#quickMessagePreview").readOnly = false; $("#quickMessagePreview").setAttribute("aria-label", "Message preview and one-time edits"); $("#quickMessagePreview").dataset.private = "message"; $("#quickMessageBuyer").dataset.private = "buyer";
+  if (!$("#moveQuickMessageUpBtn")) $("#duplicateQuickMessageBtn").insertAdjacentHTML("beforebegin", '<button id="moveQuickMessageUpBtn" type="button" class="secondary" title="Move earlier">↑</button><button id="moveQuickMessageDownBtn" type="button" class="secondary" title="Move later">↓</button>');
+  $("#quickMessageBuyer").innerHTML = buyers().map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  $("#quickMessageBuyer").value = buyers().includes(buyer) ? buyer : buyers()[0] || "";
+  renderQuickMessages(); $("#quickMessagesDialog").showModal();
+}
+
+function renderQuickMessages() {
+  const messages = ensureQuickMessages(); const query = String($("#quickMessageSearch")?.value || "").toLowerCase(); const selectedCategory = $("#quickMessageCategory")?.value || "all";
+  const categories = [...new Set(messages.map((item) => item.category || "General"))].sort();
+  $("#quickMessageCategory").innerHTML = `<option value="all">All categories</option>${categories.map((category) => `<option ${category === selectedCategory ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}`;
+  $("#quickMessageCategories").innerHTML = categories.map((category) => `<option value="${escapeHtml(category)}"></option>`).join("");
+  const shown = messages.filter((item) => (selectedCategory === "all" || item.category === selectedCategory) && (!query || `${item.name} ${item.category} ${item.body}`.toLowerCase().includes(query))).sort((a, b) => Number(b.pinned) - Number(a.pinned));
+  const recommended = quickMessageRecommendationIds($("#quickMessageBuyer").value).map(quickMessageById).filter(Boolean); const recent = (state.preferences.recentQuickMessages || []).map(quickMessageById).filter(Boolean).slice(0, 3);
+  $("#quickMessageSuggestions").innerHTML = `${recommended.length ? `<small>Suggested now</small>${recommended.map((item) => `<button type="button" data-quick-message="${item.id}">★ ${escapeHtml(item.name)}</button>`).join("")}` : ""}${recent.length ? `<small>Recently used</small>${recent.map((item) => `<button type="button" data-quick-message="${item.id}">${escapeHtml(item.name)}</button>`).join("")}` : ""}`;
+  $("#quickMessageList").innerHTML = shown.map((item) => `<button type="button" class="${item.id === selectedQuickMessageId ? "active" : ""}" data-quick-message="${item.id}"><strong>${item.pinned ? "★ " : ""}${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category || "General")}</small></button>`).join("") || `<p class="muted">No messages match.</p>`;
+  let message = quickMessageById(selectedQuickMessageId); if (!message) { message = shown[0] || messages[0]; selectedQuickMessageId = message?.id || ""; }
+  if (!message) return;
+  quickMessageDraft = clone(message); $("#quickMessageName").value = message.name; $("#quickMessageEditCategory").value = message.category || "General"; $("#quickMessageBody").value = message.body; $("#quickMessagePinned").checked = Boolean(message.pinned);
+  $("#deleteQuickMessageBtn").disabled = Boolean(message.builtInKey); $("#resetQuickMessageBtn").disabled = !message.builtInKey; updateQuickMessagePreview();
+}
+
+function updateQuickMessagePreview() {
+  if (!quickMessageDraft) return; quickMessageDraft.name = $("#quickMessageName").value; quickMessageDraft.category = $("#quickMessageEditCategory").value; quickMessageDraft.body = $("#quickMessageBody").value; quickMessageDraft.pinned = $("#quickMessagePinned").checked;
+  const rendered = quickMessageText(quickMessageDraft, $("#quickMessageBuyer").value); $("#quickMessagePreview").value = rendered.text; $("#quickMessageWarnings").innerHTML = rendered.unknown.length ? `<span>⚑ Unknown placeholders: ${rendered.unknown.map(escapeHtml).join(", ")}</span>` : "";
+}
+
+function saveQuickMessage() {
+  if (!quickMessageDraft?.name.trim() || !quickMessageDraft?.body.trim()) return toast("Enter a name and message.");
+  const existing = quickMessageById(quickMessageDraft.id); if (existing && existing.body !== quickMessageDraft.body) { existing.versions ||= []; existing.versions.unshift({ at: new Date().toISOString(), body: existing.body }); existing.versions = existing.versions.slice(0, 20); }
+  if (existing) Object.assign(existing, clone(quickMessageDraft), { updatedAt: new Date().toISOString() }); else ensureQuickMessages().push({ ...clone(quickMessageDraft), id: quickMessageDraft.id || uid(), updatedAt: new Date().toISOString(), versions: [] });
+  const saved = quickMessageById(quickMessageDraft.id); if (saved?.builtInKey) ensureMessageTemplates()[saved.builtInKey] = saved.body;
+  saveSoon(); renderQuickMessages(); toast("Message saved.");
+}
+
 const PACKING_PRINT_STYLES = `
   body{font:14px "Segoe UI",Arial,sans-serif;color:#172333;background:#fff}
   .slip-page{min-height:100vh;padding:.42in;page-break-after:always;display:flex;flex-direction:column;background:#fff;break-inside:avoid}
@@ -3603,11 +3792,10 @@ async function buildPackingSlip(buyer, design = ensurePackingSettings()) {
   const cards = cardsForBuyer(buyer);
   const order = orderFor(buyer);
   const profile = buyerProfile(buyer);
+  const addOns = addOnsForBuyer(buyer); const slipTotals = orderTotals(buyer);
+  const privacy = currentLicense.owner === true && Boolean(state.preferences?.privacyMode); const displayBuyer = privacy ? "Buyer hidden" : buyer; const displayAddress = privacy ? "Address hidden in Privacy Mode" : (profile.address || "Address not entered");
   order.orderNumber ||= `${String(sale.name || "SALE").replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase()}-${String(buyers().indexOf(buyer) + 1).padStart(3, "0")}`;
-  const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0);
-  const shipping = shippingAmount(order);
-  const discount = Number(order.discount || 0);
-  const total = subtotal + shipping - discount;
+  const subtotal = slipTotals.cardSubtotal; const shipping = slipTotals.shipping; const discount = slipTotals.discount; const total = slipTotals.total;
   const logoData = design.logoPath ? await window.cardSale.packingFileDataUrl(design.logoPath) : design.brandName === "Card Sale Manager" ? BUILT_IN_BRAND_LOGO : "";
   const qrValue = packingQrValue(design);
   const qrData = qrValue ? await window.cardSale.packingQrDataUrl(qrValue, design.accent) : "";
@@ -3616,10 +3804,10 @@ async function buildPackingSlip(buyer, design = ensurePackingSettings()) {
   const thumbData = design.showThumbnails ? await Promise.all(cards.map((card) => card.imagePath ? window.cardSale.packingFileDataUrl(card.imagePath) : Promise.resolve(""))) : [];
   const appBrand = !design.logoPath && design.brandName === "Card Sale Manager";
   const brand = `<section class="slip-brand"><div class="slip-brand-main">${logoData ? `<img class="slip-logo${appBrand ? " app-brand-logo" : ""}" src="${logoData}" alt="" />` : ""}${appBrand ? "" : `<div><h1>${escapeHtml(design.brandName || sale.name)}</h1><p>${escapeHtml(design.contact || "")}</p></div>`}</div><div class="slip-muted">${escapeHtml(sale.name)}</div></section>${design.header ? `<div class="slip-header">${escapeHtml(design.header)}</div>` : ""}`;
-  const buyerBlock = `<section class="slip-order"><div><h2>${escapeHtml(buyer)}</h2>${design.showAddress ? `<p>${escapeHtml(profile.address || "Address not entered").replace(/\n/g, "<br>")}</p>` : ""}</div><div>${design.showOrderNumber ? `<p><strong>Order:</strong> ${escapeHtml(order.orderNumber)}</p>` : ""}${design.showPayment ? `<p><strong>Payment:</strong> ${escapeHtml(order.paymentMethod || "Not recorded")}</p>` : ""}${design.showShipping ? `<p><strong>Shipping:</strong> ${escapeHtml(order.shippingMethod || "")}</p>` : ""}<p><strong>Cards:</strong> ${cards.length}</p></div></section>`;
+  const buyerBlock = `<section class="slip-order"><div><h2>${escapeHtml(displayBuyer)}</h2>${design.showAddress ? `<p>${escapeHtml(displayAddress).replace(/\n/g, "<br>")}</p>` : ""}</div><div>${design.showOrderNumber ? `<p><strong>Order:</strong> ${escapeHtml(privacy ? "ORDER-HIDDEN" : order.orderNumber)}</p>` : ""}${design.showPayment ? `<p><strong>Payment:</strong> ${escapeHtml(privacy ? "Hidden" : (order.paymentMethod || "Not recorded"))}</p>` : ""}${design.showShipping ? `<p><strong>Shipping:</strong> ${escapeHtml(order.shippingMethod || "")}</p>` : ""}<p><strong>Cards:</strong> ${cards.length}</p>${addOns.length ? `<p><strong>Add-ons:</strong> ${slipTotals.addOnCount}</p>` : ""}</div></section>`;
   const message = design.thanks || order.packingSlipNote ? `<section class="slip-message">${escapeHtml(design.thanks || "")}${order.packingSlipNote ? `<div class="slip-note">${escapeHtml(order.packingSlipNote)}</div>` : ""}</section>` : "";
-  const items = `<table class="slip-table"><thead><tr>${design.showThumbnails ? "<th></th>" : ""}<th>Ref</th><th>Card</th>${design.showPrices ? "<th class=\"price\">Price</th>" : ""}</tr></thead><tbody>${cards.map((card, index) => { const packingFields = customFields().filter((field) => field.includePacking && customFieldValue(card, field.key) !== "").map((field) => `${field.label}: ${customFieldValue(card, field.key)}`); return `<tr>${design.showThumbnails ? `<td>${thumbData[index] ? `<img class="slip-thumb" src="${thumbData[index]}" alt="" />` : ""}</td>` : ""}<td><strong>${escapeHtml(card.ref)}</strong></td><td><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong>${design.showDetails ? `<div class="slip-card-detail">${[card.condition, card.notes && String(card.notes).toLowerCase() !== "none" ? card.notes : "", ...packingFields].filter(Boolean).map(escapeHtml).join(" · ")}</div>` : ""}</td>${design.showPrices ? `<td class="price">${money(card.claimPrice ?? card.price)}</td>` : ""}</tr>`; }).join("")}</tbody></table>`;
-  const totals = design.showPrices ? `<section class="slip-totals"><div class="slip-total-line"><span>Cards</span><strong>${money(subtotal)}</strong></div><div class="slip-total-line"><span>${escapeHtml(order.shippingMethod || "Shipping")}</span><strong>${money(shipping)}</strong></div>${discount ? `<div class="slip-total-line"><span>Discount</span><strong>−${money(discount)}</strong></div>` : ""}<div class="slip-total-line grand"><span>Total</span><span>${money(total)}</span></div></section>` : "";
+  const items = `<table class="slip-table"><thead><tr>${design.showThumbnails ? "<th></th>" : ""}<th>Ref</th><th>Card / item</th>${design.showPrices ? "<th class=\"price\">Price</th>" : ""}</tr></thead><tbody>${cards.map((card, index) => { const packingFields = customFields().filter((field) => field.includePacking && customFieldValue(card, field.key) !== "").map((field) => `${field.label}: ${customFieldValue(card, field.key)}`); return `<tr>${design.showThumbnails ? `<td>${thumbData[index] ? `<img class="slip-thumb" src="${thumbData[index]}" alt="" />` : ""}</td>` : ""}<td><strong>${escapeHtml(card.ref)}</strong></td><td><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</strong>${design.showDetails ? `<div class="slip-card-detail">${[card.condition, card.notes && String(card.notes).toLowerCase() !== "none" ? card.notes : "", ...packingFields].filter(Boolean).map(escapeHtml).join(" · ")}</div>` : ""}</td>${design.showPrices ? `<td class="price">${money(card.claimPrice ?? card.price)}</td>` : ""}</tr>`; }).join("")}${addOns.map((item) => `<tr>${design.showThumbnails ? "<td></td>" : ""}<td>ADD</td><td><strong>${escapeHtml(item.name)}</strong><div class="slip-card-detail">Quantity ${item.quantity}</div></td>${design.showPrices ? `<td class="price">${money(item.price * item.quantity)}</td>` : ""}</tr>`).join("")}</tbody></table>`;
+  const totals = design.showPrices ? `<section class="slip-totals"><div class="slip-total-line"><span>Cards</span><strong>${money(subtotal)}</strong></div>${addOns.length ? `<div class="slip-total-line"><span>Add-ons</span><strong>${money(slipTotals.addOnSubtotal)}</strong></div>` : ""}<div class="slip-total-line"><span>${escapeHtml(order.shippingMethod || "Shipping")}</span><strong>${money(shipping)}</strong></div>${discount ? `<div class="slip-total-line"><span>Discount</span><strong>−${money(discount)}</strong></div>` : ""}<div class="slip-total-line grand"><span>Total</span><span>${money(total)}</span></div></section>` : "";
   const policy = design.returnPolicy ? `<section class="slip-policy"><strong>Questions or concerns?</strong><br>${escapeHtml(design.returnPolicy)}</section>` : "";
   const mainLink = qrData || design.socialLink ? `<div class="slip-link-item"><div><strong>Stay connected</strong>${design.socialLink ? `<p>${escapeHtml(design.socialLink)}</p>` : ""}${qrValue ? `<p class="slip-muted">Scan to open ${escapeHtml(design.qrType === "social" ? "our page" : design.qrType)}.</p>` : ""}</div>${qrData ? `<img src="${qrData}" alt="QR code" />` : ""}</div>` : "";
   const extraLinkHtml = extraLinks.map((link, index) => `<div class="slip-link-item"><div><strong>${escapeHtml(link.label || "Link")}</strong>${link.showText === false ? "" : `<p>${escapeHtml(link.url)}</p>`}</div>${extraQrData[index] ? `<img src="${extraQrData[index]}" alt="${escapeHtml(link.label || "Link")} QR code" />` : ""}</div>`).join("");
@@ -3628,7 +3816,7 @@ async function buildPackingSlip(buyer, design = ensurePackingSettings()) {
   const sectionHtml = { header: brand, buyer: buyerBlock, message, items, totals, policy, qr, footer };
   const densityClass = cards.length > 16 ? " slip-ultra-dense" : cards.length > 8 ? " slip-dense" : "";
   let html = `<article class="slip-page${densityClass}">${design.sectionOrder.map((id) => sectionHtml[id] || "").join("")}</article>`;
-  if (design.includeLabel && profile.address) html += `<article class="slip-page shipping-label-page"><section class="shipping-label"><h1>Ship to</h1><address><strong>${escapeHtml(buyer)}</strong><br>${escapeHtml(profile.address).replace(/\n/g, "<br>")}</address><p>${escapeHtml(order.shippingMethod || "")} · ${cards.length} card${cards.length === 1 ? "" : "s"} · ${escapeHtml(order.orderNumber)}</p></section></article>`;
+  if (design.includeLabel && profile.address) html += `<article class="slip-page shipping-label-page"><section class="shipping-label"><h1>Ship to</h1><address><strong>${escapeHtml(displayBuyer)}</strong><br>${escapeHtml(displayAddress).replace(/\n/g, "<br>")}</address><p>${escapeHtml(order.shippingMethod || "")} · ${cards.length} card${cards.length === 1 ? "" : "s"} · ${escapeHtml(privacy ? "ORDER-HIDDEN" : order.orderNumber)}</p></section></article>`;
   return { html, total, cards: cards.length, orderNumber: order.orderNumber };
 }
 
@@ -3863,6 +4051,7 @@ function readPweLabelForm() {
 
 function pweLabelHtml(buyer, settings = ensurePweLabelSettings()) {
   const profile = buyerProfile(buyer); const order = orderFor(buyer); const cards = cardsForBuyer(buyer);
+  const privacy = currentLicense.owner === true && Boolean(state.preferences?.privacyMode); const displayBuyer = privacy ? "Buyer hidden" : buyer; const displayAddress = privacy ? "Address hidden in Privacy Mode" : (profile.address || "Address not entered");
   order.orderNumber ||= `${String(activeSale().name || "SALE").replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase()}-${String(buyers().indexOf(buyer) + 1).padStart(3, "0")}`;
   const orientation = settings.orientation === "landscape" ? "landscape" : "portrait";
   const font = ["classic", "typewriter"].includes(settings.font) ? settings.font : "modern";
@@ -3870,9 +4059,9 @@ function pweLabelHtml(buyer, settings = ensurePweLabelSettings()) {
   const padding = ["tight", "roomy"].includes(settings.padding) ? settings.padding : "standard";
   const returnBlock = settings.showReturn === false ? "" : `<div class="pwe-return"><strong>${escapeHtml(settings.returnName || "Return address")}</strong><br>${escapeHtml(settings.returnAddress || "Add a return address in the label editor").replace(/\n/g, "<br>")}</div>`;
   const headingBlock = settings.showHeading === false ? "" : `<div class="pwe-heading">${escapeHtml(settings.heading || "Please deliver to")}</div>`;
-  const orderBlock = settings.showOrder === false ? "" : `<div class="pwe-order">Order ${escapeHtml(order.orderNumber)} · ${cards.length} card${cards.length === 1 ? "" : "s"} · PWE</div>`;
+  const orderBlock = settings.showOrder === false ? "" : `<div class="pwe-order">Order ${escapeHtml(privacy ? "ORDER-HIDDEN" : order.orderNumber)} · ${cards.length} card${cards.length === 1 ? "" : "s"} · PWE</div>`;
   const footerBlock = settings.showFooter === false ? "" : `<footer class="pwe-footer">${escapeHtml(settings.footer || "")}</footer>`;
-  return `<article class="pwe-print-label ${escapeHtml(settings.size || "standard")} ${orientation} font-${font} align-${alignment} padding-${padding}">${returnBlock}${headingBlock}<address class="pwe-recipient"><strong>${escapeHtml(buyer)}</strong>\n${escapeHtml(profile.address || "Address not entered")}</address>${orderBlock}${footerBlock}</article>`;
+  return `<article class="pwe-print-label ${escapeHtml(settings.size || "standard")} ${orientation} font-${font} align-${alignment} padding-${padding}">${returnBlock}${headingBlock}<address class="pwe-recipient"><strong>${escapeHtml(displayBuyer)}</strong>\n${escapeHtml(displayAddress)}</address>${orderBlock}${footerBlock}</article>`;
 }
 
 function updatePweLabelPreview() {
@@ -4222,11 +4411,15 @@ function mergeBuyerProfiles() {
   historicalSales().forEach((sale) => {
     sale.cards.forEach((card) => { if (card.buyer === source) { card.buyer = target; moved += 1; } });
     (sale.bundles || []).forEach((bundle) => { if (bundle.buyer === source) bundle.buyer = target; });
-    if (sale.orders?.[source]) { sale.orders[target] = { ...sale.orders[source], ...(sale.orders[target] || {}) }; delete sale.orders[source]; }
+    if (sale.orders?.[source]) {
+      const sourceOrder = sale.orders[source]; const targetOrder = sale.orders[target] || {}; const rank = { shopping: 0, awaiting: 1, paid: 2, packed: 3, shipped: 4 };
+      sale.orders[target] = { ...sourceOrder, ...targetOrder, status: (rank[targetOrder.status] || 0) >= (rank[sourceOrder.status] || 0) ? (targetOrder.status || sourceOrder.status) : sourceOrder.status, addOns: [...normalizeOrderAddOns(sourceOrder).map(clone), ...normalizeOrderAddOns(targetOrder).map(clone)], packingNotes: [sourceOrder.packingNotes, targetOrder.packingNotes].filter(Boolean).join("\n"), packingSlipNote: [sourceOrder.packingSlipNote, targetOrder.packingSlipNote].filter(Boolean).join("\n"), cancelHistory: [...(sourceOrder.cancelHistory || []), ...(targetOrder.cancelHistory || [])] };
+      delete sale.orders[source];
+    }
     (sale.audit || []).forEach((item) => { if (item.buyer === source) item.buyer = target; });
   });
   to.aliases = [...new Set([...(to.aliases || []), source, ...(from.aliases || [])])]; to.tags = [...new Set([...(to.tags || []), ...(from.tags || [])])];
-  to.notes = [to.notes, from.notes].filter(Boolean).join("\n"); if (!to.address && from.address) { to.address = from.address; to.validatedAddress = from.validatedAddress || ""; to.addressValidatedAt = from.addressValidatedAt || ""; } to.previousAddresses = [...(to.previousAddresses || []), ...(from.previousAddresses || [])];
+  to.notes = [to.notes, from.notes].filter(Boolean).join("\n"); if (!to.address && from.address) { to.address = from.address; to.validatedAddress = from.validatedAddress || ""; to.addressValidatedAt = from.addressValidatedAt || ""; } to.previousAddresses = [...(to.previousAddresses || []), ...(from.previousAddresses || [])]; to.dismissedPoBoxWarnings = [...new Set([...(to.dismissedPoBoxWarnings || []), ...(from.dismissedPoBoxWarnings || [])])];
   delete state.buyerProfiles[source]; state.selectedBuyer = target; state.profileBuyer = target; recordAudit("buyer-merge", `Merged ${source} into ${target}`, { buyer: target }); $("#mergeBuyerDialog").close(); saveSoon(); render(); toast(`${source} merged into ${target} across ${moved} card records.`);
 }
 
@@ -4278,6 +4471,7 @@ function applyCarryover() {
 function bindEvents() {
   $$(".nav-item[data-view]").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
   $("#brandLockup").addEventListener("click", handleOwnerGesture);
+  $("#privacyModeBtn").addEventListener("click", () => { if (!currentLicense.owner) return; state.preferences.privacyMode = !state.preferences.privacyMode; applyDisplayPreferences(); saveSoon(); toast(state.preferences.privacyMode ? "Privacy mode is hiding personal information." : "Privacy mode turned off."); });
   $("#licenseBtn").addEventListener("click", async () => { await refreshLicenseEntitlements(false).catch(() => {}); $("#licenseDialog").showModal(); });
   $("#activateLicenseBtn").addEventListener("click", async () => {
     try { const status = await window.cardSale.activateLicense($("#licenseKey").value); $("#licenseKey").value = ""; applyLicenseEntitlements(status); renderLicenseDialog(status); toast("License activated."); }
@@ -4734,6 +4928,9 @@ function bindEvents() {
   $("#buyerList").addEventListener("click", (event) => { const button = event.target.closest("[data-buyer]"); if (button) { state.selectedBuyer = button.dataset.buyer; renderOrders(); } });
   $("#orderSearch").addEventListener("input", (event) => { orderDeskSettings().query = event.target.value; saveSoon(); renderOrders(); });
   $("#orderStatusFilter").addEventListener("change", (event) => { orderDeskSettings().status = event.target.value; saveSoon(); renderOrders(); });
+  $("#orderGroupMode").addEventListener("change", (event) => { orderDeskSettings().groupMode = event.target.value; saveSoon(); renderOrders(); });
+  $("#orderViewMode").addEventListener("change", (event) => { orderDeskSettings().viewMode = event.target.value; saveSoon(); renderOrders(); });
+  $("#buyerList").addEventListener("click", (event) => { const key = event.target.closest("[data-order-group]")?.dataset.orderGroup; if (!key) return; const settings = orderDeskSettings(); settings.collapsedGroups[key] = !settings.collapsedGroups[key]; saveSoon(); renderOrders(); });
   $("#shippingRulesBtn").addEventListener("click", openShippingRules);
   $("#saveShippingRulesBtn").addEventListener("click", saveShippingRules);
   $("#orderDetail").addEventListener("input", (event) => {
@@ -4748,16 +4945,42 @@ function bindEvents() {
   });
   $("#orderDetail").addEventListener("change", (event) => { if (event.target.id !== "buyerAddress" || !state.selectedBuyer) return; const previous = event.target.dataset.originalAddress || ""; const current = event.target.value.trim(); const profile = ensureBuyerProfile(state.selectedBuyer); if (previous && normalizedAddress(previous) !== normalizedAddress(current) && !profile.previousAddresses.some((item) => normalizedAddress(item.address) === normalizedAddress(previous))) profile.previousAddresses.push({ address: previous, changedAt: new Date().toISOString() }); profile.address = current; profile.manuallySaved = true; saveSoon(); renderOrders(); toast(addressWarnings(state.selectedBuyer).length ? "Address saved with warnings." : "Address saved and checked."); });
   $("#orderDetail").addEventListener("click", (event) => {
+    if (event.target.id === "reopenOrderBtn") { const order = orderFor(state.selectedBuyer); order.status = "packed"; order.locked = false; recordAudit("order", `${state.selectedBuyer} reopened a shipped order`, { buyer: state.selectedBuyer }); saveSoon(); render(); return toast("Order reopened for editing."); }
+    if (event.target.id === "dismissPoBoxWarningBtn") { const profile = ensureBuyerProfile(state.selectedBuyer); profile.dismissedPoBoxWarnings ||= []; const key = poBoxWarningKey(state.selectedBuyer, profile.address); if (!profile.dismissedPoBoxWarnings.includes(key)) profile.dismissedPoBoxWarnings.push(key); saveSoon(); renderOrders(); return toast("PO box reminder dismissed for this address and shipping method."); }
+    if (event.target.id === "cancelOrderBtn") { openCancelOrder(state.selectedBuyer); return; }
+    const editAddOn = event.target.dataset.editAddon;
+    if (editAddOn) { const item = addOnsForBuyer(state.selectedBuyer).find((entry) => entry.id === editAddOn); if (!item) return; const name = window.prompt("Add-on name", item.name); if (name == null) return; const price = window.prompt("Unit price", item.price); if (price == null) return; const quantity = window.prompt("Quantity", item.quantity); if (quantity == null) return; item.name = name.trim() || item.name; item.price = Math.max(0, Number(price || 0)); item.quantity = Math.max(1, Math.floor(Number(quantity || 1))); saveSoon(); renderOrders(); return; }
+    const deleteAddOn = event.target.dataset.deleteAddon;
+    if (deleteAddOn && window.confirm("Remove this additional line item?")) { const order = orderFor(state.selectedBuyer); order.addOns = order.addOns.filter((item) => item.id !== deleteAddOn); recordAudit("order", `Removed an add-on from ${state.selectedBuyer}`, { buyer: state.selectedBuyer }); saveSoon(); renderOrders(); return; }
     const status = event.target.dataset.orderStatus;
     if (status && state.selectedBuyer) { const order = orderFor(state.selectedBuyer); if (status === "paid" && !order.shippingMethod) return toast("Select PWE or PMWT before marking the order paid."); if (status === "paid" && !order.paymentMethod) return toast("Choose Cash, PayPal, Venmo or Other before marking paid."); snapshotSale(`Before marking ${state.selectedBuyer} ${status}`); order.status = status; if (status === "paid") order.paidAt = new Date().toISOString(); recordAudit("order", `${state.selectedBuyer} marked ${status}${order.paymentMethod ? ` via ${order.paymentMethod}` : ""}`, { buyer: state.selectedBuyer }); saveSoon(); render(); toast(`Order marked ${status}.`); }
-    if (event.target.id === "copySummaryBtn") { if (!orderFor(state.selectedBuyer).shippingMethod) return toast("Select PWE or PMWT before copying the summary."); copyText(buyerSummary(state.selectedBuyer), "Buyer summary copied."); }
-    if (event.target.dataset.copyMessage) { if (!orderFor(state.selectedBuyer).shippingMethod && ["payment-due", "payment-received"].includes(event.target.dataset.copyMessage)) return toast("Select PWE or PMWT before copying this message."); copyText(buyerMessage(event.target.dataset.copyMessage, state.selectedBuyer), "Buyer message copied."); }
-    if (event.target.id === "editMessageTemplatesBtn") openMessageTemplates();
+    if (event.target.id === "copySummaryBtn") { if (!orderFor(state.selectedBuyer).shippingMethod) return toast("Select PWE or PMWT before copying the summary."); openQuickMessages("builtin-orderSummary", state.selectedBuyer); }
+    if (event.target.dataset.copyMessage) { if (!orderFor(state.selectedBuyer).shippingMethod && ["payment-due", "payment-received"].includes(event.target.dataset.copyMessage)) return toast("Select PWE or PMWT before copying this message."); const key = { "payment-due": "paymentDue", "payment-received": "paymentReceived", shipped: "shipped", delayed: "delayed" }[event.target.dataset.copyMessage]; openQuickMessages(`builtin-${key}`, state.selectedBuyer); }
+    if (event.target.id === "editMessageTemplatesBtn") openQuickMessages("", state.selectedBuyer);
     if (event.target.dataset.openTracking) window.cardSale.openTracking(event.target.dataset.openTracking);
     if (event.target.dataset.openBuyerProfile) { state.profileBuyer = event.target.dataset.openBuyerProfile; showView("buyers"); renderBuyerProfiles(); }
   });
+  $("#orderDetail").addEventListener("submit", (event) => { if (event.target.id !== "addOnForm") return; event.preventDefault(); const name = $("#addOnName").value.trim(); if (!name) return toast("Enter an item name."); const item = { id: uid(), name, price: Math.max(0, Number($("#addOnPrice").value || 0)), quantity: Math.max(1, Math.floor(Number($("#addOnQuantity").value || 1))), packed: false }; addOnsForBuyer(state.selectedBuyer).push(item); recordAudit("order", `Added ${item.quantity} × ${item.name} to ${state.selectedBuyer}`, { buyer: state.selectedBuyer }); saveSoon(); renderOrders(); toast("Additional item added."); });
   $("#saveMessageTemplatesBtn").addEventListener("click", saveMessageTemplates);
   $("#resetMessageTemplatesBtn").addEventListener("click", resetMessageTemplates);
+  $("#quickMessagesBtn").addEventListener("click", () => openQuickMessages());
+  $("#quickMessageSearch").addEventListener("input", renderQuickMessages);
+  $("#quickMessageCategory").addEventListener("change", renderQuickMessages);
+  $("#quickMessageBuyer").addEventListener("change", updateQuickMessagePreview);
+  $("#quickMessageList").addEventListener("click", (event) => { const id = event.target.closest("[data-quick-message]")?.dataset.quickMessage; if (id) { selectedQuickMessageId = id; renderQuickMessages(); } });
+  $("#quickMessageSuggestions").addEventListener("click", (event) => { const id = event.target.closest("[data-quick-message]")?.dataset.quickMessage; if (id) { selectedQuickMessageId = id; renderQuickMessages(); } });
+  $("#quickMessagesDialog").addEventListener("input", (event) => { if (["quickMessageName", "quickMessageEditCategory", "quickMessageBody", "quickMessagePinned"].includes(event.target.id)) updateQuickMessagePreview(); });
+  $("#quickMessagesDialog").addEventListener("click", (event) => { const field = event.target.dataset.insertMessageField; const condition = event.target.dataset.insertCondition; if (field || condition) { const area = $("#quickMessageBody"); const text = field || `[[if:${condition}]]\nYour text here\n[[/if]]`; area.setRangeText(text, area.selectionStart, area.selectionEnd, "end"); area.focus(); updateQuickMessagePreview(); return; } const direction = event.target.id === "moveQuickMessageUpBtn" ? -1 : event.target.id === "moveQuickMessageDownBtn" ? 1 : 0; if (!direction) return; const list = ensureQuickMessages(); const index = list.findIndex((item) => item.id === selectedQuickMessageId); const target = index + direction; if (index < 0 || target < 0 || target >= list.length) return; [list[index], list[target]] = [list[target], list[index]]; saveSoon(); renderQuickMessages(); });
+  $("#addQuickMessageBtn").addEventListener("click", () => { const item = { id: uid(), name: "New message", category: "General", body: "Hi {firstName},\n\n", pinned: false, versions: [] }; ensureQuickMessages().push(item); selectedQuickMessageId = item.id; saveSoon(); renderQuickMessages(); });
+  $("#saveQuickMessageBtn").addEventListener("click", saveQuickMessage);
+  $("#copyQuickMessageBtn").addEventListener("click", () => { if ($("#quickMessageWarnings").textContent.trim()) return toast("Fix the missing placeholders before copying."); const id = selectedQuickMessageId; state.preferences.recentQuickMessages = [id, ...(state.preferences.recentQuickMessages || []).filter((item) => item !== id)].slice(0, 8); copyText($("#quickMessagePreview").value, "Message copied."); saveSoon(); });
+  $("#duplicateQuickMessageBtn").addEventListener("click", () => { updateQuickMessagePreview(); const copy = { ...clone(quickMessageDraft), id: uid(), builtInKey: "", name: `${quickMessageDraft.name} copy`, versions: [] }; ensureQuickMessages().push(copy); selectedQuickMessageId = copy.id; saveSoon(); renderQuickMessages(); });
+  $("#deleteQuickMessageBtn").addEventListener("click", () => { const message = quickMessageById(selectedQuickMessageId); if (!message || message.builtInKey || !window.confirm(`Delete “${message.name}”?`)) return; state.preferences.quickMessages = ensureQuickMessages().filter((item) => item.id !== message.id); selectedQuickMessageId = state.preferences.quickMessages[0]?.id || ""; saveSoon(); renderQuickMessages(); });
+  $("#resetQuickMessageBtn").addEventListener("click", () => { const message = quickMessageById(selectedQuickMessageId); if (!message?.builtInKey) return; message.versions ||= []; message.versions.unshift({ at: new Date().toISOString(), body: message.body }); message.body = DEFAULT_MESSAGE_TEMPLATES[message.builtInKey]; ensureMessageTemplates()[message.builtInKey] = message.body; saveSoon(); renderQuickMessages(); toast("Built-in message restored."); });
+  $("#quickMessageHistoryBtn").addEventListener("click", () => { const message = quickMessageById(selectedQuickMessageId); if (!message?.versions?.length) return toast("This message has no earlier versions yet."); const choices = message.versions.map((item, index) => `${index + 1}. ${new Date(item.at).toLocaleString()}`).join("\n"); const answer = window.prompt(`Enter a version number to restore:\n${choices}`); const version = message.versions[Number(answer) - 1]; if (!version) return; message.body = version.body; saveSoon(); renderQuickMessages(); toast("Earlier message restored."); });
+  $("#cancelOrderScope").addEventListener("change", (event) => $("#cancelOrderCards").classList.toggle("hidden", event.target.value === "all"));
+  $("#cancelOrderAction").addEventListener("change", (event) => $("#cancelOrderBuyerLabel").classList.toggle("hidden", event.target.value !== "move"));
+  $("#confirmCancelOrderBtn").addEventListener("click", applyCancelOrder);
   $("#packingBuyer").addEventListener("change", renderPacking);
   $("#packingContent").addEventListener("input", (event) => {
     const buyer = $("#packingBuyer").value;
@@ -4765,17 +4988,17 @@ function bindEvents() {
     if (event.target.id === "packingInternalNotes") { orderFor(buyer).packingNotes = event.target.value; saveSoon(); }
     if (event.target.id === "packingBuyerNote") { orderFor(buyer).packingSlipNote = event.target.value; saveSoon(); }
   });
-  $("#packingContent").addEventListener("change", (event) => { const id = event.target.dataset.packCard; if (id) { const card = activeSale().cards.find((item) => item.id === id); card.packed = event.target.checked; saveSoon(); renderPacking(); } });
+  $("#packingContent").addEventListener("change", (event) => { const id = event.target.dataset.packCard; if (id) { const card = activeSale().cards.find((item) => item.id === id); card.packed = event.target.checked; saveSoon(); renderPacking(); } const addOnId = event.target.dataset.packAddon; if (addOnId) { const item = addOnsForBuyer($("#packingBuyer").value).find((entry) => entry.id === addOnId); if (item) item.packed = event.target.checked; saveSoon(); renderPacking(); } });
   $("#packingContent").addEventListener("click", (event) => {
     const buyer = $("#packingBuyer").value;
-    if (event.target.id === "checkAllCardsBtn") { const cards = cardsForBuyer(buyer); const shouldPack = cards.some((card) => !card.packed); cards.forEach((card) => card.packed = shouldPack); saveSoon(); renderPacking(); toast(shouldPack ? "All cards checked." : "All cards unchecked."); }
+    if (event.target.id === "checkAllCardsBtn") { const cards = cardsForBuyer(buyer); const addOns = addOnsForBuyer(buyer); const shouldPack = cards.some((card) => !card.packed) || addOns.some((item) => !item.packed); cards.forEach((card) => card.packed = shouldPack); addOns.forEach((item) => item.packed = shouldPack); saveSoon(); renderPacking(); toast(shouldPack ? "All items checked." : "All items unchecked."); }
     if (event.target.id === "completePackingBtn" && !event.target.disabled) { if (!orderFor(buyer).shippingMethod) return toast("Select PWE or PMWT in Buyer Orders first."); orderFor(buyer).status = "packed"; saveSoon(); render(); toast(`${buyer}'s package is complete.`); }
     if (event.target.id === "markShippedBtn" && !event.target.disabled) {
       const order = orderFor(buyer);
       if (!order.shippingMethod) return toast("Select PWE or PMWT in Buyer Orders first.");
       order.trackingNumber = $("#trackingNumber")?.value.trim() || order.trackingNumber || "";
       if (order.shippingMethod === "PMWT" && !order.trackingNumber) return toast("Enter the tracking number before marking a PMWT order shipped.");
-      order.status = "shipped"; order.shippedAt = new Date().toISOString();
+      order.status = "shipped"; order.locked = true; order.shippedAt = new Date().toISOString();
       recordAudit("shipping", `${buyer} marked shipped${order.trackingNumber ? ` · ${order.trackingNumber}` : ""}`, { buyer, trackingNumber: order.trackingNumber });
       saveSoon(); render(); toast(`${buyer}'s order is marked shipped.`);
     }
@@ -5082,10 +5305,10 @@ async function init() {
           else if (imageKey) usedImages.add(imageKey);
         });
       });
-      Object.values(sale.orders).forEach((order) => { if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : ""; order.shippingAutoSelected ??= false; order.packingNotes ||= ""; order.packingSlipNote ||= ""; order.packingSlipPrintCount ||= 0; });
+      Object.values(sale.orders).forEach((order) => { if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : ""; order.shippingAutoSelected ??= false; order.packingNotes ||= ""; order.packingSlipNote ||= ""; order.packingSlipPrintCount ||= 0; normalizeOrderAddOns(order); order.locked ??= order.status === "shipped"; });
     });
     Object.entries(state.buyerProfiles).forEach(([name, profile]) => {
-      profile.tags ||= []; profile.aliases ||= []; profile.previousAddresses ||= []; profile.validatedAddress ||= ""; profile.addressValidatedAt ||= "";
+      profile.tags ||= []; profile.aliases ||= []; profile.previousAddresses ||= []; profile.dismissedPoBoxWarnings ||= []; profile.validatedAddress ||= ""; profile.addressValidatedAt ||= "";
       const hasSavedDetails = Boolean(String(profile.address || "").trim() || String(profile.notes || "").trim() || profile.tags.length || profile.aliases.length || profile.previousAddresses.length);
       if (hasSavedDetails) profile.manuallySaved ??= true;
     });
@@ -5103,7 +5326,7 @@ async function init() {
   state.importPresets ||= [];
   state.importMemories ||= {};
   if (![...$("#packingPageSize").options].some((option) => option.value === "two-up")) $("#packingPageSize").add(new Option("Two half-slips per letter page", "two-up"));
-  claimWords(); presets(); importPresets(); importMemories(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); ensureSaleReplies(); workspaceColumns(); uiState(); bindEvents();
+  claimWords(); presets(); importPresets(); importMemories(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); ensureQuickMessages(); ensureSaleReplies(); workspaceColumns(); uiState(); bindEvents();
   await refreshLicenseEntitlements(false).catch(() => applyLicenseEntitlements({ configured: true, licensed: false, owner: false, catalogVisible: false }));
   resetListingView(); applyDisplayPreferences(); render();
   if (uiState().activeView && uiState().activeView !== "command") showView(uiState().activeView);

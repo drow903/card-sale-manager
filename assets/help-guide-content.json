@@ -345,7 +345,7 @@
       "title": "Pull Cards",
       "summary": "Sort sold cards in the same order as your boxes, binders, or shelves.",
       "paragraphs": [
-        "Choose a primary sort, secondary sort, and optional group. Imported custom fields are available alongside buyer, year, player, and reference.",
+        "Choose a primary sort, secondary sort, and optional group. Imported custom fields are available alongside buyer, year, player, purchase date, and reference.",
         "Use Mark shown pulled after completing a filtered group. The pull sheet provides a printable version when you do not want the computer beside your storage area."
       ]
     },
@@ -355,9 +355,12 @@
       "title": "Buyer Orders",
       "summary": "Confirm totals, shipping, addresses, payment, and buyer messages.",
       "paragraphs": [
-        "The buyer list scrolls separately and can be filtered by payment, packing, shipping, address, or attention status. The selected order shows images, filenames, accepted prices, totals, notes, and buyer history. Address review warns about missing city/state/ZIP information, invalid state abbreviations, duplicate lines, PO boxes, shared addresses, and changes from a buyer's previously saved address.",
+        "The buyer list scrolls separately and can be filtered by payment, packing, shipping, address, or attention status. Arrange it alphabetically or in collapsible status groups, and switch between compact and image-rich expanded views. CSM remembers these choices.",
+        "The selected order shows images, filenames, purchase dates, accepted prices, totals, notes, and a readiness checklist. Add cards sold outside the original sale as additional line items with a name, price, and optional quantity. Add-ons receive their own subtotal and packing checkbox.",
+        "Address review warns about missing city/state/ZIP information, invalid state abbreviations, duplicate lines, PO boxes, shared addresses, and changes from a buyer's previously saved address. A PO-box service reminder can be dismissed for the current address and shipping method; it returns if either changes.",
         "Open Shipping rules to change the automatic PMWT thresholds. CSM explains exactly which card-count or value rule caused a PMWT recommendation. You can still override it.",
-        "Use full buyer names where possible and save alternate Facebook names as aliases rather than creating duplicate profiles."
+        "Shipped orders are locked against accidental edits. Reopen one deliberately when a correction is needed. Cancel or move an order to return cards to the open pool, mark them unsold, or transfer them while preserving the activity history.",
+        "Use full buyer names where possible and save alternate Facebook names as aliases rather than creating duplicate profiles. CSM warns before creating a likely duplicate, and Merge Buyers combines profiles and orders after showing a preview."
       ]
     },
     {
@@ -366,7 +369,7 @@
       "title": "Packing",
       "summary": "Verify cards, print paperwork, record tracking, and finish packages.",
       "paragraphs": [
-        "Choose a buyer and check each card as it enters the package. Packed and Shipped appear beside completed buyers in the buyer menu.",
+        "Choose a buyer and check each card or additional line item as it enters the package. Packed and Shipped appear beside completed buyers in the buyer menu.",
         "Customize packing slips and PWE labels before printing. Packing slips can contain multiple link lines and QR codes. Use preview when page count matters. Combined printing creates one batch from the buyers and filters you select.",
         "After packing is complete, use Mark shipped here. PMWT orders require a tracking number; PWE orders do not."
       ]
@@ -519,6 +522,18 @@
         "Use only music you have permission to publish.",
         "Trailer choices are saved with the sale, but generated video files are not stored inside the CSM file.",
         "If CSM skips an image, use the filename shown in the warning to locate or rematch that card before trying again."
+      ]
+    },
+    {
+      "id": "quick-messages",
+      "group": "Buyer communication",
+      "title": "Build a Quick Message Library",
+      "summary": "Keep reusable messages available from every screen without sending anything automatically.",
+      "paragraphs": [
+        "Choose Quick messages at the top of CSM. Built-in order, payment, offer, and shipping messages are ready to edit, and you can add unlimited templates in your own categories.",
+        "Pin frequent messages, search the library, duplicate a useful starting point, change the order, or use the context-aware suggestions and Recently used list. Preview the filled message for a buyer before copying it.",
+        "Placeholder buttons insert safe customer-facing order details. Conditional buttons can include a section only when tracking, add-ons, payment status, or shipping information applies. Purchase price, purchase date, profit, private notes, tags, and private custom fields are never available as message placeholders.",
+        "Edits made in the preview are one-time changes. Save changes in the template editor only when you want them reused. Built-in messages can be reset individually, and earlier saved versions can be restored from History."
       ]
     },
     {
