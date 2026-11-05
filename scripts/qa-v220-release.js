@@ -8,7 +8,7 @@ const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(root, "styles.css"), "utf8");
 const pkg = require(path.join(root, "package.json"));
 
-assert.equal(pkg.version, "2.2.0", "package version must be 2.2.0");
+assert(Number(pkg.version.split(".")[0]) > 2 || (Number(pkg.version.split(".")[0]) === 2 && Number(pkg.version.split(".")[1]) >= 2), "package version must include the 2.2 feature set or newer");
 [
   "normalizeOrderAddOns", "orderTotals", "orderReadiness", "openCancelOrder", "applyCancelOrder",
   "ensureQuickMessages", "renderConditionalMessage", "openQuickMessages", "likelyDuplicateBuyer",

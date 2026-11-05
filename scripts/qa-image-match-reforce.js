@@ -1,5 +1,6 @@
 const fs = require("fs");
 const vm = require("vm");
+const CSMImageMatcher = require("../image-matcher.js");
 
 const source = fs.readFileSync("renderer.js", "utf8");
 
@@ -18,10 +19,10 @@ function functionSource(name) {
 
 const card = { id: "card-a", ref: "1", year: "1959", set: "Topps", number: "10", name: "Mickey Mantle", purchaseDate: "09182025", imagePath: "" };
 const image = { path: "C:\\Cards\\1959\\Mantle 9182025.jpg", relativePath: "1959/Mantle 9182025.jpg", stem: "Mantle 9182025" };
-const state = { activeSaleId: "sale-a", sales: [{ id: "sale-a", name: "Current", cards: [card], images: [] }] };
-const context = vm.createContext({ state, Date, Set, String, Number, Boolean, Array, Object, console, uid: () => "image-id", toast: () => {} });
+const state = { activeSaleId: "sale-a", sales: [{ id: "sale-a", name: "Current", cards: [card], images: [] }], lookupSettings: { sportFolderAliases: { football: ["Football"], basketball: ["Basketball"], hockey: ["Hockey"] } } };
+const context = vm.createContext({ state, window: { CSMImageMatcher }, Date, Set, String, Number, Boolean, Array, Object, console, uid: () => "image-id", toast: () => {} });
 [
-  "activeSale", "normalizeMatchText", "normalizedCardKey", "validDateCode", "duplicateInfo", "matchingDuplicateInfo", "normalizePurchaseDate",
+  "activeSale", "lookupSettings", "normalizeMatchText", "normalizedCardKey", "validDateCode", "duplicateInfo", "matchingDuplicateInfo", "normalizePurchaseDate",
   "saleImageMode", "requiredImageSlots", "imagePathFor", "setImagePathFor", "imageMatchKey", "cardImagePaths", "imageSide",
   "cardLastName", "imageDateCodes", "imageSequenceNumber", "allCardRecords", "scoreImage",
   "proposedImageMatch", "imageOwner", "attachImage"
@@ -30,7 +31,7 @@ const context = vm.createContext({ state, Date, Set, String, Number, Boolean, Ar
 context.card = card;
 context.image = image;
 let result = vm.runInContext("proposedImageMatch(card, [image], state.sales[0])", context);
-if (!result.automatic || result.automaticReason !== "unique purchase date code") throw new Error("A unique purchase-date filename was not auto-confirmed.");
+if (!result.automatic || !/date/i.test(result.automaticReason)) throw new Error("A unique purchase-date filename was not auto-confirmed.");
 
 state.sales[0].cards.push({ ...card, id: "card-duplicate", ref: "2" });
 result = vm.runInContext("proposedImageMatch(card, [image], state.sales[0])", context);

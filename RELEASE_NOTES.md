@@ -1,3 +1,19 @@
+# Card Sale Manager 2.3.0
+
+## Highlights
+
+- Adds independent one-off orders for unrelated customer purchases without creating a full sale.
+- Supports unlimited custom line items with quantities, prices, and optional customer-facing images.
+- Autosaves one-off drafts and carries them through Unpaid, Paid, Packed, Shipped, and manually Closed stages.
+- Includes shipping-rule recommendations with manual override, discounts, tax, credits, payments, tracking, copied messages, packing slips, visual summaries, and 4×6 shipping labels.
+- Stores closed one-off orders in a dedicated One-Off Order History inside Archived Sale Records and in the buyer profile, while keeping them out of active sales and profit totals.
+- Adds optional PayPal, Venmo, Zelle, Apple Pay, and Cash App QR codes to visual buyer summaries.
+- Fixes normal sale closing so a closed sale immediately leaves Active Sales and moves to Archived Sale Records.
+- Tightens additional-line-item editing, packing, totals, audit history, and automatic shipping-rule recalculation.
+- Reuses a persistent local image-folder index for faster matching across sales and refreshes recent indexes in the background.
+- Makes notification actions more explicit and preserves the existing large-sale performance and cross-filter selection behavior.
+- Updates the built-in help guide and getting-started documentation.
+
 # Card Sale Manager 2.1.1
 
 ## Highlights
@@ -24,4 +40,3 @@
 - Adds optional subtotal, shipping, final-total, and payment-status lines to visual buyer order cards.
 - Updates the built-in help guide for the new 2.1 workflows.
 
-The owner-only catalog and Facebook companion remain unavailable to standard customer licenses.

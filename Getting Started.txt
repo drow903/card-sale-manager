@@ -262,6 +262,16 @@ and orders after reviewing the preview.
 25. The Theme button cycles between System, Light, Dark, and High Contrast. The Motion button
     reduces animation. These preferences are remembered, but printed packing
     slips always use a clean white background.
+26. Choose One-off order from Command Center or Buyer Orders when a customer
+    purchase is unrelated to every open sale. Select or create a buyer, add as
+    many custom line items as needed, and optionally attach one image to each
+    item. Drafts autosave. Shipping rules can recommend PMWT but remain
+    overridable. Discounts, tax, credits, payments, packing slips, 4 x 6 labels,
+    copied messages, tracking, and payment QR codes are available without
+    creating another sale. Mark the order Paid, Packed, and Shipped, then close
+    it manually. Closed one-off orders move to Archived Sale Records under
+    One-Off Order History and remain in the buyer profile, but never appear in
+    active Buyer Orders or the Profit Dashboard.
 
 Data is saved automatically on this computer and again when the app closes.
 Verified recovery backups are also created before updates and retained locally.

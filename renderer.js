@@ -52,6 +52,7 @@ const DEFAULT_SALE_REPLIES = {
 const SALE_REPLY_FIELDS = [["claim", "Claim confirmed"], ["backup", "Backup claim"], ["unavailable", "Already claimed"], ["offerReceived", "Offer received"], ["offerAccepted", "Offer accepted"], ["stillShopping", "Finished shopping check"]];
 const WORKSPACE_COLUMNS = [["ref", "Reference"], ["grade", "Grade"], ["price", "Price / cost"], ["status", "Status"]];
 const DEFAULT_WORKSPACE_COLUMNS = ["ref", "grade", "price", "status"];
+const PAYMENT_QR_METHODS = [["paypal", "PayPal"], ["venmo", "Venmo"], ["zelle", "Zelle"], ["applePay", "Apple Pay"], ["cashApp", "Cash App"]];
 
 const starterSale = {
   id: uid(),
@@ -110,6 +111,8 @@ let lastClaimCardId = "";
 let imageLookupCancelled = false;
 let selectedQuickMessageId = "builtin-orderSummary";
 let quickMessageDraft = null;
+let selectedOneOffOrderId = "";
+let oneOffQuery = "";
 const runtimeErrors = [];
 const scrubDiagnosticText = (value) => String(value ?? "").replace(/file:\/{2,3}[^\s)]+/gi, "[local path]").replace(/[A-Za-z]:[\\/][^\n\r]*/g, "[local path]").slice(0, 2000);
 window.addEventListener("error", (event) => { runtimeErrors.push({ at: new Date().toISOString(), type: "error", message: scrubDiagnosticText(event.message || "Unknown renderer error").slice(0, 500) }); if (runtimeErrors.length > 25) runtimeErrors.shift(); });
@@ -231,7 +234,8 @@ function historicalSales() {
 }
 
 function allBuyerNames() {
-  return [...new Set([...Object.keys(state.buyerProfiles || {}), ...historicalSales().flatMap((sale) => sale.cards.filter(cardInOrder).map((card) => card.buyer).filter(Boolean))])].sort((a, b) => a.localeCompare(b));
+  ensureOneOffState();
+  return [...new Set([...Object.keys(state.buyerProfiles || {}), ...historicalSales().flatMap((sale) => sale.cards.filter(cardInOrder).map((card) => card.buyer).filter(Boolean)), ...state.oneOffOrders.map((order) => order.buyer).filter(Boolean), ...state.archivedOneOffOrders.map((order) => order.buyer).filter(Boolean)])].sort((a, b) => a.localeCompare(b));
 }
 
 function blankBuyerProfile() { return { notes: "", address: "", validatedAddress: "", addressValidatedAt: "", tags: [], aliases: [], previousAddresses: [], dismissedPoBoxWarnings: [], manuallySaved: false }; }
@@ -278,7 +282,8 @@ function addressWarnings(buyer, address = buyerProfile(buyer).address) {
   else if (!states.has(stateZip[1].toUpperCase())) warnings.push(`${stateZip[1].toUpperCase()} is not a recognized U.S. state abbreviation`);
   if (lines.length < 2) warnings.push("Recipient/street and city/state/ZIP may not be on separate lines");
   if (new Set(lines.map(normalizedAddress)).size !== lines.length) warnings.push("The address contains a duplicate line");
-  if (/\bP\.?\s*O\.?\s*Box\b/i.test(value) && !buyerProfile(buyer).dismissedPoBoxWarnings.includes(poBoxWarningKey(buyer, value))) warnings.push("PO box detected — confirm the selected shipping service can deliver there");
+  const poBoxDismissals = buyerProfile(buyer).dismissedPoBoxWarnings;
+  if (/\bP\.?\s*O\.?\s*Box\b/i.test(value) && !poBoxDismissals.includes(poBoxWarningKey(buyer, value)) && !poBoxDismissals.includes(`${normalizedAddress(value)}|*`)) warnings.push("PO box detected — confirm the selected shipping service can deliver there");
   if (/\b(?:apt|apartment|unit|suite|ste)\b\s*$/i.test(value)) warnings.push("Apartment or unit number is incomplete");
   const key = normalizedAddress(value);
   const duplicate = key && Object.keys(state.buyerProfiles || {}).find((name) => name !== buyer && normalizedAddress(buyerProfile(name).address) === key);
@@ -669,6 +674,82 @@ function confirmDestructive({ title, message, preserved = [], confirmLabel = "Re
   return new Promise((resolve) => { safeDeleteResolver = resolve; });
 }
 
+function ensurePaymentQrSettings() {
+  state.preferences ||= {};
+  state.preferences.paymentQr ||= {};
+  PAYMENT_QR_METHODS.forEach(([key, label]) => {
+    state.preferences.paymentQr[key] ||= { label, enabled: false, value: "" };
+    state.preferences.paymentQr[key].label ||= label;
+    state.preferences.paymentQr[key].enabled = Boolean(state.preferences.paymentQr[key].enabled);
+    state.preferences.paymentQr[key].value = String(state.preferences.paymentQr[key].value || "");
+  });
+  return state.preferences.paymentQr;
+}
+
+function ensureOneOffState() {
+  state.oneOffOrders ||= [];
+  state.archivedOneOffOrders ||= [];
+  state.oneOffSequence = Math.max(0, Number(state.oneOffSequence || 0));
+  [...state.oneOffOrders, ...state.archivedOneOffOrders].forEach(normalizeOneOffOrder);
+  return state.oneOffOrders;
+}
+
+function normalizeOneOffOrder(order) {
+  order.id ||= uid();
+  order.reference ||= `OO-${new Date(order.createdAt || Date.now()).getFullYear()}-${String(++state.oneOffSequence).padStart(4, "0")}`;
+  order.buyer = String(order.buyer || "").trim();
+  order.status ||= "awaiting";
+  order.items ||= [];
+  order.items.forEach((item) => {
+    item.id ||= uid(); item.description = String(item.description || item.name || "Item").trim();
+    item.quantity = Math.max(1, Math.floor(Number(item.quantity || 1))); item.price = Math.max(0, Number(item.price || 0));
+    item.imagePath ||= ""; item.packed = Boolean(item.packed); item.includeImage ??= true;
+  });
+  order.pweShipping = Math.max(0, Number(order.pweShipping ?? activeSale()?.pweShipping ?? 1));
+  order.pmwtShipping = Math.max(0, Number(order.pmwtShipping ?? activeSale()?.pmwtShipping ?? 5));
+  order.shippingRules ||= clone(ensureShippingRules(activeSale()));
+  order.shippingMethod ||= ""; order.shippingAutoSelected = Boolean(order.shippingAutoSelected);
+  ["discount", "tax", "credit", "paymentAmount"].forEach((key) => order[key] = Math.max(0, Number(order[key] || 0)));
+  order.paymentMethod ||= ""; order.address ||= order.buyer ? buyerProfile(order.buyer).address || "" : "";
+  order.notes ||= ""; order.packingSlipNote ||= ""; order.trackingNumber ||= ""; order.audit ||= [];
+  order.createdAt ||= new Date().toISOString(); order.locked = Boolean(order.locked || order.status === "closed");
+  return order;
+}
+
+function oneOffOrder(id = selectedOneOffOrderId) {
+  ensureOneOffState();
+  return state.oneOffOrders.find((order) => order.id === id) || state.archivedOneOffOrders.find((order) => order.id === id) || null;
+}
+
+function oneOffTotals(order) {
+  const subtotal = order.items.reduce((sum, item) => sum + Number(item.price || 0) * Math.max(1, Number(item.quantity || 1)), 0);
+  const shipping = order.shippingMethod === "PWE" ? Number(order.pweShipping || 0) : order.shippingMethod === "PMWT" ? Number(order.pmwtShipping || 0) : 0;
+  const total = Math.max(0, subtotal + shipping + Number(order.tax || 0) - Number(order.discount || 0) - Number(order.credit || 0));
+  return { subtotal, shipping, total, balance: Math.max(0, total - Number(order.paymentAmount || 0)), quantity: order.items.reduce((sum, item) => sum + Math.max(1, Number(item.quantity || 1)), 0) };
+}
+
+function oneOffPmwtRequired(order) {
+  const totals = oneOffTotals(order); const rules = order.shippingRules || {};
+  return (rules.cardCountEnabled && totals.quantity > Number(rules.maxPweCards ?? 3)) || (rules.valueEnabled && totals.subtotal > Number(rules.maxPweValue ?? 50));
+}
+
+function applyOneOffShippingRule(order) {
+  if (!order.shippingMethod && oneOffPmwtRequired(order)) { order.shippingMethod = "PMWT"; order.shippingAutoSelected = true; }
+}
+
+function recordOneOffAudit(order, message) {
+  order.audit ||= []; order.audit.unshift({ id: uid(), at: new Date().toISOString(), message });
+  if (order.audit.length > 100) order.audit.length = 100;
+  order.updatedAt = new Date().toISOString();
+}
+
+function createOneOffOrder() {
+  ensureOneOffState();
+  const sale = activeSale(); const year = new Date().getFullYear(); state.oneOffSequence += 1;
+  const order = normalizeOneOffOrder({ id: uid(), reference: `OO-${year}-${String(state.oneOffSequence).padStart(4, "0")}`, buyer: "", status: "awaiting", items: [], pweShipping: sale.pweShipping, pmwtShipping: sale.pmwtShipping, shippingRules: clone(ensureShippingRules(sale)), createdAt: new Date().toISOString(), audit: [] });
+  recordOneOffAudit(order, "One-off order created"); state.oneOffOrders.unshift(order); selectedOneOffOrderId = order.id; saveSoon(); renderOneOffOrders();
+}
+
 function ensureShippingRules(sale = activeSale()) {
   sale.shippingRules ||= {};
   sale.shippingRules.cardCountEnabled ??= true;
@@ -750,6 +831,12 @@ function orderFor(buyer) {
   if (order.shippingMethod == null) order.shippingMethod = order.shipping != null ? (Number(order.shipping) === Number(sale.pweShipping) ? "PWE" : "PMWT") : (pmwtRequired(buyer) ? "PMWT" : "");
   if (!order.shippingMethod && pmwtRequired(buyer)) { order.shippingMethod = "PMWT"; order.shippingAutoSelected = true; }
   return order;
+}
+
+function refreshBuyerShippingAfterLineItemChange(buyer) {
+  const order = orderFor(buyer); const required = pmwtRequired(buyer);
+  if (required && (!order.shippingMethod || order.shippingAutoSelected)) { order.shippingMethod = "PMWT"; order.shippingAutoSelected = true; }
+  else if (!required && order.shippingAutoSelected) { order.shippingMethod = ""; order.shippingAutoSelected = false; }
 }
 
 function cardInOrder(card) {
@@ -1193,7 +1280,8 @@ function renderNotifications() {
   const priorityLabel = { blocking: "Blocking", attention: "Needs attention", info: "Informational" };
   $("#notificationFilters").innerHTML = [`<button class="${notificationCategory === "all" ? "primary" : "secondary"}" data-notification-category="all">All (${all.length})</button>`, ...categories.map((category) => `<button class="${notificationCategory === category ? "primary" : "secondary"}" data-notification-category="${escapeHtml(category)}">${priorityLabel[category]} (${all.filter((item) => item.priority === category).length})</button>`)].join("");
   const shown = all.filter((item) => notificationCategory === "all" || item.priority === notificationCategory);
-  $("#notificationList").innerHTML = shown.length ? shown.map((item) => `<article class="notification-item priority-${item.priority} ${item.urgent ? "urgent" : ""}" data-notification-id="${escapeHtml(item.id)}"><span>${item.priority === "blocking" ? "!" : item.priority === "attention" ? "⚑" : "i"}</span><div><strong>${escapeHtml(item.title)}</strong><small>${priorityLabel[item.priority]}</small><p>${escapeHtml(item.detail)}</p></div><div class="notification-actions"><button class="primary" data-open-notification="${escapeHtml(item.id)}">${item.category === "images" ? "Match images" : item.category === "offers" ? "Review offers" : item.category === "shipping" ? "Open packing" : "Open"}</button><button class="secondary" data-snooze-notification="${escapeHtml(item.id)}">Snooze 1 day</button><button class="row-action danger-link" data-dismiss-notification="${escapeHtml(item.id)}">Dismiss</button></div></article>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>You’re caught up</h3><p>No active notifications match this view.</p></div>`;
+  const actionLabel = (item) => ({ images: "Fix image", offers: "Review offer", shipping: "Fix shipping", orders: "Fix order", payment: "Record payment", profit: "Review price", packing: "Open packing", data: "Fix data" })[item.category] || "Open and fix";
+  $("#notificationList").innerHTML = shown.length ? shown.map((item) => `<article class="notification-item priority-${item.priority} ${item.urgent ? "urgent" : ""}" data-notification-id="${escapeHtml(item.id)}"><span>${item.priority === "blocking" ? "!" : item.priority === "attention" ? "⚑" : "i"}</span><div><strong>${escapeHtml(item.title)}</strong><small>${priorityLabel[item.priority]}</small><p>${escapeHtml(item.detail)}</p></div><div class="notification-actions"><button class="primary" data-open-notification="${escapeHtml(item.id)}">${escapeHtml(actionLabel(item))}</button><button class="secondary" data-snooze-notification="${escapeHtml(item.id)}">Snooze 1 day</button><button class="row-action danger-link" data-dismiss-notification="${escapeHtml(item.id)}">Dismiss</button></div></article>`).join("") : `<div class="empty-state"><div class="empty-icon">✓</div><h3>You’re caught up</h3><p>No active notifications match this view.</p></div>`;
   const activeCount = visibleNotifications({ includeSnoozed: false }).length;
   $("#notificationNavCount").textContent = activeCount; $("#notificationNavCount").classList.toggle("hidden", activeCount === 0);
   $("#showSnoozedNotificationsBtn").textContent = showSnoozedNotifications ? "Hide snoozed" : "Show snoozed";
@@ -1514,6 +1602,88 @@ function renderOrders() {
   renderOrderDetail();
 }
 
+function oneOffStatusLabel(status) {
+  return ({ awaiting: "Unpaid", paid: "Paid", packed: "Packed", shipped: "Shipped", closed: "Closed", voided: "Voided" })[status] || status;
+}
+
+function renderOneOffOrders() {
+  ensureOneOffState();
+  const query = oneOffQuery.trim().toLowerCase();
+  const orders = state.oneOffOrders.filter((order) => !query || `${order.reference} ${order.buyer}`.toLowerCase().includes(query));
+  if (!state.oneOffOrders.some((order) => order.id === selectedOneOffOrderId)) selectedOneOffOrderId = state.oneOffOrders[0]?.id || "";
+  $("#oneOffSearch").value = oneOffQuery;
+  $("#oneOffOrderList").innerHTML = orders.length ? orders.map((order) => {
+    const totals = oneOffTotals(order); const activeBuyerOrder = order.buyer && buyers().includes(order.buyer);
+    return `<button type="button" class="buyer-button order-${order.status === "awaiting" ? "unpaid" : order.status} ${order.id === selectedOneOffOrderId ? "active" : ""}" data-one-off-order="${escapeHtml(order.id)}"><strong>${escapeHtml(order.buyer || "Buyer not selected")}</strong><span class="buyer-total">${money(totals.total)}</span><small>${escapeHtml(order.reference)} · ${totals.quantity} item${totals.quantity === 1 ? "" : "s"} · ${escapeHtml(oneOffStatusLabel(order.status))}</small>${activeBuyerOrder ? '<span class="order-state-badge">Also has active sale order</span>' : ""}</button>`;
+  }).join("") : `<div class="empty-state"><h3>${state.oneOffOrders.length ? "No matching orders" : "No one-off drafts"}</h3><p>Create a standalone order without setting up a sale.</p></div>`;
+  renderOneOffDetail();
+}
+
+function renderOneOffDetail() {
+  const root = $("#oneOffOrderDetail"); const order = oneOffOrder();
+  if (!order || order.status === "closed" || order.status === "voided") { root.innerHTML = `<div class="empty-state"><h3>No one-off order selected</h3><p>Create an order or choose a saved draft.</p></div>`; return; }
+  normalizeOneOffOrder(order); applyOneOffShippingRule(order);
+  const totals = oneOffTotals(order); const locked = Boolean(order.locked); const allPacked = order.items.length > 0 && order.items.every((item) => item.packed);
+  const profile = order.buyer ? buyerProfile(order.buyer) : blankBuyerProfile(); const address = order.address || profile.address || "";
+  const oneOffAddressWarnings = order.buyer ? addressWarnings(order.buyer, address) : [];
+  const activeBuyerOrder = order.buyer && buyers().includes(order.buyer);
+  const shippingReason = oneOffPmwtRequired(order) ? `PMWT is recommended by the saved shipping rule. You can still override it.` : "The PMWT rule was not triggered; choose either shipping method.";
+  root.innerHTML = `<div class="panel-header compact"><div><h2>${escapeHtml(order.reference)}</h2><p>Standalone order · autosaved</p></div><div class="row-actions"><span class="status ${order.status === "paid" ? "paid" : "claimed"}">${escapeHtml(oneOffStatusLabel(order.status))}</span><button type="button" class="secondary danger-button" data-delete-one-off="${escapeHtml(order.id)}">Delete draft</button></div></div>
+    ${activeBuyerOrder ? `<div class="order-lock-notice warning"><strong>This buyer also has an active sale order.</strong><span>This one-off remains separate. Confirm that is what you intend before collecting payment.</span></div>` : ""}
+    ${locked ? `<div class="order-lock-notice"><strong>This shipped order is locked.</strong><span>Reopen it before correcting items, prices, shipping, address, or payment details.</span><button type="button" class="secondary" id="reopenOneOffCorrectionBtn">Reopen for correction</button></div>` : ""}
+    <div class="one-off-form-grid"><section class="one-off-main"><div class="two-columns"><label>Buyer<input id="oneOffBuyer" list="buyerNames" value="${escapeHtml(order.buyer)}" placeholder="Choose or enter a buyer" ${locked ? "disabled" : ""} /></label><label>Reference<input value="${escapeHtml(order.reference)}" readonly /></label></div><label>Mailing address<textarea id="oneOffAddress" rows="3" ${locked ? "disabled" : ""}>${escapeHtml(address)}</textarea></label>${oneOffAddressWarnings.length ? `<div class="address-warnings">${oneOffAddressWarnings.map((warning) => `<span>⚑ ${escapeHtml(warning)}</span>`).join("")}</div>` : ""}
+      <section class="one-off-items"><div class="panel-header compact"><div><h3>Line items</h3><p>Add as many unrelated items as needed.</p></div></div><div class="one-off-item-list">${order.items.map((item) => `<article class="one-off-item ${item.packed ? "packed" : ""}"><label class="one-off-pack"><input type="checkbox" data-one-off-pack="${item.id}" ${item.packed ? "checked" : ""} ${locked ? "disabled" : ""} /> Packed</label>${item.imagePath ? `<img src="${fileUrl(item.imagePath)}" alt="" />` : `<div class="placeholder-thumb">No image</div>`}<div><strong>${escapeHtml(item.description)}</strong><small>${item.quantity} × ${money(item.price)}${item.imagePath ? ` · ${escapeHtml(fileName(item.imagePath))}` : ""}</small><label class="check-label"><input type="checkbox" data-one-off-show-image="${item.id}" ${item.includeImage === false ? "" : "checked"} ${locked ? "disabled" : ""} /> Show image on summaries and slips</label></div><strong>${money(item.quantity * item.price)}</strong><div class="row-actions"><button type="button" class="row-action" data-one-off-image="${item.id}" ${locked ? "disabled" : ""}>${item.imagePath ? "Replace image" : "Add image"}</button><button type="button" class="row-action" data-one-off-edit="${item.id}" ${locked ? "disabled" : ""}>Edit</button><button type="button" class="row-action danger-link" data-one-off-remove="${item.id}" ${locked ? "disabled" : ""}>Remove</button></div></article>`).join("") || `<p class="muted">No line items yet.</p>`}</div><form id="oneOffItemForm" class="add-on-form"><input id="oneOffItemDescription" placeholder="Item description" ${locked ? "disabled" : ""} /><input id="oneOffItemQuantity" type="number" min="1" step="1" value="1" title="Quantity" ${locked ? "disabled" : ""} /><input id="oneOffItemPrice" type="number" min="0" step="0.01" placeholder="Unit price" ${locked ? "disabled" : ""} /><button type="submit" class="primary" ${locked ? "disabled" : ""}>Add item</button></form></section>
+      <div class="packing-notes"><label>Internal notes<textarea id="oneOffNotes" rows="3" ${locked ? "disabled" : ""}>${escapeHtml(order.notes)}</textarea></label><label>Buyer-facing packing-slip note<textarea id="oneOffSlipNote" rows="3" ${locked ? "disabled" : ""}>${escapeHtml(order.packingSlipNote)}</textarea></label></div><details class="address-history"><summary>Order audit history (${order.audit.length})</summary>${order.audit.map((entry) => `<div><span>${escapeHtml(entry.message)}</span><small>${new Date(entry.at).toLocaleString()}</small></div>`).join("")}</details></section>
+      <aside class="one-off-sidebar"><div class="totals"><div class="total-line"><span>Items (${totals.quantity})</span><strong>${money(totals.subtotal)}</strong></div><label>Shipping<select id="oneOffShipping" ${locked ? "disabled" : ""}><option value="">Select shipping…</option><option value="PWE" ${order.shippingMethod === "PWE" ? "selected" : ""}>PWE — ${money(order.pweShipping)}</option><option value="PMWT" ${order.shippingMethod === "PMWT" ? "selected" : ""}>PMWT — ${money(order.pmwtShipping)}${order.shippingAutoSelected ? " (rule)" : ""}</option></select></label><small class="shipping-rule-explanation">${escapeHtml(shippingReason)}</small><div class="total-line"><span>Shipping</span><strong>${money(totals.shipping)}</strong></div><label>Discount<input id="oneOffDiscount" type="number" min="0" step="0.01" value="${order.discount}" ${locked ? "disabled" : ""} /></label><label>Tax<input id="oneOffTax" type="number" min="0" step="0.01" value="${order.tax}" ${locked ? "disabled" : ""} /></label><label>Credit<input id="oneOffCredit" type="number" min="0" step="0.01" value="${order.credit}" ${locked ? "disabled" : ""} /></label><div class="total-line grand"><span>Total</span><strong>${money(totals.total)}</strong></div><label>Payment received<input id="oneOffPaymentAmount" type="number" min="0" step="0.01" value="${order.paymentAmount}" ${locked ? "disabled" : ""} /></label><div class="total-line"><span>Balance</span><strong>${money(totals.balance)}</strong></div></div>
+      <label>Payment method<select id="oneOffPaymentMethod" ${locked ? "disabled" : ""}><option value="">Not recorded</option>${["Cash", "PayPal", "Venmo", "Zelle", "Apple Pay", "Cash App", "Other"].map((method) => `<option ${order.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label><label>Tracking number<input id="oneOffTracking" value="${escapeHtml(order.trackingNumber)}" placeholder="Optional for PWE" ${locked ? "disabled" : ""} /></label>
+      <div class="readiness-checklist"><span class="${order.buyer ? "ready" : "pending"}">${order.buyer ? "✓" : "○"} Buyer selected</span><span class="${address.trim() ? "ready" : "pending"}">${address.trim() ? "✓" : "○"} Address entered</span><span class="${order.shippingMethod ? "ready" : "pending"}">${order.shippingMethod ? "✓" : "○"} Shipping selected</span><span class="${totals.balance <= 0 && totals.total > 0 ? "ready" : "pending"}">${totals.balance <= 0 && totals.total > 0 ? "✓" : "○"} Paid</span><span class="${allPacked ? "ready" : "pending"}">${allPacked ? "✓" : "○"} Packed</span></div>
+      <div class="one-off-status-actions ${locked ? "hidden" : ""}"><button type="button" class="secondary" data-one-off-status="awaiting">Unpaid</button><button type="button" class="secondary" data-one-off-status="paid">Mark paid</button><button type="button" class="secondary" id="oneOffCheckAllBtn">${allPacked ? "Uncheck all" : "Check all packed"}</button><button type="button" class="secondary" data-one-off-status="packed" ${allPacked ? "" : "disabled"}>Mark packed</button><button type="button" class="primary" data-one-off-status="shipped" ${order.status === "packed" && (order.shippingMethod !== "PMWT" || order.trackingNumber) ? "" : "disabled"}>Mark shipped</button></div>
+      <div class="one-off-output-actions"><button type="button" class="secondary" id="copyOneOffSummaryBtn">Copy buyer summary</button><button type="button" class="secondary" data-one-off-output="summary">Preview visual summary</button><button type="button" class="secondary" data-one-off-output="preview">Preview packing slip</button><button type="button" class="secondary" data-one-off-output="print">Print packing slip</button><button type="button" class="secondary" data-one-off-output="label">Print shipping label</button></div><div class="message-grid"><button type="button" class="secondary" data-one-off-message="paymentDue">Payment due</button><button type="button" class="secondary" data-one-off-message="paymentReceived">Payment received</button><button type="button" class="secondary" data-one-off-message="shipped">Shipped</button><button type="button" class="secondary" data-one-off-message="delayed">Delayed</button></div><button type="button" class="primary full" id="closeOneOffOrderBtn" ${order.status === "shipped" ? "" : "disabled"}>Close order and archive</button></aside></div>`;
+}
+
+function oneOffSummaryText(order) {
+  const totals = oneOffTotals(order); const firstName = String(order.buyer || "there").split(/\s+/)[0];
+  return `Hi ${firstName} — here’s your order summary:\n\n${order.items.map((item) => `${item.quantity} × ${item.description} — ${money(item.quantity * item.price)}`).join("\n")}\n\nItems: ${money(totals.subtotal)}\nShipping (${order.shippingMethod || "not selected"}): ${money(totals.shipping)}${order.tax ? `\nTax: ${money(order.tax)}` : ""}${order.discount ? `\nDiscount: -${money(order.discount)}` : ""}${order.credit ? `\nCredit: -${money(order.credit)}` : ""}\nTotal: ${money(totals.total)}${totals.balance ? `\nBalance due: ${money(totals.balance)}` : "\nPaid in full"}\n\nPlease confirm your mailing address. Thanks!`;
+}
+
+function oneOffMessageText(order, key) {
+  const totals = oneOffTotals(order); const values = { buyer: order.buyer, firstName: String(order.buyer || "there").split(/\s+/)[0], saleName: "one-off order", cardCount: String(totals.quantity), cardList: order.items.map((item) => `${item.quantity} × ${item.description} — ${money(item.quantity * item.price)}`).join("\n"), subtotal: money(totals.subtotal), addOnSection: "", addOnTotalLine: "", shippingMethod: order.shippingMethod || "not selected", shipping: money(totals.shipping), discountLine: order.discount ? `Discount: -${money(order.discount)}\n` : "", total: money(totals.total), trackingNumber: order.trackingNumber || "", trackingLine: order.trackingNumber ? `Tracking: ${order.trackingNumber}` : "" };
+  const conditions = { tracking: Boolean(order.trackingNumber), addOns: false, paid: ["paid", "packed", "shipped", "closed"].includes(order.status), unpaid: !["paid", "packed", "shipped", "closed"].includes(order.status), shipping: Boolean(order.shippingMethod) };
+  return String(ensureMessageTemplates()[key] || "").replace(/\[\[if:(tracking|addOns|paid|unpaid|shipping)\]\]([\s\S]*?)\[\[\/if\]\]/g, (_match, condition, body) => conditions[condition] ? body : "").replace(/\{(buyer|firstName|saleName|cardCount|cardList|subtotal|addOnSection|addOnTotalLine|shippingMethod|shipping|discountLine|total|trackingNumber|trackingLine)\}/g, (_match, field) => values[field] ?? "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+async function buildOneOffDocument(order, mode = "slip") {
+  const design = ensurePackingSettings(); const totals = oneOffTotals(order); const profile = order.buyer ? buyerProfile(order.buyer) : blankBuyerProfile(); const address = order.address || profile.address || "Address not entered";
+  const itemImages = await Promise.all(order.items.map((item) => item.imagePath && item.includeImage !== false ? window.cardSale.packingFileDataUrl(item.imagePath) : Promise.resolve("")));
+  const enabledPayments = PAYMENT_QR_METHODS.map(([key]) => ensurePaymentQrSettings()[key]).filter((item) => item.enabled && item.value.trim());
+  const paymentCodes = await Promise.all(enabledPayments.map((item) => window.cardSale.packingQrDataUrl(item.value, design.accent)));
+  const rows = order.items.map((item, index) => `<tr>${itemImages[index] ? `<td><img class="slip-thumb" src="${itemImages[index]}" alt="" /></td>` : `<td></td>`}<td><strong>${escapeHtml(item.description)}</strong><div class="slip-card-detail">Quantity ${item.quantity} × ${money(item.price)}</div></td><td class="price">${money(item.quantity * item.price)}</td></tr>`).join("");
+  const qr = enabledPayments.length ? `<section class="slip-links">${enabledPayments.map((item, index) => `<div class="slip-link-item"><div><strong>${escapeHtml(item.label)}</strong><p>${escapeHtml(item.value)}</p></div><img src="${paymentCodes[index]}" alt="${escapeHtml(item.label)} QR code" /></div>`).join("")}</section>` : "";
+  const html = `<article class="slip-page${mode === "summary" ? " one-off-summary-page" : ""}"><section class="slip-brand"><div class="slip-brand-main"><div><h1>${escapeHtml(design.brandName || "Card Sale Manager")}</h1><p>${escapeHtml(design.contact || "")}</p></div></div><div class="slip-muted">One-off order · ${escapeHtml(order.reference)}</div></section><div class="slip-header">${mode === "summary" ? "Order summary" : escapeHtml(design.header || "Packing slip")}</div><section class="slip-order"><div><h2>${escapeHtml(order.buyer || "Buyer")}</h2><p>${escapeHtml(address).replace(/\n/g, "<br>")}</p></div><div><p><strong>Status:</strong> ${escapeHtml(oneOffStatusLabel(order.status))}</p><p><strong>Shipping:</strong> ${escapeHtml(order.shippingMethod || "Not selected")}</p><p><strong>Payment:</strong> ${escapeHtml(order.paymentMethod || "Not recorded")}</p></div></section>${order.packingSlipNote ? `<section class="slip-message">${escapeHtml(order.packingSlipNote)}</section>` : ""}<table class="slip-table"><thead><tr><th></th><th>Item</th><th class="price">Price</th></tr></thead><tbody>${rows}</tbody></table><section class="slip-totals"><div class="slip-total-line"><span>Items</span><strong>${money(totals.subtotal)}</strong></div><div class="slip-total-line"><span>Shipping</span><strong>${money(totals.shipping)}</strong></div>${order.tax ? `<div class="slip-total-line"><span>Tax</span><strong>${money(order.tax)}</strong></div>` : ""}${order.discount ? `<div class="slip-total-line"><span>Discount</span><strong>-${money(order.discount)}</strong></div>` : ""}${order.credit ? `<div class="slip-total-line"><span>Credit</span><strong>-${money(order.credit)}</strong></div>` : ""}<div class="slip-total-line grand"><span>Total</span><strong>${money(totals.total)}</strong></div></section>${qr}<footer class="slip-footer">${escapeHtml(design.footer || "Packed with care.")}</footer></article>`;
+  return { html, styles: PACKING_PRINT_STYLES.replaceAll("var(--accent)", design.accent || "#19b56b"), pageSize: design.pageSize || "letter" };
+}
+
+async function outputOneOff(order, mode) {
+  if (!order.items.length) return toast("Add at least one line item first.");
+  if (!order.buyer) return toast("Choose or enter a buyer first.");
+  if (mode === "label") {
+    const address = order.address || buyerProfile(order.buyer).address || ""; if (!address.trim()) return toast("Enter a mailing address before printing a label.");
+    const settings = ensurePweLabelSettings(); const html = `<article class="pwe-print-label standard landscape"><div class="pwe-return">${escapeHtml(settings.returnName || "")}<br>${escapeHtml(settings.returnAddress || "").replace(/\n/g, "<br>")}</div><h1>${escapeHtml(settings.heading || "PLEASE DELIVER TO")}</h1><address class="pwe-recipient"><strong>${escapeHtml(order.buyer)}</strong><br>${escapeHtml(address).replace(/\n/g, "<br>")}</address><footer>${escapeHtml(order.reference)} · ${escapeHtml(settings.footer || "")}</footer></article>`;
+    return window.cardSale.printPackingSlip({ title: `${order.reference} shipping label`, html, styles: `.pwe-print-label{box-sizing:border-box;width:6in;height:4in;padding:.28in;font:16px Arial;position:relative}.pwe-return{font-size:11px}.pwe-print-label h1{text-align:center;font-size:13px;margin:.28in 0}.pwe-recipient{display:block;font-style:normal;font-size:23px;line-height:1.45;margin-left:1.25in}.pwe-print-label footer{position:absolute;bottom:.2in;left:.28in;right:.28in;text-align:center;font-size:10px}`, pageSize: "label" });
+  }
+  const doc = await buildOneOffDocument(order, mode === "summary" ? "summary" : "slip");
+  const payload = { title: `${order.reference} ${mode === "summary" ? "visual summary" : "packing slip"}`, ...doc };
+  const result = mode === "print" ? await window.cardSale.printPackingSlip(payload) : await window.cardSale.previewPackingSlip(payload);
+  if (!result?.success && !result?.canceled) toast("The document could not be created.");
+  else if (result?.success) { recordOneOffAudit(order, mode === "print" ? "Packing slip printed" : mode === "summary" ? "Visual summary previewed" : "Packing slip previewed"); saveSoon(); }
+  return result;
+}
+
+function renderPaymentQrSettings() {
+  const settings = ensurePaymentQrSettings();
+  $("#paymentQrRows").innerHTML = PAYMENT_QR_METHODS.map(([key, label]) => `<article class="payment-qr-row"><label class="check-label"><input type="checkbox" data-payment-qr-enabled="${key}" ${settings[key].enabled ? "checked" : ""} /> <strong>${escapeHtml(label)}</strong></label><label>Payment link, username, phone, or email<input data-payment-qr-value="${key}" value="${escapeHtml(settings[key].value)}" placeholder="${key === "paypal" ? "https://paypal.me/yourname" : key === "venmo" ? "https://venmo.com/u/yourname" : "Payment destination"}" /></label></article>`).join("");
+}
+
 function orderFlags(buyer) {
   const cards = cardsForBuyer(buyer);
   const order = orderFor(buyer);
@@ -1529,9 +1699,11 @@ function orderFlags(buyer) {
 
 function buyerHistory(buyer) {
   const cards = historicalSales().flatMap((sale) => sale.cards).filter((card) => card.buyer === buyer && cardInOrder(card));
+  ensureOneOffState();
+  const oneOffOrders = [...state.oneOffOrders, ...state.archivedOneOffOrders].filter((order) => order.buyer === buyer && order.status !== "voided");
   const countBy = (field) => cards.reduce((result, card) => { const value = String(card[field] || "").trim(); if (value) result[value] = (result[value] || 0) + 1; return result; }, {});
   const top = (record) => Object.entries(record).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
-  return { cards, spent: cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0), player: top(countBy("name")), brand: top(countBy("set")), year: top(countBy("year")) };
+  return { cards, oneOffOrders, spent: cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0) + oneOffOrders.reduce((sum, order) => sum + oneOffTotals(order).total, 0), player: top(countBy("name")), brand: top(countBy("set")), year: top(countBy("year")) };
 }
 
 function repeatBuyerMatches(buyer) {
@@ -1764,11 +1936,11 @@ function renderBuyerProfiles() {
   const names = allBuyerNames();
   const filtered = names.filter((name) => `${name} ${buyerProfile(name).aliases.join(" ")} ${buyerProfile(name).tags.join(" ")}`.toLowerCase().includes(profileQuery.toLowerCase()));
   if (!filtered.includes(state.profileBuyer)) state.profileBuyer = filtered[0] || names[0] || "";
-  $("#buyerProfileList").innerHTML = filtered.length ? filtered.map((name) => { const history = buyerHistory(name); const profile = buyerProfile(name); const warnings = addressWarnings(name); return `<button class="buyer-button ${warnings.length ? "has-warning" : ""} ${name === state.profileBuyer ? "active" : ""}" data-profile-buyer="${escapeHtml(name)}"><strong>${escapeHtml(name)}</strong><span class="buyer-total">${money(history.spent)}</span><small>${history.cards.length} purchases${profile.tags.length ? ` · ${escapeHtml(profile.tags.join(", "))}` : ""}</small>${warnings.length ? `<span class="order-state-badge">Address review</span>` : ""}</button>`; }).join("") : `<div class="empty-state"><p>No matching buyers.</p></div>`;
+  $("#buyerProfileList").innerHTML = filtered.length ? filtered.map((name) => { const history = buyerHistory(name); const profile = buyerProfile(name); const warnings = addressWarnings(name); const purchases = history.cards.length + history.oneOffOrders.length; return `<button class="buyer-button ${warnings.length ? "has-warning" : ""} ${name === state.profileBuyer ? "active" : ""}" data-profile-buyer="${escapeHtml(name)}"><strong>${escapeHtml(name)}</strong><span class="buyer-total">${money(history.spent)}</span><small>${purchases} purchase${purchases === 1 ? "" : "s"}${history.oneOffOrders.length ? ` · ${history.oneOffOrders.length} one-off` : ""}${profile.tags.length ? ` · ${escapeHtml(profile.tags.join(", "))}` : ""}</small>${warnings.length ? `<span class="order-state-badge">Address review</span>` : ""}</button>`; }).join("") : `<div class="empty-state"><p>No matching buyers.</p></div>`;
   const buyer = state.profileBuyer;
   if (!buyer) { $("#buyerProfileDetail").innerHTML = `<div class="empty-state"><h3>No buyer history yet</h3><p>Profiles are created when a card is claimed or an offer is accepted.</p><button type="button" class="primary" data-empty-action="claims">Open Claims Desk</button></div>`; return; }
   const history = buyerHistory(buyer); const profile = buyerProfile(buyer); const matches = repeatBuyerMatches(buyer); const warnings = addressWarnings(buyer);
-  $("#buyerProfileDetail").innerHTML = `<div class="panel-header"><div><h2>${escapeHtml(buyer)}</h2><p>${history.cards.length} lifetime cards · ${money(history.spent)} spent</p></div><span class="status ${warnings.length ? "offered" : "available"}">${warnings.length ? `${warnings.length} address warning${warnings.length === 1 ? "" : "s"}` : "Address ready"}</span></div><div class="profile-content"><div class="profile-stats"><article><span>Favorite player</span><strong>${escapeHtml(history.player || "—")}</strong></article><article><span>Favorite brand</span><strong>${escapeHtml(history.brand || "—")}</strong></article><article><span>Favorite year</span><strong>${escapeHtml(history.year || "—")}</strong></article></div>${warnings.length ? `<div class="address-warnings">${warnings.map((warning) => `<span>⚑ ${escapeHtml(warning)}</span>`).join("")}</div>` : ""}<label>Facebook names / aliases<input id="profileAliases" value="${escapeHtml(profile.aliases.join(", "))}" placeholder="Alex Smith, Alex S." /><small>Claims under these names will be assigned to this buyer.</small></label><label>Buyer tags<input id="profileTags" value="${escapeHtml(profile.tags.join(", "))}" placeholder="Vintage, Yankees, set builder" /></label><label>Mailing address<textarea id="profileAddress" rows="4">${escapeHtml(profile.address || "")}</textarea></label><label>Notes<textarea id="profileNotes" rows="4">${escapeHtml(profile.notes || "")}</textarea></label><div class="profile-save-actions"><button id="saveBuyerProfileBtn" class="primary">Save and validate profile</button><button id="deleteBuyerProfileBtn" type="button" class="secondary danger-button">Delete buyer profile</button></div>${profile.previousAddresses.length ? `<details class="address-history"><summary>Previous addresses (${profile.previousAddresses.length})</summary>${profile.previousAddresses.slice().reverse().map((item) => `<div><span>${escapeHtml(item.address).replace(/\n/g, "<br>")}</span><small>${new Date(item.changedAt).toLocaleDateString()}</small></div>`).join("")}</details>` : ""}${matches.length ? `<section class="profile-alert"><h3>Available cards this buyer may like</h3>${matches.map((card) => `<button data-profile-card="${card.id}"><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</strong><span>${money(card.price)}</span></button>`).join("")}</section>` : ""}<section><h3>Purchase history</h3><div class="profile-history">${history.cards.slice().reverse().map((card) => `<article><span>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</span><strong>${money(card.claimPrice ?? card.price)}</strong></article>`).join("") || "No purchases recorded."}</div></section></div>`;
+  $("#buyerProfileDetail").innerHTML = `<div class="panel-header"><div><h2>${escapeHtml(buyer)}</h2><p>${history.cards.length} lifetime cards · ${history.oneOffOrders.length} one-off order${history.oneOffOrders.length === 1 ? "" : "s"} · ${money(history.spent)} spent</p></div><span class="status ${warnings.length ? "offered" : "available"}">${warnings.length ? `${warnings.length} address warning${warnings.length === 1 ? "" : "s"}` : "Address ready"}</span></div><div class="profile-content"><div class="profile-stats"><article><span>Favorite player</span><strong>${escapeHtml(history.player || "—")}</strong></article><article><span>Favorite brand</span><strong>${escapeHtml(history.brand || "—")}</strong></article><article><span>Favorite year</span><strong>${escapeHtml(history.year || "—")}</strong></article></div>${warnings.length ? `<div class="address-warnings">${warnings.map((warning) => `<span>⚑ ${escapeHtml(warning)}${/PO box/i.test(warning) ? `<button type="button" class="warning-dismiss-x" data-dismiss-profile-po-box aria-label="Dismiss PO box warning" title="Dismiss this warning">×</button>` : ""}</span>`).join("")}</div>` : ""}<label>Facebook names / aliases<input id="profileAliases" value="${escapeHtml(profile.aliases.join(", "))}" placeholder="Alex Smith, Alex S." /><small>Claims under these names will be assigned to this buyer.</small></label><label>Buyer tags<input id="profileTags" value="${escapeHtml(profile.tags.join(", "))}" placeholder="Vintage, Yankees, set builder" /></label><label>Mailing address<textarea id="profileAddress" rows="4">${escapeHtml(profile.address || "")}</textarea></label><label>Notes<textarea id="profileNotes" rows="4">${escapeHtml(profile.notes || "")}</textarea></label><div class="profile-save-actions"><button id="saveBuyerProfileBtn" class="primary">Save and validate profile</button><button id="deleteBuyerProfileBtn" type="button" class="secondary danger-button">Delete buyer profile</button></div>${profile.previousAddresses.length ? `<details class="address-history"><summary>Previous addresses (${profile.previousAddresses.length})</summary>${profile.previousAddresses.slice().reverse().map((item) => `<div><span>${escapeHtml(item.address).replace(/\n/g, "<br>")}</span><small>${new Date(item.changedAt).toLocaleDateString()}</small></div>`).join("")}</details>` : ""}${matches.length ? `<section class="profile-alert"><h3>Available cards this buyer may like</h3>${matches.map((card) => `<button data-profile-card="${card.id}"><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</strong><span>${money(card.price)}</span></button>`).join("")}</section>` : ""}<section><h3>Purchase history</h3><div class="profile-history">${history.cards.slice().reverse().map((card) => `<article><span>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</span><strong>${money(card.claimPrice ?? card.price)}</strong></article>`).join("")}${history.oneOffOrders.slice().reverse().map((order) => `<article><span><strong>${escapeHtml(order.reference)}</strong> · One-off order · ${order.items.reduce((sum, item) => sum + item.quantity, 0)} item${order.items.reduce((sum, item) => sum + item.quantity, 0) === 1 ? "" : "s"}</span><strong>${money(oneOffTotals(order).total)}</strong></article>`).join("") || (history.cards.length ? "" : "No purchases recorded.")}</div></section></div>`;
 }
 
 async function deleteBuyerProfile(name) {
@@ -1778,6 +1950,9 @@ async function deleteBuyerProfile(name) {
     if (cards.length) references.push(`${cards.length} card${cards.length === 1 ? "" : "s"} in ${sale.name}`);
     if (sale.orders?.[name]) references.push(`an order in ${sale.name}`);
   });
+  ensureOneOffState();
+  const oneOffCount = [...state.oneOffOrders, ...state.archivedOneOffOrders].filter((order) => order.buyer === name).length;
+  if (oneOffCount) references.push(`${oneOffCount} one-off order${oneOffCount === 1 ? "" : "s"}`);
   if (references.length) return toast(`Move or remove this buyer’s ${references[0]} before deleting the profile.`);
   if (!await confirmDestructive({ title: `Delete ${name}’s buyer profile?`, message: "Saved aliases, address, tags, and private notes will be removed.", preserved: ["Past sale records are not changed.", "Card and order history remains in archived sales.", "This cannot remove a buyer who is still assigned to a card or order."], confirmLabel: "Delete profile" })) return;
   delete state.buyerProfiles[name];
@@ -1989,7 +2164,15 @@ function finishCloseSale() {
     const percent = Number($("#closeSalePercent").value || 0); const cards = sale.cards.filter((card) => card.status === "available").map((card, index) => ({ ...clone(card), id: uid(), ref: String(index + 1), sourceOrder: index + 1, customOrder: index + 1, price: Math.max(0, Number(card.price) * (1 + percent / 100)), hiddenAfterCopy: false }));
     const next = { id: uid(), name, imageMode: saleImageMode(sale), pweShipping: sale.pweShipping, pmwtShipping: sale.pmwtShipping, shippingRules: clone(ensureShippingRules(sale)), template: sale.template, cards, images: clone(sale.images.filter((image) => cards.some((card) => cardImagePaths(card).includes(image.path)))), orders: {}, bundles: [], customFieldDefinitions: clone(customFields(sale)), versions: [], audit: [], sortMode: "spreadsheet" }; state.sales.push(next); recordAudit("close", `Created ${name} with ${cards.length} unsold cards`, {}, sale);
   }
-  sale.closedAt = new Date().toISOString(); recordAudit("close", "Sale closed with the closing assistant"); $("#closeSaleDialog").close(); saveSoon(); render(); toast(missingTracking.length ? `${missingTracking.length} packed PMWT order${missingTracking.length === 1 ? " still needs" : "s still need"} tracking and was not marked shipped.` : "Sale closing steps completed.");
+  sale.closedAt = new Date().toISOString(); recordAudit("close", "Sale closed with the closing assistant");
+  const closedIndex = state.sales.findIndex((item) => item.id === sale.id);
+  state.archivedSales ||= [];
+  state.archivedSales = state.archivedSales.filter((item) => item.id !== sale.id);
+  state.archivedSales.unshift({ ...clone(sale), archivedAt: sale.closedAt, archivedFromIndex: closedIndex, archiveReason: "closed" });
+  state.sales = state.sales.filter((item) => item.id !== sale.id);
+  if (!state.sales.length) state.sales.push({ id: uid(), name: "New sale", pweShipping: 1, pmwtShipping: 5, shippingRules: { cardCountEnabled: true, maxPweCards: 3, valueEnabled: true, maxPweValue: 50 }, template: DEFAULT_TEMPLATE, cards: [], images: [], orders: {}, bundles: [], customFieldDefinitions: [] });
+  state.activeSaleId = state.sales.at(-1).id; state.selectedBuyer = ""; resetListingView();
+  $("#closeSaleDialog").close(); saveSoon(); render(); toast(missingTracking.length ? `Sale archived. ${missingTracking.length} packed PMWT order${missingTracking.length === 1 ? " still needs" : "s still need"} tracking and was not marked shipped.` : "Sale closed and moved to Archived Sale Records.");
 }
 
 function presets() { state.salePresets ||= []; return state.salePresets; }
@@ -2679,8 +2862,15 @@ async function autoMatchImages(options = {}) {
   let images;
   try {
     const signature = JSON.stringify({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders });
-    images = await window.cardSale.scanImageFolder({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders, excludedPaths: options.force ? [] : [...confirmedPaths] });
-    state.imageFolderIndex = { signature, scannedAt: Date.now(), images: clone(images) }; saveSoon();
+    const cached = state.imageFolderIndex?.signature === signature && Array.isArray(state.imageFolderIndex.images) && Date.now() - Number(state.imageFolderIndex.scannedAt || 0) < 300000;
+    if (cached && !options.force) {
+      images = state.imageFolderIndex.images.filter((image) => !confirmedPaths.has(String(image.path || "").toLowerCase()));
+      progressBar.style.width = "60%"; progressText.textContent = `Using the saved image index · ${images.length} available files`;
+      window.cardSale.scanImageFolder({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders, excludedPaths: [] }).then((fresh) => { state.imageFolderIndex = { signature, scannedAt: Date.now(), images: clone(fresh) }; saveSoon(); }).catch(() => {});
+    } else {
+      const fullImages = await window.cardSale.scanImageFolder({ folders: [folder, ...settings.additionalFolders], excludedFolders: settings.excludedFolders, excludedPaths: [] });
+      state.imageFolderIndex = { signature, scannedAt: Date.now(), images: clone(fullImages) }; images = options.force ? fullImages : fullImages.filter((image) => !confirmedPaths.has(String(image.path || "").toLowerCase())); saveSoon();
+    }
   } catch (error) {
     progress.classList.add("hidden");
     toast(error.message || "Image lookup could not finish.");
@@ -3256,8 +3446,11 @@ async function deleteActiveSale() {
 
 function renderArchivedSales() {
   const archived = state.archivedSales || [];
+  ensureOneOffState();
   const button = $("#archivedSalesBtn");
-  if (button) button.innerHTML = `<span>14</span> Archived Sale Records${archived.length ? ` <b class="nav-count">${archived.length}</b>` : ""}`;
+  const totalArchived = archived.length + state.archivedOneOffOrders.length;
+  if (button) button.innerHTML = `<span>14</span> Archived Sale Records${totalArchived ? ` <b class="nav-count">${totalArchived}</b>` : ""}`;
+  if ($("#oneOffArchiveCount")) $("#oneOffArchiveCount").textContent = state.archivedOneOffOrders.length ? `(${state.archivedOneOffOrders.length})` : "";
   const list = $("#archivedSalesList");
   if (!list) return;
   list.innerHTML = archived.length ? archived.map((sale) => {
@@ -3268,6 +3461,8 @@ function renderArchivedSales() {
     const empty = sale.cards.length === 0 && sold.length === 0;
     return `<article class="csm-manager-item"><div><strong>${escapeHtml(sale.name)}${empty ? ` <span class="status pending">Empty sale</span>` : ""}</strong><small>${sale.cards.length} cards · ${sold.length} sold · ${buyers} buyer${buyers === 1 ? "" : "s"} · ${money(revenue)}${date ? ` · ${escapeHtml(new Date(date).toLocaleDateString())}` : ""}</small></div><div class="row-actions"><button type="button" class="secondary" data-restore-archived-sale="${escapeHtml(sale.id)}">Restore to active sales</button><button type="button" class="secondary danger-button" data-delete-archived-sale="${escapeHtml(sale.id)}">Delete permanently</button></div></article>`;
   }).join("") : `<div class="empty-state"><h3>No archived sales</h3><p>Removing a sale will preserve its records here.</p></div>`;
+  const oneOffList = $("#archivedOneOffList");
+  if (oneOffList) oneOffList.innerHTML = state.archivedOneOffOrders.length ? state.archivedOneOffOrders.map((order) => { const totals = oneOffTotals(order); return `<article class="csm-manager-item"><div><strong>${escapeHtml(order.reference)} · ${escapeHtml(order.buyer || "Buyer not selected")}${order.status === "voided" ? ` <span class="status offered">Voided</span>` : ""}</strong><small>${totals.quantity} item${totals.quantity === 1 ? "" : "s"} · ${money(totals.total)} · ${escapeHtml(oneOffStatusLabel(order.status))}${order.closedAt ? ` · ${new Date(order.closedAt).toLocaleDateString()}` : ""}</small></div><div class="row-actions"><button type="button" class="secondary" data-view-one-off-history="${escapeHtml(order.id)}">View</button>${order.status !== "voided" ? `<button type="button" class="secondary" data-reopen-one-off="${escapeHtml(order.id)}">Correct / reopen</button><button type="button" class="secondary danger-button" data-void-one-off="${escapeHtml(order.id)}">Void</button>` : ""}</div></article>`; }).join("") : `<div class="empty-state"><h3>No closed one-off orders</h3><p>Closed standalone orders will appear here.</p></div>`;
 }
 
 async function permanentlyDeleteArchivedSale(saleId) {
@@ -4405,6 +4600,63 @@ function openBuyerMerge() {
   $("#mergeBuyerSource").innerHTML = options; $("#mergeBuyerTarget").innerHTML = options; $("#mergeBuyerTarget").selectedIndex = 1; updateBuyerMergePreview(); $("#mergeBuyerDialog").showModal();
 }
 function updateBuyerMergePreview() { const source = $("#mergeBuyerSource").value; const target = $("#mergeBuyerTarget").value; const count = historicalSales().flatMap((sale) => sale.cards).filter((card) => card.buyer === source).length; $("#mergeBuyerPreview").textContent = source === target ? "Choose two different profiles." : `${count} card record${count === 1 ? "" : "s"}, orders, and saved profile details will move from ${source} to ${target}.`; }
+
+function openOneOffOrders(create = false) {
+  ensureOneOffState();
+  if (create) createOneOffOrder();
+  else renderOneOffOrders();
+  $("#oneOffOrdersDialog").showModal();
+}
+
+async function chooseOneOffItemImage(order, item) {
+  const paths = await window.cardSale.chooseImages(); const path = paths?.[0]; if (!path) return;
+  item.imagePath = path; item.includeImage = true; recordOneOffAudit(order, `Image attached to ${item.description}`); saveSoon(); renderOneOffDetail();
+}
+
+async function deleteOneOffDraft(order) {
+  if (!await confirmDestructive({ title: `Delete ${order.reference}?`, message: "This removes the unfinished one-off order.", preserved: ["Buyer profiles remain available.", "Original image files are never deleted.", "A local recovery backup will be created first."], confirmLabel: "Delete draft" })) return;
+  const backup = await window.cardSale.backup(`before-delete-one-off-${order.id}`); if (!backup?.ok) return toast("CSM could not create the safety backup, so the order was not deleted.");
+  state.oneOffOrders = state.oneOffOrders.filter((item) => item.id !== order.id); selectedOneOffOrderId = state.oneOffOrders[0]?.id || ""; saveSoon(); renderOneOffOrders(); toast("One-off draft deleted. A recovery backup was created.");
+}
+
+function setOneOffStatus(order, status) {
+  const totals = oneOffTotals(order);
+  if (status === "paid") {
+    if (!order.buyer || !order.items.length || !order.shippingMethod) return toast("Choose a buyer, add an item, and select shipping first.");
+    if (!order.paymentMethod) return toast("Choose a payment method before marking paid.");
+    order.paymentAmount = Math.max(order.paymentAmount, totals.total); order.paidAt ||= new Date().toISOString();
+  }
+  if (status === "packed" && (!order.items.length || order.items.some((item) => !item.packed))) return toast("Check every line item before marking the order packed.");
+  if (status === "shipped") {
+    if (order.status !== "packed") return toast("Mark the order packed first.");
+    if (order.shippingMethod === "PMWT" && !order.trackingNumber.trim()) return toast("Enter tracking before marking a PMWT order shipped.");
+    order.shippedAt = new Date().toISOString(); order.locked = true;
+  } else order.locked = false;
+  order.status = status; recordOneOffAudit(order, `Order marked ${oneOffStatusLabel(status).toLowerCase()}`); saveSoon(); renderOneOffOrders();
+}
+
+function closeOneOffOrder(order) {
+  if (order.status !== "shipped") return toast("Mark the order shipped before closing it.");
+  order.status = "closed"; order.closedAt = new Date().toISOString(); order.locked = true; recordOneOffAudit(order, "Order closed and archived");
+  state.oneOffOrders = state.oneOffOrders.filter((item) => item.id !== order.id); state.archivedOneOffOrders.unshift(order); selectedOneOffOrderId = state.oneOffOrders[0]?.id || ""; saveSoon(); renderOneOffOrders(); renderArchivedSales(); toast(`${order.reference} moved to One-Off Order History.`);
+}
+
+function reopenOneOffOrder(id) {
+  const index = state.archivedOneOffOrders.findIndex((order) => order.id === id); if (index < 0) return;
+  const order = state.archivedOneOffOrders.splice(index, 1)[0]; order.status = "shipped"; order.locked = false; delete order.closedAt; recordOneOffAudit(order, "Archived order reopened for correction"); state.oneOffOrders.unshift(order); selectedOneOffOrderId = order.id; saveSoon(); renderArchivedSales(); $("#archivedSalesDialog").close(); openOneOffOrders(); toast("One-off order reopened. Its audit history was preserved.");
+}
+
+async function voidOneOffOrder(id) {
+  const order = state.archivedOneOffOrders.find((item) => item.id === id); if (!order) return;
+  if (!await confirmDestructive({ title: `Void ${order.reference}?`, message: "The order will remain in history but will be clearly marked voided and excluded from buyer spending totals.", preserved: ["The original line items and audit history remain visible.", "The buyer profile is not deleted."], confirmLabel: "Void order" })) return;
+  order.status = "voided"; order.voidedAt = new Date().toISOString(); recordOneOffAudit(order, "Order voided"); saveSoon(); renderArchivedSales(); renderBuyerProfiles(); toast("One-off order marked voided.");
+}
+
+function savePaymentQrSettings() {
+  const settings = ensurePaymentQrSettings();
+  PAYMENT_QR_METHODS.forEach(([key]) => { settings[key].enabled = Boolean($(`[data-payment-qr-enabled="${key}"]`)?.checked); settings[key].value = String($(`[data-payment-qr-value="${key}"]`)?.value || "").trim(); });
+  saveSoon(); $("#paymentQrDialog").close(); toast("Payment QR options saved.");
+}
 function mergeBuyerProfiles() {
   const source = $("#mergeBuyerSource").value; const target = $("#mergeBuyerTarget").value; if (!source || !target || source === target) return toast("Choose two different buyer profiles.");
   const from = buyerProfile(source); const to = ensureBuyerProfile(target); let moved = 0;
@@ -4681,9 +4933,18 @@ function bindEvents() {
   $("#closeSaleUnsoldAction").addEventListener("change", (event) => $("#closeSaleNameLabel").classList.toggle("hidden", event.target.value !== "new"));
   $("#finishCloseSaleBtn").addEventListener("click", finishCloseSale);
   $("#newSaleBtn").addEventListener("click", () => { const single = document.querySelector('input[name="newSaleImageMode"][value="single"]'); if (single) single.checked = true; $("#newSaleFacebookPostUrl").value = ""; $("#newSaleDialog").showModal(); });
+  $("#newOneOffOrderBtn").addEventListener("click", () => openOneOffOrders(true));
+  $("#openOneOffOrdersBtn").addEventListener("click", () => openOneOffOrders(false));
+  $("#createOneOffOrderBtn").addEventListener("click", createOneOffOrder);
+  $("#oneOffSearch").addEventListener("input", (event) => { oneOffQuery = event.target.value; renderOneOffOrders(); });
+  $("#oneOffOrderList").addEventListener("click", (event) => { const id = event.target.closest("[data-one-off-order]")?.dataset.oneOffOrder; if (id) { selectedOneOffOrderId = id; renderOneOffOrders(); } });
+  $("#paymentQrSettingsBtn").addEventListener("click", () => { renderPaymentQrSettings(); $("#paymentQrDialog").showModal(); });
+  $("#savePaymentQrSettingsBtn").addEventListener("click", savePaymentQrSettings);
   $("#deleteSaleBtn").addEventListener("click", deleteActiveSale);
   $("#archivedSalesBtn").addEventListener("click", () => { renderArchivedSales(); $("#archivedSalesDialog").showModal(); });
+  $$("[data-archive-tab]").forEach((button) => button.addEventListener("click", () => { $$("[data-archive-tab]").forEach((item) => item.classList.toggle("active", item === button)); $("#archivedSalesPanel").classList.toggle("hidden", button.dataset.archiveTab !== "sales"); $("#archivedOneOffPanel").classList.toggle("hidden", button.dataset.archiveTab !== "one-offs"); }));
   $("#archivedSalesList").addEventListener("click", (event) => { const restore = event.target.closest("[data-restore-archived-sale]"); const remove = event.target.closest("[data-delete-archived-sale]"); if (restore) { restoreArchivedSale(restore.dataset.restoreArchivedSale); $("#archivedSalesDialog").close(); } if (remove) permanentlyDeleteArchivedSale(remove.dataset.deleteArchivedSale); });
+  $("#archivedOneOffList").addEventListener("click", (event) => { const view = event.target.closest("[data-view-one-off-history]"); const reopen = event.target.closest("[data-reopen-one-off]"); const voidButton = event.target.closest("[data-void-one-off]"); if (view) { const order = oneOffOrder(view.dataset.viewOneOffHistory); if (order) outputOneOff(order, "summary"); } if (reopen) reopenOneOffOrder(reopen.dataset.reopenOneOff); if (voidButton) voidOneOffOrder(voidButton.dataset.voidOneOff); });
   $("#createSaleBtn").addEventListener("click", (event) => {
     event.preventDefault(); const name = $("#newSaleName").value.trim(); if (!name) return;
     const imageMode = document.querySelector('input[name="newSaleImageMode"]:checked')?.value === "front-back" ? "front-back" : "single";
@@ -4949,9 +5210,9 @@ function bindEvents() {
     if (event.target.id === "dismissPoBoxWarningBtn") { const profile = ensureBuyerProfile(state.selectedBuyer); profile.dismissedPoBoxWarnings ||= []; const key = poBoxWarningKey(state.selectedBuyer, profile.address); if (!profile.dismissedPoBoxWarnings.includes(key)) profile.dismissedPoBoxWarnings.push(key); saveSoon(); renderOrders(); return toast("PO box reminder dismissed for this address and shipping method."); }
     if (event.target.id === "cancelOrderBtn") { openCancelOrder(state.selectedBuyer); return; }
     const editAddOn = event.target.dataset.editAddon;
-    if (editAddOn) { const item = addOnsForBuyer(state.selectedBuyer).find((entry) => entry.id === editAddOn); if (!item) return; const name = window.prompt("Add-on name", item.name); if (name == null) return; const price = window.prompt("Unit price", item.price); if (price == null) return; const quantity = window.prompt("Quantity", item.quantity); if (quantity == null) return; item.name = name.trim() || item.name; item.price = Math.max(0, Number(price || 0)); item.quantity = Math.max(1, Math.floor(Number(quantity || 1))); saveSoon(); renderOrders(); return; }
+    if (editAddOn) { const item = addOnsForBuyer(state.selectedBuyer).find((entry) => entry.id === editAddOn); if (!item) return; const name = window.prompt("Add-on name", item.name); if (name == null) return; const price = window.prompt("Unit price", item.price); if (price == null) return; const quantity = window.prompt("Quantity", item.quantity); if (quantity == null) return; item.name = name.trim() || item.name; item.price = Math.max(0, Number(price || 0)); item.quantity = Math.max(1, Math.floor(Number(quantity || 1))); item.packed = false; refreshBuyerShippingAfterLineItemChange(state.selectedBuyer); recordAudit("order", `Updated add-on ${item.name} for ${state.selectedBuyer}`, { buyer: state.selectedBuyer }); saveSoon(); renderOrders(); return; }
     const deleteAddOn = event.target.dataset.deleteAddon;
-    if (deleteAddOn && window.confirm("Remove this additional line item?")) { const order = orderFor(state.selectedBuyer); order.addOns = order.addOns.filter((item) => item.id !== deleteAddOn); recordAudit("order", `Removed an add-on from ${state.selectedBuyer}`, { buyer: state.selectedBuyer }); saveSoon(); renderOrders(); return; }
+    if (deleteAddOn && window.confirm("Remove this additional line item?")) { const order = orderFor(state.selectedBuyer); order.addOns = order.addOns.filter((item) => item.id !== deleteAddOn); refreshBuyerShippingAfterLineItemChange(state.selectedBuyer); recordAudit("order", `Removed an add-on from ${state.selectedBuyer}`, { buyer: state.selectedBuyer }); saveSoon(); renderOrders(); return; }
     const status = event.target.dataset.orderStatus;
     if (status && state.selectedBuyer) { const order = orderFor(state.selectedBuyer); if (status === "paid" && !order.shippingMethod) return toast("Select PWE or PMWT before marking the order paid."); if (status === "paid" && !order.paymentMethod) return toast("Choose Cash, PayPal, Venmo or Other before marking paid."); snapshotSale(`Before marking ${state.selectedBuyer} ${status}`); order.status = status; if (status === "paid") order.paidAt = new Date().toISOString(); recordAudit("order", `${state.selectedBuyer} marked ${status}${order.paymentMethod ? ` via ${order.paymentMethod}` : ""}`, { buyer: state.selectedBuyer }); saveSoon(); render(); toast(`Order marked ${status}.`); }
     if (event.target.id === "copySummaryBtn") { if (!orderFor(state.selectedBuyer).shippingMethod) return toast("Select PWE or PMWT before copying the summary."); openQuickMessages("builtin-orderSummary", state.selectedBuyer); }
@@ -4960,7 +5221,50 @@ function bindEvents() {
     if (event.target.dataset.openTracking) window.cardSale.openTracking(event.target.dataset.openTracking);
     if (event.target.dataset.openBuyerProfile) { state.profileBuyer = event.target.dataset.openBuyerProfile; showView("buyers"); renderBuyerProfiles(); }
   });
-  $("#orderDetail").addEventListener("submit", (event) => { if (event.target.id !== "addOnForm") return; event.preventDefault(); const name = $("#addOnName").value.trim(); if (!name) return toast("Enter an item name."); const item = { id: uid(), name, price: Math.max(0, Number($("#addOnPrice").value || 0)), quantity: Math.max(1, Math.floor(Number($("#addOnQuantity").value || 1))), packed: false }; addOnsForBuyer(state.selectedBuyer).push(item); recordAudit("order", `Added ${item.quantity} × ${item.name} to ${state.selectedBuyer}`, { buyer: state.selectedBuyer }); saveSoon(); renderOrders(); toast("Additional item added."); });
+  $("#orderDetail").addEventListener("submit", (event) => { if (event.target.id !== "addOnForm") return; event.preventDefault(); const name = $("#addOnName").value.trim(); if (!name) return toast("Enter an item name."); const item = { id: uid(), name, price: Math.max(0, Number($("#addOnPrice").value || 0)), quantity: Math.max(1, Math.floor(Number($("#addOnQuantity").value || 1))), packed: false }; addOnsForBuyer(state.selectedBuyer).push(item); refreshBuyerShippingAfterLineItemChange(state.selectedBuyer); recordAudit("order", `Added ${item.quantity} × ${item.name} to ${state.selectedBuyer}`, { buyer: state.selectedBuyer }); saveSoon(); renderOrders(); toast("Additional item added."); });
+  $("#oneOffOrderDetail").addEventListener("submit", (event) => {
+    if (event.target.id !== "oneOffItemForm") return; event.preventDefault(); const order = oneOffOrder(); if (!order || order.locked) return;
+    const description = $("#oneOffItemDescription").value.trim(); if (!description) return toast("Enter an item description.");
+    const item = { id: uid(), description, quantity: Math.max(1, Math.floor(Number($("#oneOffItemQuantity").value || 1))), price: Math.max(0, Number($("#oneOffItemPrice").value || 0)), imagePath: "", includeImage: true, packed: false };
+    order.items.push(item); applyOneOffShippingRule(order); recordOneOffAudit(order, `Added ${item.quantity} × ${item.description}`); saveSoon(); renderOneOffOrders();
+  });
+  $("#oneOffOrderDetail").addEventListener("input", (event) => {
+    const order = oneOffOrder(); if (!order) return;
+    if (event.target.id === "oneOffNotes") order.notes = event.target.value;
+    if (event.target.id === "oneOffSlipNote") order.packingSlipNote = event.target.value;
+    if (event.target.id === "oneOffTracking") order.trackingNumber = event.target.value;
+    saveSoon();
+  });
+  $("#oneOffOrderDetail").addEventListener("change", (event) => {
+    const order = oneOffOrder(); if (!order) return; let rerender = true;
+    if (event.target.id === "oneOffBuyer") { const buyer = canonicalBuyerName(event.target.value); order.buyer = buyer; if (buyer) { const profile = ensureBuyerProfile(buyer); if (!order.address) order.address = profile.address || ""; } recordOneOffAudit(order, buyer ? `Buyer set to ${buyer}` : "Buyer cleared"); }
+    else if (event.target.id === "oneOffAddress") { order.address = event.target.value.trim(); if (order.buyer) { const profile = ensureBuyerProfile(order.buyer); profile.address = order.address; profile.validatedAddress = order.address; profile.addressValidatedAt = order.address ? new Date().toISOString() : ""; profile.manuallySaved = true; } }
+    else if (event.target.id === "oneOffShipping") { order.shippingMethod = event.target.value; order.shippingAutoSelected = false; }
+    else if (event.target.id === "oneOffDiscount") order.discount = Math.max(0, Number(event.target.value || 0));
+    else if (event.target.id === "oneOffTax") order.tax = Math.max(0, Number(event.target.value || 0));
+    else if (event.target.id === "oneOffCredit") order.credit = Math.max(0, Number(event.target.value || 0));
+    else if (event.target.id === "oneOffPaymentAmount") order.paymentAmount = Math.max(0, Number(event.target.value || 0));
+    else if (event.target.id === "oneOffPaymentMethod") order.paymentMethod = event.target.value;
+    else if (event.target.dataset.oneOffPack) { const item = order.items.find((entry) => entry.id === event.target.dataset.oneOffPack); if (item) item.packed = event.target.checked; }
+    else if (event.target.dataset.oneOffShowImage) { const item = order.items.find((entry) => entry.id === event.target.dataset.oneOffShowImage); if (item) item.includeImage = event.target.checked; }
+    else rerender = false;
+    order.updatedAt = new Date().toISOString(); saveSoon(); if (rerender) renderOneOffOrders();
+  });
+  $("#oneOffOrderDetail").addEventListener("click", async (event) => {
+    const order = oneOffOrder(); if (!order) return;
+    const itemId = event.target.dataset.oneOffImage || event.target.dataset.oneOffEdit || event.target.dataset.oneOffRemove; const item = order.items.find((entry) => entry.id === itemId);
+    if (event.target.dataset.oneOffImage && item) return chooseOneOffItemImage(order, item);
+    if (event.target.dataset.oneOffEdit && item) { const description = window.prompt("Item description", item.description); if (description == null) return; const quantity = window.prompt("Quantity", item.quantity); if (quantity == null) return; const price = window.prompt("Unit price", item.price); if (price == null) return; item.description = description.trim() || item.description; item.quantity = Math.max(1, Math.floor(Number(quantity || 1))); item.price = Math.max(0, Number(price || 0)); item.packed = false; recordOneOffAudit(order, `Updated ${item.description}`); applyOneOffShippingRule(order); saveSoon(); return renderOneOffOrders(); }
+    if (event.target.dataset.oneOffRemove && item && window.confirm(`Remove ${item.description} from this order?`)) { order.items = order.items.filter((entry) => entry.id !== item.id); recordOneOffAudit(order, `Removed ${item.description}`); saveSoon(); return renderOneOffOrders(); }
+    if (event.target.dataset.deleteOneOff) return deleteOneOffDraft(order);
+    if (event.target.id === "reopenOneOffCorrectionBtn") { order.status = "packed"; order.locked = false; recordOneOffAudit(order, "Shipped order reopened for correction"); saveSoon(); renderOneOffOrders(); return toast("One-off order reopened for correction."); }
+    if (event.target.dataset.oneOffStatus) return setOneOffStatus(order, event.target.dataset.oneOffStatus);
+    if (event.target.id === "oneOffCheckAllBtn") { const pack = order.items.some((entry) => !entry.packed); order.items.forEach((entry) => entry.packed = pack); recordOneOffAudit(order, pack ? "All line items checked for packing" : "Packing checks cleared"); saveSoon(); return renderOneOffOrders(); }
+    if (event.target.id === "copyOneOffSummaryBtn") { if (!order.shippingMethod) return toast("Select shipping before copying the summary."); await window.cardSale.copyText(oneOffSummaryText(order)); recordOneOffAudit(order, "Buyer summary copied"); saveSoon(); return toast("One-off buyer summary copied."); }
+    if (event.target.dataset.oneOffMessage) { const key = event.target.dataset.oneOffMessage; if (!order.shippingMethod && ["paymentDue", "paymentReceived"].includes(key)) return toast("Select shipping before copying this message."); if (key === "shipped" && !order.trackingNumber && order.shippingMethod === "PMWT") return toast("Enter tracking before copying the shipped message."); await window.cardSale.copyText(oneOffMessageText(order, key)); recordOneOffAudit(order, `${event.target.textContent.trim()} message copied`); saveSoon(); return toast("Message copied."); }
+    if (event.target.dataset.oneOffOutput) return outputOneOff(order, event.target.dataset.oneOffOutput);
+    if (event.target.id === "closeOneOffOrderBtn") return closeOneOffOrder(order);
+  });
   $("#saveMessageTemplatesBtn").addEventListener("click", saveMessageTemplates);
   $("#resetMessageTemplatesBtn").addEventListener("click", resetMessageTemplates);
   $("#quickMessagesBtn").addEventListener("click", () => openQuickMessages());
@@ -5127,7 +5431,7 @@ function bindEvents() {
   $("#mergeBuyerTarget").addEventListener("change", updateBuyerMergePreview);
   $("#confirmMergeBuyerBtn").addEventListener("click", mergeBuyerProfiles);
   $("#buyerProfileList").addEventListener("click", (event) => { const button = event.target.closest("[data-profile-buyer]"); if (button) { state.profileBuyer = button.dataset.profileBuyer; renderBuyerProfiles(); } });
-  $("#buyerProfileDetail").addEventListener("click", (event) => { if (event.target.id === "saveBuyerProfileBtn") { const profile = ensureBuyerProfile(state.profileBuyer); const nextAddress = $("#profileAddress").value.trim(); if (profile.address && normalizedAddress(profile.address) !== normalizedAddress(nextAddress)) profile.previousAddresses.push({ address: profile.address, changedAt: new Date().toISOString() }); profile.aliases = $("#profileAliases").value.split(",").map((alias) => alias.trim()).filter(Boolean); profile.tags = $("#profileTags").value.split(",").map((tag) => tag.trim()).filter(Boolean); profile.address = nextAddress; profile.validatedAddress = nextAddress; profile.addressValidatedAt = nextAddress ? new Date().toISOString() : ""; profile.notes = $("#profileNotes").value.trim(); profile.manuallySaved = true; saveSoon(); renderBuyerProfiles(); renderOrders(); toast(addressWarnings(state.profileBuyer).length ? "Profile saved. Review the remaining address warnings." : "Buyer profile saved and address validated."); } if (event.target.id === "deleteBuyerProfileBtn") deleteBuyerProfile(state.profileBuyer); if (event.target.dataset.profileCard) { showView("sale"); resetListingView(); state.query = activeSale().cards.find((card) => card.id === event.target.dataset.profileCard)?.name || ""; $("#cardSearch").value = state.query; renderListings(); } });
+  $("#buyerProfileDetail").addEventListener("click", (event) => { if (event.target.matches("[data-dismiss-profile-po-box]")) { const profile = ensureBuyerProfile(state.profileBuyer); profile.dismissedPoBoxWarnings ||= []; const key = `${normalizedAddress(profile.address)}|*`; if (!profile.dismissedPoBoxWarnings.includes(key)) profile.dismissedPoBoxWarnings.push(key); saveSoon(); renderBuyerProfiles(); renderOrders(); return toast("PO box warning dismissed for this saved address."); } if (event.target.id === "saveBuyerProfileBtn") { const profile = ensureBuyerProfile(state.profileBuyer); const nextAddress = $("#profileAddress").value.trim(); if (profile.address && normalizedAddress(profile.address) !== normalizedAddress(nextAddress)) profile.previousAddresses.push({ address: profile.address, changedAt: new Date().toISOString() }); profile.aliases = $("#profileAliases").value.split(",").map((alias) => alias.trim()).filter(Boolean); profile.tags = $("#profileTags").value.split(",").map((tag) => tag.trim()).filter(Boolean); profile.address = nextAddress; profile.validatedAddress = nextAddress; profile.addressValidatedAt = nextAddress ? new Date().toISOString() : ""; profile.notes = $("#profileNotes").value.trim(); profile.manuallySaved = true; saveSoon(); renderBuyerProfiles(); renderOrders(); toast(addressWarnings(state.profileBuyer).length ? "Profile saved. Review the remaining address warnings." : "Buyer profile saved and address validated."); } if (event.target.id === "deleteBuyerProfileBtn") deleteBuyerProfile(state.profileBuyer); if (event.target.dataset.profileCard) { showView("sale"); resetListingView(); state.query = activeSale().cards.find((card) => card.id === event.target.dataset.profileCard)?.name || ""; $("#cardSearch").value = state.query; renderListings(); } });
   $("#setupChooseFolderBtn").addEventListener("click", async () => { const folder = await window.cardSale.chooseLookupFolder(); if (folder) $("#setupImageFolder").value = folder; });
   $("#setupBackBtn").addEventListener("click", () => { setupStep = Math.max(0, setupStep - 1); renderSetupStep(); });
   $("#setupSkipBtn").addEventListener("click", () => { state.preferences.setupCompleted = true; saveSoon(); $("#setupWizardDialog").close(); });
@@ -5242,6 +5546,9 @@ async function init() {
     lookupSettings();
     state.buyerProfiles ||= {};
     state.archivedSales ||= [];
+    state.oneOffOrders ||= [];
+    state.archivedOneOffOrders ||= [];
+    state.oneOffSequence ||= 0;
     state.manualMatchMemory ||= {};
     state.teamMatchMemory ||= {};
     state.teamLookupCache ||= {};
@@ -5326,7 +5633,7 @@ async function init() {
   state.importPresets ||= [];
   state.importMemories ||= {};
   if (![...$("#packingPageSize").options].some((option) => option.value === "two-up")) $("#packingPageSize").add(new Option("Two half-slips per letter page", "two-up"));
-  claimWords(); presets(); importPresets(); importMemories(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); ensureQuickMessages(); ensureSaleReplies(); workspaceColumns(); uiState(); bindEvents();
+  claimWords(); presets(); importPresets(); importMemories(); ensurePackingSettings(); ensurePweLabelSettings(); ensureSaleIntroTemplate(); ensureMessageTemplates(); ensureQuickMessages(); ensureSaleReplies(); ensurePaymentQrSettings(); ensureOneOffState(); workspaceColumns(); uiState(); bindEvents();
   await refreshLicenseEntitlements(false).catch(() => applyLicenseEntitlements({ configured: true, licensed: false, owner: false, catalogVisible: false }));
   resetListingView(); applyDisplayPreferences(); render();
   if (uiState().activeView && uiState().activeView !== "command") showView(uiState().activeView);

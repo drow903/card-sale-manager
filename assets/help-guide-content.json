@@ -129,7 +129,7 @@
       "paragraphs": [
         "Choose Image lookup folders the first time you use a computer. Your primary, additional, and excluded folders carry from sale to sale.",
         "CSM treats the expected year folder as the first boundary. A 1961 card first considers files inside the 1961 folder, so the same player in 1962 or 1965 cannot create a conflict. Matching two-digit folders such as 61 are supported, while broad names such as Cards 1948-2026 are not mistaken for a specific year. If no valid year-folder match exists for a card marked Football, Basketball, or Hockey, CSM can fall back to the folder named for that sport. NFL, NBA, and NHL are recognized, and custom folder aliases can be saved in Image lookup folders. A surname-only sport fallback stays in review until stronger evidence supports it. Inside the chosen folder, CSM checks player or team, card number, purchase date, filename year, and brand. A single eligible file can confirm automatically; date conflicts are rejected and duplicate copies stay together for review. In front-and-back mode, CSM also recognizes F, B, Front, Back, Obverse, Reverse, Side 1/2, and Scan 1/2 filename keys.",
-        "Every lookup performs a fresh folder scan. Choose Check image folders first to see which sale years have folders, which sport fallbacks are available, and which cards need a Sport value. If Image Review cannot use a fallback because Sport is blank, set Football, Basketball, or Hockey on that row and CSM immediately retries it.",
+        "CSM keeps a persistent local image index so repeated lookups and new sales do not need to rebuild the same folder list every time. A recent index is used immediately and refreshed in the background; an older index is refreshed before matching. Choose Check image folders first to see which sale years have folders, which sport fallbacks are available, and which cards need a Sport value. If Image Review cannot use a fallback because Sport is blank, set Football, Basketball, or Hockey on that row and CSM immediately retries it.",
         "Before CSM attaches a suggestion, it verifies that the image still exists and is readable locally. Moved, deleted, unreadable, and cloud-only files remain unattached with a specific explanation.",
         "The same image cannot be attached to multiple listings within one sale. CSM compares file contents, so an identical renamed copy in another folder is also blocked. If CSM finds a conflict, both cards stay unconfirmed until you choose separate images."
       ],
@@ -217,7 +217,8 @@
       ],
       "tips": [
         "Customer-facing messages use the buyer's first name. Purchase costs remain private.",
-        "Message templates can be edited for payment due, payment received, shipped, delayed, order confirmation, and counter offers."
+        "Message templates can be edited for payment due, payment received, shipped, delayed, order confirmation, and counter offers.",
+        "A PO-box reminder can be dismissed with the X directly on the warning in Buyer Profiles after you confirm the shipping service. The dismissal is remembered for that saved address."
       ]
     },
     {
@@ -534,6 +535,30 @@
         "Pin frequent messages, search the library, duplicate a useful starting point, change the order, or use the context-aware suggestions and Recently used list. Preview the filled message for a buyer before copying it.",
         "Placeholder buttons insert safe customer-facing order details. Conditional buttons can include a section only when tracking, add-ons, payment status, or shipping information applies. Purchase price, purchase date, profit, private notes, tags, and private custom fields are never available as message placeholders.",
         "Edits made in the preview are one-time changes. Save changes in the template editor only when you want them reused. Built-in messages can be reset individually, and earlier saved versions can be restored from History."
+      ]
+    },
+    {
+      "id": "one-off-orders",
+      "group": "Buyer communication",
+      "title": "Create a one-off order",
+      "summary": "Handle an unrelated customer purchase without creating a complete sale.",
+      "paragraphs": [
+        "A one-off order is completely separate from every open sale. Use it when someone buys an unrelated card or group of cards and you still want CSM to create the summary, packing slip, label, tracking record, and buyer history.",
+        "One-off drafts autosave. Add as many custom line items as needed, with a description, quantity, price, and optional image for each. Shipping rules can recommend PMWT, but you may override the choice.",
+        "Closed one-off orders move to Archived Sale Records under One-Off Order History and remain visible in the buyer profile. They do not appear in active Buyer Orders and do not affect the Profit Dashboard."
+      ],
+      "steps": [
+        "Choose One-off order from Command Center or Buyer Orders.",
+        "Select an existing buyer or enter a new buyer name, then confirm the mailing address.",
+        "Add every item. Attach an optional image and decide whether it should appear on customer-facing summaries and slips.",
+        "Choose shipping, enter any discount, tax, credit, payment, and payment method, then copy or preview the buyer summary.",
+        "Check the items while packing, mark the order Paid, Packed, and Shipped, then choose Close order.",
+        "Find the completed record later in Archived Sale Records or the buyer profile."
+      ],
+      "tips": [
+        "If the same buyer has an active sale order, CSM warns you but keeps the one-off order separate.",
+        "Use Payment QR codes in Buyer Orders to enable optional PayPal, Venmo, Zelle, Apple Pay, or Cash App codes on visual summaries.",
+        "A shipped order is not closed automatically, giving you time to correct it before archiving."
       ]
     },
     {

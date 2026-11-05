@@ -828,12 +828,14 @@ function createWindow() {
     mainWindow.webContents.once("did-finish-load", async () => {
       await new Promise((resolve) => setTimeout(resolve, 2400));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
-      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["facebook-capture", "order-cards", "sale-trailer", "beginner-setup", "missing-images", "sale-readiness", "dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder", "image-workflow"].find((view) => captureName.includes(view)) || "");
+      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["facebook-capture", "order-cards", "sale-trailer", "beginner-setup", "missing-images", "sale-readiness", "one-off", "dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder", "image-workflow"].find((view) => captureName.includes(view)) || "");
       if (captureView && captureView !== "setup") await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item) => item.close())");
       if (captureView === "facebook-capture") {
         await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; currentLicense={configured:true,licensed:true,owner:true,catalogVisible:true}; applyLicenseEntitlements(currentLicense); showView('claims'); v2RenderCaptureDialog(); document.querySelector('#facebookCaptureDialog').showModal()");
       } else if (captureView === "order-cards") {
         await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; showView('orders'); v2OpenOrderCards()");
+      } else if (captureView === "one-off") {
+        await mainWindow.webContents.executeJavaScript("window.__captureOriginalOneOff=state.oneOffOrders; state.preferences ||= {}; state.preferences.setupCompleted=true; state.oneOffOrders=[{id:'capture-one-off',reference:'OO-2026-0001',buyer:'Alex Sample',status:'paid',items:[{id:'one',description:'1961 Topps Robin Roberts #20',quantity:1,price:7,imagePath:'',includeImage:true,packed:false},{id:'two',description:'1974 Topps Hank Aaron #1',quantity:2,price:12,imagePath:'',includeImage:true,packed:false}],pweShipping:1.25,pmwtShipping:5.5,shippingRules:{cardCountEnabled:true,maxPweCards:3,valueEnabled:true,maxPweValue:50},shippingMethod:'PWE',discount:2,tax:0,credit:0,paymentAmount:30.25,paymentMethod:'PayPal',address:['Alex Sample','123 Main St','Chicago, IL 60601'].join('\\n'),notes:'',packingSlipNote:'Thank you!',audit:[{id:'a',at:new Date().toISOString(),message:'Payment received'}],createdAt:new Date().toISOString()}]; selectedOneOffOrderId='capture-one-off'; renderOneOffOrders(); document.querySelector('#oneOffOrdersDialog').showModal()");
       } else if (captureView === "sale-trailer") {
         await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; bypassReadinessOnce=true; showView('live'); document.querySelector('#saleTrailerDialog').setAttribute('open',''); true");
       } else if (captureView === "beginner-setup") {
@@ -902,12 +904,14 @@ function createWindow() {
         await mainWindow.webContents.executeJavaScript(`showView(${JSON.stringify(captureView)})`);
       }
       await new Promise((resolve) => setTimeout(resolve, 150));
+      if (captureView === "one-off") { await new Promise((resolve) => setTimeout(resolve, 800)); await mainWindow.webContents.executeJavaScript("state.preferences.setupCompleted=true; document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); renderOneOffOrders(); const target=document.querySelector('#oneOffOrdersDialog'); if(!target.open) target.showModal()"); await new Promise((resolve) => setTimeout(resolve, 350)); }
       if (["live-light", "live-dark", "live-contrast", "live-system"].includes(captureView)) {
         await new Promise((resolve) => setTimeout(resolve, 3000));
         await mainWindow.webContents.executeJavaScript("state.preferences.setupCompleted=true; document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); showView('live'); renderLiveSale()");
       }
       const image = await mainWindow.webContents.capturePage();
       await fs.promises.writeFile(process.env.CARD_SALE_CAPTURE_PATH, image.toPNG());
+      if (captureView === "one-off") await mainWindow.webContents.executeJavaScript("state.oneOffOrders=window.__captureOriginalOneOff || []; clearTimeout(saveTimer); saveTimer=null");
       app.quit();
     });
   }

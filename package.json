@@ -1,12 +1,12 @@
 {
   "name": "card-sale-manager",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Local-first card sale workflow manager",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload.js && node --check image-matcher.js && node --check renderer.js && node --check features-v200.js && node --check media-tools.js && node --check live-popout.js && node --check live-popout-preload.js && node qa-image-matcher.js && node scripts/qa-facebook-companion.js && node scripts/qa-facebook-card-association.js && node scripts/qa-v220-release.js",
+    "check": "node --check main.js && node --check preload.js && node --check image-matcher.js && node --check renderer.js && node --check features-v200.js && node --check media-tools.js && node --check live-popout.js && node --check live-popout-preload.js && node qa-image-matcher.js && node scripts/qa-facebook-companion.js && node scripts/qa-facebook-card-association.js && node scripts/qa-v220-release.js && node scripts/qa-v230-release.js",
     "dist": "electron-builder --win"
   },
   "dependencies": {

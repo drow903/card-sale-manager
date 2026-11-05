@@ -47,6 +47,8 @@ const context = vm.createContext({
   resetListingView: () => {}
 });
 
+vm.runInContext("const ensureOneOffState = () => { state.oneOffOrders ||= []; state.archivedOneOffOrders ||= []; }; const oneOffTotals = () => ({ total: 0 });", context);
+
 ["clone", "activeSale", "cardInOrder", "historicalSales", "buyerHistory", "deleteActiveSale", "restoreArchivedSale"].forEach((name) => {
   if (name === "clone") vm.runInContext("const clone = (value) => JSON.parse(JSON.stringify(value));", context);
   else vm.runInContext(functionSource(name), context);

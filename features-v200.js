@@ -128,8 +128,8 @@ async function v2CreateOrderPage(cards, settings, page, pageCount) {
   if (logoSource) { try { const logo = await v2LoadImage(logoSource); v2Contain(ctx, logo, width - 340, 42, 276, 105); } catch {} }
   if (settings.showStatus && settings.status) { ctx.fillStyle = "#b7c7d7"; ctx.font = "24px system-ui"; ctx.fillText(settings.status, 64, 177); }
   const totalLines = page === pageCount ? [settings.showSubtotal, settings.showShipping, settings.showTotal, settings.showPayment].filter(Boolean).length + (settings.showTotal && Number(settings.discount || 0) ? 1 : 0) : 0;
-  const totalsHeight = totalLines ? 52 + totalLines * 38 : 0;
-  const top = settings.showStatus ? 215 : 180; const gap = 26; const cols = settings.layout === "compact" ? 2 : 1; const rows = Math.ceil(cards.length / cols); const cellWidth = (width - 128 - gap * (cols - 1)) / cols; const cellHeight = Math.min((height - top - 100 - totalsHeight - gap * Math.max(0, rows - 1)) / Math.max(1, rows), settings.layout === "compact" ? 360 : 560);
+  const totalsHeight = totalLines ? 52 + totalLines * 38 : 0; const paymentQrs = page === pageCount ? (settings.paymentQrs || []) : []; const qrHeight = paymentQrs.length ? 190 : 0;
+  const top = settings.showStatus ? 215 : 180; const gap = 26; const cols = settings.layout === "compact" ? 2 : 1; const rows = Math.ceil(cards.length / cols); const cellWidth = (width - 128 - gap * (cols - 1)) / cols; const cellHeight = Math.min((height - top - 100 - totalsHeight - qrHeight - gap * Math.max(0, rows - 1)) / Math.max(1, rows), settings.layout === "compact" ? 360 : 560);
   for (let index = 0; index < cards.length; index += 1) {
     const card = cards[index]; const col = index % cols; const row = Math.floor(index / cols); const x = 64 + col * (cellWidth + gap); const y = top + row * (cellHeight + gap);
     ctx.fillStyle = "#112433"; ctx.beginPath(); ctx.roundRect(x, y, cellWidth, cellHeight, 22); ctx.fill();
@@ -140,7 +140,7 @@ async function v2CreateOrderPage(cards, settings, page, pageCount) {
     ctx.fillStyle = accent; ctx.font = `800 ${cols === 2 ? 25 : 31}px system-ui`; ctx.fillText(money(card.claimPrice ?? card.price), x + 20, y + cellHeight - 22);
   }
   if (totalLines) {
-    const x = 64; const boxWidth = width - 128; const boxY = height - totalsHeight - 56;
+    const x = 64; const boxWidth = width - 128; const boxY = height - totalsHeight - qrHeight - 56;
     ctx.fillStyle = "#112433"; ctx.beginPath(); ctx.roundRect(x, boxY, boxWidth, totalsHeight, 18); ctx.fill();
     const lines = [];
     if (settings.showSubtotal) lines.push(["Card subtotal", money(settings.subtotal)]);
@@ -154,6 +154,11 @@ async function v2CreateOrderPage(cards, settings, page, pageCount) {
     });
     ctx.textAlign = "left";
   }
+  if (paymentQrs.length) {
+    const size = Math.min(122, Math.floor((width - 128 - Math.max(0, paymentQrs.length - 1) * 20) / Math.max(1, paymentQrs.length))); const startX = 64; const y = height - qrHeight + 8;
+    for (let index = 0; index < paymentQrs.length; index += 1) { const item = paymentQrs[index]; const x = startX + index * (size + 20); try { const image = await v2LoadImage(item.dataUrl); ctx.drawImage(image, x, y, size, size); } catch {} ctx.fillStyle = "#b7c7d7"; ctx.font = "700 17px system-ui"; ctx.textAlign = "center"; ctx.fillText(item.label, x + size / 2, y + size + 24); }
+    ctx.textAlign = "left";
+  }
   ctx.fillStyle = "#8ca1b2"; ctx.font = "20px system-ui"; ctx.textAlign = "right"; ctx.fillText(`Page ${page} of ${pageCount}`, width - 64, height - 34); ctx.textAlign = "left";
   return canvas.toDataURL("image/png");
 }
@@ -162,11 +167,12 @@ function v2OrderSignature(cards) { return cards.map((card) => `${card.id}:${card
 async function v2GenerateOrderCards() {
   const cards = cardsForBuyer(state.selectedBuyer); if (!cards.length) return toast("Choose a buyer order first.");
   const order = orderFor(state.selectedBuyer); const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0); const shipping = shippingAmount(order); const discount = Number(order.discount || 0);
-  const settings = { format: $("#orderCardFormat").value, layout: $("#orderCardLayout").value, heading: $("#orderCardHeading").value.trim(), showStatus: $("#orderCardShowStatus").checked, status: $("#orderCardStatus").value.trim(), showSubtotal: $("#orderCardShowSubtotal").checked, showShipping: $("#orderCardShowShipping").checked, showTotal: $("#orderCardShowTotal").checked, showPayment: $("#orderCardShowPayment").checked, subtotal, shipping, discount, total: subtotal + shipping - discount, shippingMethod: order.shippingMethod || "", paymentLabel: ["paid", "packed", "shipped"].includes(order.status) ? `Paid${order.paymentMethod ? ` via ${order.paymentMethod}` : ""}` : "Payment due" };
+  const qrSettings = ensurePaymentQrSettings(); const enabledQrs = PAYMENT_QR_METHODS.map(([key]) => qrSettings[key]).filter((item) => item.enabled && item.value.trim()); const paymentQrs = $("#orderCardShowPaymentQrs").checked ? await Promise.all(enabledQrs.map(async (item) => ({ label: item.label, dataUrl: await window.cardSale.packingQrDataUrl(item.value, ensurePackingSettings().accent || "#19b56b") }))) : [];
+  const settings = { format: $("#orderCardFormat").value, layout: $("#orderCardLayout").value, heading: $("#orderCardHeading").value.trim(), showStatus: $("#orderCardShowStatus").checked, status: $("#orderCardStatus").value.trim(), showSubtotal: $("#orderCardShowSubtotal").checked, showShipping: $("#orderCardShowShipping").checked, showTotal: $("#orderCardShowTotal").checked, showPayment: $("#orderCardShowPayment").checked, showPaymentQrs: $("#orderCardShowPaymentQrs").checked, paymentQrs, subtotal, shipping, discount, total: subtotal + shipping - discount, shippingMethod: order.shippingMethod || "", paymentLabel: ["paid", "packed", "shipped"].includes(order.status) ? `Paid${order.paymentMethod ? ` via ${order.paymentMethod}` : ""}` : "Payment due" };
   const perPage = settings.format === "vertical" ? (settings.layout === "compact" ? 8 : 4) : settings.format === "letter" ? (settings.layout === "compact" ? 10 : 5) : (settings.layout === "compact" ? 6 : 3);
   const groups = []; for (let index = 0; index < cards.length; index += perPage) groups.push(cards.slice(index, index + perPage));
   v2OrderPages = []; for (let index = 0; index < groups.length; index += 1) v2OrderPages.push(await v2CreateOrderPage(groups[index], settings, index + 1, groups.length));
-  v2OrderPageIndex = 0; order.visualOrderCard = { signature: v2OrderSignature(cards), settings, generatedAt: new Date().toISOString() }; state.preferences ||= {}; state.preferences.visualOrderCardSettings = { format: settings.format, layout: settings.layout, heading: settings.heading, showStatus: settings.showStatus, status: settings.status, showSubtotal: settings.showSubtotal, showShipping: settings.showShipping, showTotal: settings.showTotal, showPayment: settings.showPayment }; saveSoon(); v2RenderOrderPreview();
+  v2OrderPageIndex = 0; order.visualOrderCard = { signature: v2OrderSignature(cards), settings, generatedAt: new Date().toISOString() }; state.preferences ||= {}; state.preferences.visualOrderCardSettings = { format: settings.format, layout: settings.layout, heading: settings.heading, showStatus: settings.showStatus, status: settings.status, showSubtotal: settings.showSubtotal, showShipping: settings.showShipping, showTotal: settings.showTotal, showPayment: settings.showPayment, showPaymentQrs: settings.showPaymentQrs }; saveSoon(); v2RenderOrderPreview();
 }
 function v2RenderOrderPreview() {
   $("#orderCardPreview").innerHTML = v2OrderPages.length ? `<button type="button" data-order-page-prev>‹</button><img src="${v2OrderPages[v2OrderPageIndex]}" alt="Order card page ${v2OrderPageIndex + 1}" /><button type="button" data-order-page-next>›</button>` : '<div class="empty-state"><p>Generate a preview before saving or copying.</p></div>';
@@ -177,7 +183,7 @@ function v2OpenOrderCards() {
   const settings = state.preferences?.visualOrderCardSettings || order.visualOrderCard?.settings || {};
   if (settings.format) $("#orderCardFormat").value = settings.format; if (settings.layout) $("#orderCardLayout").value = settings.layout; if (settings.heading) $("#orderCardHeading").value = settings.heading;
   $("#orderCardShowStatus").checked = Boolean(settings.showStatus); if (settings.status) $("#orderCardStatus").value = settings.status;
-  $("#orderCardShowSubtotal").checked = Boolean(settings.showSubtotal); $("#orderCardShowShipping").checked = Boolean(settings.showShipping); $("#orderCardShowTotal").checked = Boolean(settings.showTotal); $("#orderCardShowPayment").checked = Boolean(settings.showPayment);
+  $("#orderCardShowSubtotal").checked = Boolean(settings.showSubtotal); $("#orderCardShowShipping").checked = Boolean(settings.showShipping); $("#orderCardShowTotal").checked = Boolean(settings.showTotal); $("#orderCardShowPayment").checked = Boolean(settings.showPayment); $("#orderCardShowPaymentQrs").checked = Boolean(settings.showPaymentQrs);
   $("#orderCardStaleMessage").classList.toggle("hidden", !stale); $("#orderCardStaleMessage").textContent = stale ? "This order changed since the last visual card was generated. Create a fresh preview before sharing it." : "";
   v2OrderPages = []; v2RenderOrderPreview(); $("#visualOrderCardDialog").showModal();
 }

@@ -20,7 +20,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Uses a complete Card Sale Manager identity across the Windows icon, sidebar, light and dark themes, onboarding, walkthrough, Help guide, and default packing-slip design.
 - Formats each card into a copy-ready sale listing.
 - Matches local images year-folder first, including matching two-digit year folders, with editable Football/NFL, Basketball/NBA, or Hockey/NHL folder fallbacks when that sport is set and no valid year-folder match exists; then uses player names, card numbers, six- to eight-digit purchase-date codes (including `MMDDYY` such as `091326`), and duplicate sequence numbers.
-- Rescans lookup folders each time and revalidates files before attachment so stale indexes, renamed files, and unavailable cloud placeholders cannot create silent bad links.
+- Keeps a persistent local image index for faster matching across sales, refreshes a recent index in the background, and revalidates files before attachment so renamed files and unavailable cloud placeholders cannot create silent bad links.
 - Reports year- and sport-folder coverage before lookup, offers Set Sport and retry directly from Image Review, and fingerprints file contents so identical renamed copies cannot be attached to separate listings.
 - Auto-confirms a purchase-date filename match when that date identifies only one copy of the card; duplicate same-date copies still require review.
 - Hard-rejects an image when its valid filename date conflicts with the card purchase date, keys remembered matches by card, date, and image side, and assigns duplicate groups one-to-one instead of greedily reusing the strongest file.
@@ -49,6 +49,8 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Supports exact numeric card positioning in addition to custom drag-and-drop ordering.
 - Provides PWE and PMWT shipping options.
 - Generates buyer summaries and tracking messages from editable saved templates.
+- Creates completely independent one-off orders with unlimited custom line items, optional images, shipping rules, discounts, tax, credits, payments, packing slips, 4×6 labels, tracking, draft autosave, buyer history, and a dedicated archived-order history—without creating or affecting an active sale.
+- Adds optional PayPal, Venmo, Zelle, Apple Pay, and Cash App QR codes to visual buyer summaries.
 - Keeps sale data stored locally on the computer.
 - Saves and opens portable `.csm` workspace files from OneDrive or another synced folder while retaining the normal local recovery copy.
 - Detects newer cloud copies and active-file locks, creates verified portable-file backups, and opens potentially conflicting files read-only.
