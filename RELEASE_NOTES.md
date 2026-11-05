@@ -1,3 +1,11 @@
+# Card Sale Manager 2.3.1
+
+## Fixes
+
+- Makes the One-Off Orders window fit the available display height and gives the order list and order details independent scrolling, so packing and shipping controls always remain reachable.
+- Widens the Reusable Buyer Messages window, gives its list and editor independent scrolling, and prevents placeholder and action-button labels from wrapping across multiple lines.
+- Improves both layouts on smaller or shorter displays.
+
 # Card Sale Manager 2.3.0
 
 ## Highlights

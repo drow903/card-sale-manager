@@ -21,6 +21,8 @@ const guide = JSON.parse(fs.readFileSync(path.join(root, "assets", "help-guide-c
 ].forEach((id) => assert(html.includes(`id="${id}"`), `missing UI control: ${id}`));
 
 [".one-off-layout", ".one-off-item", ".payment-qr-row"].forEach((selector) => assert(css.includes(selector), `missing style: ${selector}`));
+assert(css.includes("height: min(900px, 90vh)") && css.includes(".one-off-detail { height: 100%") && css.includes("overflow-y: auto"), "one-off order list and details must remain independently scrollable");
+assert(css.includes(".dialog-card.large.quick-message-dialog") && css.includes("width:min(1280px") && css.includes("white-space:nowrap"), "reusable buyer messages must use a wide dialog with non-wrapping controls");
 assert(features.includes("paymentQrs"), "visual buyer summaries must render enabled payment QR codes");
 assert(renderer.includes('archiveReason: "closed"'), "closing a sale must move it to archived records");
 assert(renderer.includes("state.archivedOneOffOrders.unshift(order)"), "closed one-off orders must move to one-off history");
