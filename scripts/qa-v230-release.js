@@ -30,5 +30,15 @@ assert(renderer.includes("state.imageFolderIndex?.signature === signature"), "im
 assert(renderer.includes("data-dismiss-profile-po-box"), "buyer profiles must provide a direct PO-box warning dismiss control");
 assert(renderer.includes('`${normalizedAddress(profile.address)}|*`'), "PO-box dismissal must persist for the saved address");
 assert(guide.sections.some((section) => section.id === "one-off-orders"), "built-in guide must explain one-off orders");
+assert(html.includes('id="toast"') && html.includes('popover="manual"'), "notifications must use the browser top layer above modal dialogs");
+assert(renderer.includes('event.target.id === "addOneOffItemBtn"') && !renderer.includes('<form id="oneOffItemForm"'), "one-off items must use a reliable click action without nested forms");
+assert(renderer.includes("function renderViewContent") && renderer.includes("renderViewContent(view)"), "rendering must be limited to the active workspace");
+assert(renderer.includes("updateNotificationBadge()") && renderer.includes("updateArchivedSalesBadge()"), "hidden notification and archive screens must not be rebuilt during ordinary actions");
+assert(html.includes('id="orderCardShowImages"') && features.includes("settings.showImages === false"), "visual buyer summaries must support a one-page image-free list");
+assert(css.includes(".message-template-dialog") && css.includes(".message-field-reference"), "message templates must use the redesigned editor");
+assert(html.includes('id="selectVisibleClaims"') && html.includes('id="assignSelectedClaimsBtn"'), "Claims Desk must expose bulk selection and assignment controls");
+assert(renderer.includes("selectedClaimIds") && renderer.includes("function assignSelectedClaims"), "Claims Desk bulk assignment logic is missing");
+assert(renderer.includes("toastQueue") && renderer.includes("function showNextToast"), "notifications must queue rather than overwrite each other");
+assert(renderer.includes("oneOffItemSubmissionLocked") && features.includes('dataset.processing = "true"'), "repeat-click protection is missing from long-running actions");
 
 console.log("CSM 2.3 feature checks passed.");

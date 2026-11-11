@@ -797,7 +797,7 @@ function openLivePopout(payload) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    show: !process.env.CARD_SALE_CAPTURE_PATH,
+    show: !(process.env.CARD_SALE_CAPTURE_PATH || process.env.CARD_SALE_QA_REPORT),
     width: 1500,
     height: 940,
     minWidth: 1040,
@@ -824,7 +824,20 @@ function createWindow() {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
     }, 5000);
   });
-  if (process.env.CARD_SALE_CAPTURE_PATH) {
+  if (process.env.CARD_SALE_QA_REPORT) {
+    mainWindow.webContents.once("did-finish-load", async () => {
+      let report;
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        const source = await fs.promises.readFile(path.join(__dirname, "scripts", "qa-usability-renderer.js"), "utf8");
+        report = await mainWindow.webContents.executeJavaScript(`(async () => { ${source}\n })()`);
+      } catch (error) {
+        report = { passed: false, error: String(error?.stack || error) };
+      }
+      await fs.promises.writeFile(process.env.CARD_SALE_QA_REPORT, JSON.stringify(report, null, 2));
+      allowWindowClose = true; app.quit();
+    });
+  } else if (process.env.CARD_SALE_CAPTURE_PATH) {
     mainWindow.webContents.once("did-finish-load", async () => {
       await new Promise((resolve) => setTimeout(resolve, 2400));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();

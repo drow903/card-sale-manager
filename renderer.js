@@ -84,6 +84,8 @@ let undoStack = [];
 let selectedListingIds = new Set();
 let listingSelectionAnchor = "";
 let selectedMatchIds = new Set();
+let selectedClaimIds = new Set();
+let claimBulkBuyerName = "";
 let availableUpdate = null;
 let liveIndex = 0;
 let profileQuery = "";
@@ -113,6 +115,17 @@ let selectedQuickMessageId = "builtin-orderSummary";
 let quickMessageDraft = null;
 let selectedOneOffOrderId = "";
 let oneOffQuery = "";
+let toastQueue = [];
+let toastShowing = false;
+let oneOffItemSubmissionLocked = false;
+let derivedRenderContext = null;
+const cardSearchTextCache = new WeakMap();
+const scheduledUiTasks = new Map();
+let stateRevision = 0;
+let lastSavedRevision = -1;
+let saveIdleHandle = null;
+let pendingSaleSnapshots = [];
+let snapshotIdleHandle = null;
 const runtimeErrors = [];
 const scrubDiagnosticText = (value) => String(value ?? "").replace(/file:\/{2,3}[^\s)]+/gi, "[local path]").replace(/[A-Za-z]:[\\/][^\n\r]*/g, "[local path]").slice(0, 2000);
 window.addEventListener("error", (event) => { runtimeErrors.push({ at: new Date().toISOString(), type: "error", message: scrubDiagnosticText(event.message || "Unknown renderer error").slice(0, 500) }); if (runtimeErrors.length > 25) runtimeErrors.shift(); });
@@ -123,6 +136,36 @@ const pwePreviewSheet = typeof CSSStyleSheet !== "undefined" ? new CSSStyleSheet
 if (pwePreviewSheet && typeof document !== "undefined" && document.adoptedStyleSheets) document.adoptedStyleSheets = [...document.adoptedStyleSheets, pwePreviewSheet];
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
+
+function scheduleUiTask(key, work, delay = 120) {
+  clearTimeout(scheduledUiTasks.get(key));
+  scheduledUiTasks.set(key, setTimeout(() => { scheduledUiTasks.delete(key); work(); }, delay));
+}
+
+function cardSearchText(card) {
+  const signature = [...Object.values(card).filter((value) => typeof value !== "object"), ...Object.values(card.customFields || {})].join("\u0001");
+  const cached = cardSearchTextCache.get(card);
+  if (cached?.signature === signature) return cached.text;
+  const text = signature.toLowerCase(); cardSearchTextCache.set(card, { signature, text }); return text;
+}
+
+function buildDerivedSaleData(sale = activeSale()) {
+  const duplicateGroups = new Map(); const datedDuplicateGroups = new Map(); const buyerCards = new Map();
+  sale.cards.forEach((card) => {
+    const key = normalizedCardKey(card); const datedKey = `${key}|${normalizePurchaseDate(card.purchaseDate)}`;
+    if (!duplicateGroups.has(key)) duplicateGroups.set(key, []); duplicateGroups.get(key).push(card);
+    if (!datedDuplicateGroups.has(datedKey)) datedDuplicateGroups.set(datedKey, []); datedDuplicateGroups.get(datedKey).push(card);
+    if (cardInOrder(card) && card.buyer) { if (!buyerCards.has(card.buyer)) buyerCards.set(card.buyer, []); buyerCards.get(card.buyer).push(card); }
+  });
+  const buyerNames = [...new Set([...buyerCards.keys(), ...Object.entries(sale.orders || {}).filter(([, order]) => (order?.addOns || []).length).map(([buyer]) => buyer)])].filter(Boolean).sort((a, b) => a.localeCompare(b));
+  return { sale, duplicateGroups, datedDuplicateGroups, buyerCards, buyerNames };
+}
+
+function withDerivedSaleData(sale, work) {
+  if (derivedRenderContext?.sale === sale) return work();
+  const previous = derivedRenderContext; derivedRenderContext = buildDerivedSaleData(sale);
+  try { return work(); } finally { derivedRenderContext = previous; }
+}
 
 const BUILT_IN_CARD_FIELDS = [
   ["ref", "Reference"], ["buyer", "Buyer"], ["year", "Year"], ["set", "Brand"], ["name", "Player"], ["number", "Card number"],
@@ -214,11 +257,31 @@ function saleSnapshotData(sale) {
   return data;
 }
 
+function commitPendingSnapshot(version) {
+  if (!version?.pending || !version._serialized) return version;
+  version.data = JSON.parse(version._serialized); version.pending = false; delete version._serialized;
+  return version;
+}
+
+function flushPendingSnapshots() {
+  if (snapshotIdleHandle != null && typeof cancelIdleCallback === "function") cancelIdleCallback(snapshotIdleHandle);
+  snapshotIdleHandle = null; pendingSaleSnapshots.splice(0).forEach(commitPendingSnapshot);
+}
+
+function scheduleSnapshotCommit() {
+  if (snapshotIdleHandle != null) return;
+  const commit = () => { snapshotIdleHandle = null; pendingSaleSnapshots.splice(0).forEach(commitPendingSnapshot); };
+  snapshotIdleHandle = typeof requestIdleCallback === "function" ? requestIdleCallback(commit, { timeout: 700 }) : setTimeout(commit, 0);
+}
+
 function snapshotSale(label, sale = activeSale()) {
   if (!sale) return;
   sale.versions ||= [];
-  const version = { id: uid(), at: new Date().toISOString(), label, data: saleSnapshotData(sale) };
+  const source = { ...sale }; delete source.versions;
+  const version = { id: uid(), at: new Date().toISOString(), label, data: null, pending: true };
+  Object.defineProperty(version, "_serialized", { value: JSON.stringify(source), configurable: true, writable: true, enumerable: false });
   sale.versions.push(version);
+  pendingSaleSnapshots.push(version); scheduleSnapshotCommit();
   undoStack.push({ saleId: sale.id, versionId: version.id });
   if (sale.versions.length > 25) sale.versions.splice(0, sale.versions.length - 25);
 }
@@ -514,13 +577,13 @@ function imageMemoryKey(card, slot = "single") {
 
 function matchingDuplicateInfo(card, sale = activeSale()) {
   const date = normalizePurchaseDate(card?.purchaseDate);
-  const matches = sale.cards.filter((item) => normalizedCardKey(item) === normalizedCardKey(card) && normalizePurchaseDate(item.purchaseDate) === date);
+  const matches = derivedRenderContext?.sale === sale ? (derivedRenderContext.datedDuplicateGroups.get(`${normalizedCardKey(card)}|${date}`) || []) : sale.cards.filter((item) => normalizedCardKey(item) === normalizedCardKey(card) && normalizePurchaseDate(item.purchaseDate) === date);
   return { index: Math.max(0, matches.findIndex((item) => item.id === card.id)), total: Math.max(1, matches.length) };
 }
 
 function duplicateInfo(card, sale = activeSale()) {
   if (!card?.id) return { index: 0, total: 1, label: "" };
-  const matches = sale.cards.filter((item) => normalizedCardKey(item) === normalizedCardKey(card));
+  const matches = derivedRenderContext?.sale === sale ? (derivedRenderContext.duplicateGroups.get(normalizedCardKey(card)) || []) : sale.cards.filter((item) => normalizedCardKey(item) === normalizedCardKey(card));
   const index = matches.findIndex((item) => item.id === card.id);
   return { index, total: matches.length, label: matches.length > 1 ? `(${index + 1} of ${matches.length})` : "" };
 }
@@ -853,19 +916,27 @@ function shippingAmount(order, sale = activeSale()) {
 }
 
 function cardsForBuyer(buyer) {
-  return activeSale().cards.filter((card) => card.buyer === buyer && cardInOrder(card));
+  const sale = activeSale();
+  if (derivedRenderContext?.sale === sale) return derivedRenderContext.buyerCards.get(buyer) || [];
+  return sale.cards.filter((card) => card.buyer === buyer && cardInOrder(card));
 }
 
 function buyers() {
   const sale = activeSale();
+  if (derivedRenderContext?.sale === sale) return derivedRenderContext.buyerNames;
   return [...new Set([...sale.cards.filter(cardInOrder).map((card) => card.buyer), ...Object.entries(sale.orders || {}).filter(([, order]) => (order?.addOns || []).length).map(([buyer]) => buyer)])].filter(Boolean).sort((a, b) => a.localeCompare(b));
 }
 
-async function saveNow() {
+async function saveNow({ force = true } = {}) {
   clearTimeout(saveTimer);
   saveTimer = null;
+  if (saveIdleHandle != null && typeof cancelIdleCallback === "function") cancelIdleCallback(saveIdleHandle);
+  saveIdleHandle = null; flushPendingSnapshots();
+  if (!force && lastSavedRevision === stateRevision) return { skipped: true };
   state.activeSaleId = activeSale().id;
+  const savingRevision = stateRevision;
   const result = await window.cardSale.save(state);
+  lastSavedRevision = savingRevision;
   if (result?.csm?.document) portableDocument = result.csm.document;
   const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   if (result?.csm?.conflict) {
@@ -883,17 +954,23 @@ async function saveNow() {
 }
 
 function saveSoon() {
+  stateRevision += 1;
   $("#saveText").textContent = "Saving…";
   $("#saveDot").style.background = "#f0b44b";
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
+  if (saveIdleHandle != null && typeof cancelIdleCallback === "function") cancelIdleCallback(saveIdleHandle);
+  saveIdleHandle = null;
+  saveTimer = setTimeout(() => {
+    const run = async () => {
     try {
-      await saveNow();
+      await saveNow({ force: false });
     } catch (error) {
       $("#saveText").textContent = "Save failed — changes still open";
       $("#saveDot").style.background = "#d4584e";
     }
-  }, 250);
+    };
+    if (typeof requestIdleCallback === "function") saveIdleHandle = requestIdleCallback(() => { saveIdleHandle = null; run(); }, { timeout: 700 }); else run();
+  }, 600);
 }
 
 function renderCsmFileManager(refreshRecent = false) {
@@ -1019,8 +1096,15 @@ async function packageCsmWorkspace() {
 }
 
 function toast(message) {
-  const node = $("#toast");
   const text = String(message || "Something needs attention.");
+  if (toastQueue.at(-1) !== text) toastQueue.push(text);
+  showNextToast();
+}
+
+function showNextToast() {
+  if (toastShowing || !toastQueue.length) return;
+  const node = $("#toast");
+  const text = toastQueue.shift(); toastShowing = true;
   const beginnerHelp = [
     [/choose a primary image folder first|no primary folder/i, "Open Image lookup folders and choose the folder that contains your card images."],
     [/already linked|already attached|already in use/i, "One image can belong to only one listing in a sale. Choose a different file for this card."],
@@ -1031,9 +1115,14 @@ function toast(message) {
     [/select at least|no cards were selected/i, "Check the boxes beside the cards you want, then try the action again."]
   ].find(([pattern]) => pattern.test(text));
   node.innerHTML = `${escapeHtml(text)}${isBeginnerMode() && beginnerHelp ? `<div class="plain-error">What to do: ${escapeHtml(beginnerHelp[1])}</div>` : ""}`;
+  clearTimeout(node._hideTimer);
+  if (typeof node.showPopover === "function" && !node.matches(":popover-open")) node.showPopover();
   node.classList.add("show");
   clearTimeout(node._timer);
-  node._timer = setTimeout(() => node.classList.remove("show"), isBeginnerMode() && beginnerHelp ? 5200 : 2600);
+  node._timer = setTimeout(() => {
+    node.classList.remove("show");
+    node._hideTimer = setTimeout(() => { if (typeof node.hidePopover === "function" && node.matches(":popover-open") && !node.classList.contains("show")) node.hidePopover(); toastShowing = false; showNextToast(); }, 220);
+  }, isBeginnerMode() && beginnerHelp ? 5200 : 2600);
 }
 
 function renumberSidebar() {
@@ -1144,26 +1233,34 @@ function formatLine(card, template = activeSale().template) {
   return line;
 }
 
+function renderViewContent(view = uiState().activeView || $$(".view.active")[0]?.id?.replace(/View$/, "") || "command") {
+  const renderers = {
+    command: renderCommandCenter,
+    sale: () => { renderStats(); renderListings(); renderImages(); },
+    catalog: renderCatalog,
+    claims: renderClaims,
+    offers: renderOffers,
+    orders: renderOrders,
+    packing: renderPacking,
+    pulling: renderPulling,
+    notifications: renderNotifications,
+    dashboard: renderDashboard,
+    live: renderLiveSale,
+    buyers: renderBuyerProfiles,
+    health: renderHealthCheck,
+    help: () => renderDetailedGuide()
+  };
+  renderers[view]?.();
+}
+
 function render() {
   const sale = activeSale();
   $("#viewTitle").textContent = sale.name;
   $("#saleSelect").innerHTML = state.sales.map((item) => `<option value="${item.id}" ${item.id === sale.id ? "selected" : ""}>${escapeHtml(item.name)} (${item.cards.length} cards)</option>`).join("");
-  renderCommandCenter();
-  renderStats();
-  renderListings();
-  renderImages();
-  renderCatalog();
-  renderClaims();
-  renderOffers();
-  renderOrders();
-  renderPacking();
-  renderPulling();
-  renderNotifications();
-  renderDashboard();
-  renderLiveSale();
-  renderBuyerProfiles();
-  renderArchivedSales();
-  renderHealthCheck();
+  const view = uiState().activeView || $$(".view.active")[0]?.id?.replace(/View$/, "") || "command";
+  renderViewContent(view);
+  if (view !== "notifications") updateNotificationBadge();
+  updateArchivedSalesBadge();
   applyDisplayPreferences();
   renderCsmFileManager(false);
   renumberSidebar();
@@ -1272,7 +1369,8 @@ function visibleNotifications({ includeSnoozed = showSnoozedNotifications } = {}
   return [...groups.entries()].map(([key, children]) => children.length === 1 ? children[0] : ({ ...children[0], id: `group:${key}`, childIds: children.map((item) => item.id), title: `${children.length} related: ${children[0].title}`, detail: children.slice(0, 3).map((item) => item.detail).join(" · ") + (children.length > 3 ? ` · +${children.length - 3} more` : ""), urgent: children.some((item) => item.urgent), priority: children.some((item) => item.priority === "blocking") ? "blocking" : "attention" }));
 }
 
-function renderNotifications() {
+function renderNotifications() { return withDerivedSaleData(activeSale(), renderNotificationsContent); }
+function renderNotificationsContent() {
   if (!$("#notificationList")) return;
   const all = visibleNotifications();
   const categories = ["blocking", "attention", "info"].filter((priority) => all.some((item) => item.priority === priority));
@@ -1285,6 +1383,12 @@ function renderNotifications() {
   const activeCount = visibleNotifications({ includeSnoozed: false }).length;
   $("#notificationNavCount").textContent = activeCount; $("#notificationNavCount").classList.toggle("hidden", activeCount === 0);
   $("#showSnoozedNotificationsBtn").textContent = showSnoozedNotifications ? "Hide snoozed" : "Show snoozed";
+}
+
+function updateNotificationBadge() {
+  const badge = $("#notificationNavCount"); if (!badge) return;
+  const activeCount = visibleNotifications({ includeSnoozed: false }).length;
+  badge.textContent = activeCount; badge.classList.toggle("hidden", activeCount === 0);
 }
 
 function openNotification(id) {
@@ -1323,7 +1427,8 @@ function sortedSaleCards(sale = activeSale(), cards = sale.cards) {
   });
 }
 
-function renderListings() {
+function renderListings() { return withDerivedSaleData(activeSale(), renderListingsContent); }
+function renderListingsContent() {
   const sale = activeSale();
   const columns = new Set(workspaceColumns());
   sale.sortMode ||= "spreadsheet";
@@ -1338,7 +1443,7 @@ function renderListings() {
       || (state.filter === "claimed" && card.status !== "available")
       || (state.filter === "with-image" && cardHasRequiredImages(card, sale))
       || (state.filter === "missing-image" && !cardHasRequiredImages(card, sale)));
-    return filterMatch && [...Object.values(card).filter((value) => typeof value !== "object"), ...Object.values(card.customFields || {})].join(" ").toLowerCase().includes(query);
+    return filterMatch && cardSearchText(card).includes(query);
   }));
   const validIds = new Set(sale.cards.map((card) => card.id));
   selectedListingIds = new Set([...selectedListingIds].filter((id) => validIds.has(id)));
@@ -1370,13 +1475,14 @@ function filteredListingCards() {
   return sortedSaleCards(activeSale(), activeSale().cards.filter((card) => {
     const hidden = Boolean(card.hiddenAfterCopy);
     const filterMatch = state.filter === "copied" ? hidden : !hidden && (state.filter === "all" || (state.filter === "available" && card.status === "available") || (state.filter === "claimed" && card.status !== "available") || (state.filter === "with-image" && cardHasRequiredImages(card)) || (state.filter === "missing-image" && !cardHasRequiredImages(card)));
-    return filterMatch && [...Object.values(card).filter((value) => typeof value !== "object"), ...Object.values(card.customFields || {})].join(" ").toLowerCase().includes(query);
+    return filterMatch && cardSearchText(card).includes(query);
   }));
 }
 
 function resetListingView() {
   const view = saleViewState(); state.filter = view.filter || "all"; state.query = view.query || ""; state.claimQuery = view.claimQuery || "";
   selectedListingIds = new Set(view.selectedListingIds || []);
+  selectedClaimIds.clear(); claimBulkBuyerName = "";
   const search = $("#cardSearch");
   if (search) search.value = state.query;
   if ($("#claimSearch")) $("#claimSearch").value = state.claimQuery;
@@ -1477,24 +1583,70 @@ async function hydrateThumbnails(root = document) {
   await Promise.all(images.map(async (image) => { const source = image.dataset.thumbPath; const thumb = await window.cardSale.thumbnail(source).catch(() => ""); if (thumb && image.isConnected) image.src = fileUrl(thumb); image.dataset.thumbReady = "true"; }));
 }
 
-function renderClaims() {
+function claimRowHtml(card, sale = activeSale()) {
+  const effectivePrice = Number(card.offerPrice ?? card.claimPrice ?? card.price); const belowCost = Number(card.purchasePrice) > 0 && effectivePrice < Number(card.purchasePrice); const claimType = card.claimType || (card.offerPrice != null ? "offer" : "claim");
+  return `<tr class="${card.id === lastClaimCardId ? "claim-row-active" : ""} ${selectedClaimIds.has(card.id) ? "claim-row-selected" : ""}" data-claim-row="${card.id}"><td class="claim-select-column"><input type="checkbox" data-select-claim="${card.id}" ${selectedClaimIds.has(card.id) ? "checked" : ""} aria-label="Select ${escapeHtml(card.ref)} ${escapeHtml(card.name)}" /></td><td class="ref">${escapeHtml(card.ref)}</td><td><div class="card-title">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card, sale).label)}</div><div class="card-line">${escapeHtml(card.condition || "No grade")}${card.notes && !/^none$/i.test(card.notes) ? ` · ${escapeHtml(card.notes)}` : ""}</div></td><td><strong class="money">${money(card.price)}</strong><small class="cost-note">Cost ${card.purchasePrice !== "" && card.purchasePrice != null ? money(card.purchasePrice) : "—"}</small><small class="cost-note">Purchased ${displayPurchaseDate(card.purchaseDate)}</small></td><td><input type="checkbox" data-claim-type="claim" ${claimType === "claim" ? "checked" : ""} aria-label="Claim" /></td><td><input type="checkbox" data-claim-type="offer" ${claimType === "offer" ? "checked" : ""} aria-label="Offer" /></td><td><input class="offer-input ${belowCost ? "below-cost" : ""}" data-claim-offer type="number" min="0" step="0.01" value="${card.offerPrice ?? ""}" placeholder="${Number(card.price || 0).toFixed(2)}" ${claimType === "claim" ? "disabled" : ""} />${belowCost ? `<small class="cost-warning">Below cost</small>` : ""}</td><td><input class="buyer-assignment" data-claim-buyer value="${escapeHtml(card.buyer || "")}" list="buyerNames" placeholder="Buyer name" /><input class="claim-note-input" data-claim-note value="${escapeHtml(card.claimNote || "")}" placeholder="Claim note" /></td><td><div class="row-actions"><button class="row-action" data-assign-card="${card.id}">${card.buyer ? "Save / move" : "Assign"}</button>${card.buyer ? `<button class="row-action danger-link" data-clear-claim="${card.id}">Clear</button>` : ""}</div></td></tr>`;
+}
+
+function claimActivityRecords(sale = activeSale()) {
+  const legacyClaims = sale.cards.filter((card) => card.claimedAt).map((card) => ({ id: `legacy-${card.id}`, at: card.claimedAt, type: card.claimType || "claim", message: `${card.claimType === "offer" ? "Offer" : "Claim"} recorded for ${card.ref} · ${card.name}`, cardId: card.id, buyer: card.buyer }));
+  return (sale.audit?.length ? sale.audit : legacyClaims).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
+}
+
+function renderClaimTimeline(sale = activeSale()) {
+  const claims = claimActivityRecords(sale);
+  $("#claimTimeline").innerHTML = claims.length ? claims.map((item) => `<button type="button" class="timeline-item timeline-link" ${item.cardId ? `data-timeline-card="${item.cardId}"` : ""}><strong>${escapeHtml(item.message)}</strong><p>${escapeHtml(item.buyer || item.type || "Activity")} · ${new Date(item.at).toLocaleString()}</p></button>`).join("") : `<div class="empty-state"><h3>No activity recorded</h3><p>Claims, offers and changes will appear here.</p></div>`;
+}
+
+function refreshClaimRow(cardId) {
+  const sale = activeSale(); const card = sale.cards.find((item) => item.id === cardId); const row = $(`[data-claim-row="${CSS.escape(cardId)}"]`, $("#claimRows"));
+  if (!card || !cardSearchText(card).includes(String(state.claimQuery || "").toLowerCase())) row?.remove();
+  else if (row) row.outerHTML = claimRowHtml(card, sale);
+  $("#buyerNames").innerHTML = allBuyerNames().flatMap((buyer) => [buyer, ...buyerProfile(buyer).aliases]).map((buyer) => `<option value="${escapeHtml(buyer)}"></option>`).join("");
+  renderClaimTimeline(sale); updateClaimBulkBar(); updateNotificationBadge();
+}
+
+function renderClaims() { return withDerivedSaleData(activeSale(), renderClaimsContent); }
+function renderClaimsContent() {
   window.CSMV2?.updateCaptureBadge?.();
   const sale = activeSale();
-  const legacyClaims = sale.cards.filter((card) => card.claimedAt).map((card) => ({ id: `legacy-${card.id}`, at: card.claimedAt, type: card.claimType || "claim", message: `${card.claimType === "offer" ? "Offer" : "Claim"} recorded for ${card.ref} · ${card.name}`, cardId: card.id, buyer: card.buyer }));
-  const claims = (sale.audit?.length ? sale.audit : legacyClaims).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
   $("#buyerNames").innerHTML = allBuyerNames().flatMap((buyer) => [buyer, ...buyerProfile(buyer).aliases]).map((buyer) => `<option value="${escapeHtml(buyer)}"></option>`).join("");
   const query = String(state.claimQuery || "").toLowerCase();
-  const cards = sale.cards.filter((card) => [...Object.values(card).filter((value) => typeof value !== "object"), ...Object.values(card.customFields || {})].join(" ").toLowerCase().includes(query));
-  $("#claimRows").innerHTML = cards.length ? cards.map((card) => {
-    const effectivePrice = Number(card.offerPrice ?? card.claimPrice ?? card.price);
-    const belowCost = Number(card.purchasePrice) > 0 && effectivePrice < Number(card.purchasePrice);
-    const claimType = card.claimType || (card.offerPrice != null ? "offer" : "claim");
-    return `<tr class="${card.id === lastClaimCardId ? "claim-row-active" : ""}" data-claim-row="${card.id}"><td class="ref">${escapeHtml(card.ref)}</td><td><div class="card-title">${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(numberLabel(card))} ${escapeHtml(card.name)} ${escapeHtml(duplicateInfo(card).label)}</div><div class="card-line">${escapeHtml(card.condition || "No grade")}${card.notes && !/^none$/i.test(card.notes) ? ` · ${escapeHtml(card.notes)}` : ""}</div></td><td><strong class="money">${money(card.price)}</strong><small class="cost-note">Cost ${card.purchasePrice !== "" && card.purchasePrice != null ? money(card.purchasePrice) : "—"}</small><small class="cost-note">Purchased ${displayPurchaseDate(card.purchaseDate)}</small></td><td><input type="checkbox" data-claim-type="claim" ${claimType === "claim" ? "checked" : ""} aria-label="Claim" /></td><td><input type="checkbox" data-claim-type="offer" ${claimType === "offer" ? "checked" : ""} aria-label="Offer" /></td><td><input class="offer-input ${belowCost ? "below-cost" : ""}" data-claim-offer type="number" min="0" step="0.01" value="${card.offerPrice ?? ""}" placeholder="${Number(card.price || 0).toFixed(2)}" ${claimType === "claim" ? "disabled" : ""} />${belowCost ? `<small class="cost-warning">Below cost</small>` : ""}</td><td><input class="buyer-assignment" data-claim-buyer value="${escapeHtml(card.buyer || "")}" list="buyerNames" placeholder="Buyer name" /><input class="claim-note-input" data-claim-note value="${escapeHtml(card.claimNote || "")}" placeholder="Claim note" /></td><td><div class="row-actions"><button class="row-action" data-assign-card="${card.id}">${card.buyer ? "Save / move" : "Assign"}</button>${card.buyer ? `<button class="row-action danger-link" data-clear-claim="${card.id}">Clear</button>` : ""}</div></td></tr>`;
-  }).join("") : `<tr><td colspan="8"><div class="empty-state"><h3>No cards are ready for claims</h3><p>Import or add cards in Sale Workspace first.</p><button type="button" class="primary" data-empty-action="sale">Open Sale Workspace</button></div></td></tr>`;
-  $("#claimTimeline").innerHTML = claims.length ? claims.map((item) => `<button type="button" class="timeline-item timeline-link" ${item.cardId ? `data-timeline-card="${item.cardId}"` : ""}><strong>${escapeHtml(item.message)}</strong><p>${escapeHtml(item.buyer || item.type || "Activity")} · ${new Date(item.at).toLocaleString()}</p></button>`).join("") : `<div class="empty-state"><h3>No activity recorded</h3><p>Claims, offers and changes will appear here.</p></div>`;
+  const cards = sale.cards.filter((card) => cardSearchText(card).includes(query));
+  selectedClaimIds = new Set([...selectedClaimIds].filter((id) => sale.cards.some((card) => card.id === id)));
+  $("#claimRows").innerHTML = cards.length ? cards.map((card) => claimRowHtml(card, sale)).join("") : `<tr><td colspan="9"><div class="empty-state"><h3>No cards are ready for claims</h3><p>Import or add cards in Sale Workspace first.</p><button type="button" class="primary" data-empty-action="sale">Open Sale Workspace</button></div></td></tr>`;
+  updateClaimBulkBar(cards);
+  renderClaimTimeline(sale);
   $("#claimActivityWidth").value = Math.max(260, Math.min(520, Number(state.preferences?.claimActivityWidth || 330)));
   $("#toggleClaimActivityBtn").textContent = state.preferences?.claimActivityCollapsed ? "Expand" : "Collapse";
   requestAnimationFrame(() => { if (lastClaimCardId) $(`[data-claim-row="${CSS.escape(lastClaimCardId)}"]`)?.scrollIntoView({ block: "nearest" }); });
+}
+
+function updateClaimBulkBar(visibleCards = activeSale().cards.filter((card) => cardSearchText(card).includes(String(state.claimQuery || "").toLowerCase()))) {
+  const visibleIds = visibleCards.map((card) => card.id); const selectedVisible = visibleIds.filter((id) => selectedClaimIds.has(id)).length;
+  const selectAll = $("#selectVisibleClaims"); if (selectAll) { selectAll.checked = Boolean(visibleIds.length && selectedVisible === visibleIds.length); selectAll.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length; }
+  if ($("#claimSelectionCount")) $("#claimSelectionCount").textContent = `${selectedClaimIds.size} selected`;
+  if ($("#claimBulkBuyer") && document.activeElement !== $("#claimBulkBuyer")) $("#claimBulkBuyer").value = claimBulkBuyerName;
+  if ($("#assignSelectedClaimsBtn")) $("#assignSelectedClaimsBtn").disabled = !selectedClaimIds.size || !claimBulkBuyerName.trim();
+  if ($("#clearClaimSelectionBtn")) $("#clearClaimSelectionBtn").disabled = !selectedClaimIds.size;
+}
+
+function assignSelectedClaims() {
+  const buyer = canonicalBuyerName(claimBulkBuyerName); if (!buyer) return toast("Enter the buyer receiving the selected cards.");
+  const cards = activeSale().cards.filter((card) => selectedClaimIds.has(card.id)); if (!cards.length) return toast("Select at least one card first.");
+  if (cards.some((card) => unresolvedBundleForCard(card))) return toast("Manage bundled cards through the Offers tab before assigning them in bulk.");
+  const duplicate = !state.buyerProfiles?.[buyer] && likelyDuplicateBuyer(buyer);
+  if (duplicate && !window.confirm(`“${buyer}” looks similar to existing buyer “${duplicate}”.\n\nChoose OK to assign ${buyer} anyway, or Cancel and select ${duplicate}.`)) return;
+  const replacements = cards.filter((card) => (card.buyer && card.buyer !== buyer) || card.claimType === "offer");
+  if (replacements.length && !window.confirm(`${replacements.length} selected card${replacements.length === 1 ? " has" : "s have"} existing buyer or offer activity.\n\nAssigning these cards to ${buyer} will replace that activity with full-price claims. Continue?`)) return;
+  snapshotSale(`Before assigning ${cards.length} cards to ${buyer}`);
+  const now = new Date().toISOString();
+  cards.forEach((card) => {
+    const previousBuyer = card.buyer; card.buyer = buyer; card.claimType = "claim"; card.status = "claimed"; card.claimPrice = Number(card.price); card.claimedAt ||= now; card.claimUpdatedAt = now;
+    delete card.offerPrice; delete card.offerStatus; delete card.counterPrice; delete card.offerReceivedAt; delete card.offerAcceptedAt; delete card.counteredAt;
+    recordAudit("claim", previousBuyer && previousBuyer !== buyer ? `Moved ${card.ref} · ${card.name} from ${previousBuyer} to ${buyer}` : `Claim recorded for ${card.ref} · ${card.name}`, { cardId: card.id, buyer });
+  });
+  orderFor(buyer); state.selectedBuyer = buyer; selectedClaimIds.clear(); claimBulkBuyerName = buyer; saveSoon(); render(); toast(`${cards.length} card${cards.length === 1 ? "" : "s"} assigned to ${buyer}.`);
 }
 
 function offerDecisionPrice(card) {
@@ -1564,7 +1716,8 @@ function renderOffers() {
   }).join("");
 }
 
-function renderOrders() {
+function renderOrders() { return withDerivedSaleData(activeSale(), renderOrdersContent); }
+function renderOrdersContent() {
   const allNames = buyers();
   const settings = orderDeskSettings();
   $("#orderSearch").value = settings.query;
@@ -1632,7 +1785,7 @@ function renderOneOffDetail() {
     ${activeBuyerOrder ? `<div class="order-lock-notice warning"><strong>This buyer also has an active sale order.</strong><span>This one-off remains separate. Confirm that is what you intend before collecting payment.</span></div>` : ""}
     ${locked ? `<div class="order-lock-notice"><strong>This shipped order is locked.</strong><span>Reopen it before correcting items, prices, shipping, address, or payment details.</span><button type="button" class="secondary" id="reopenOneOffCorrectionBtn">Reopen for correction</button></div>` : ""}
     <div class="one-off-form-grid"><section class="one-off-main"><div class="two-columns"><label>Buyer<input id="oneOffBuyer" list="buyerNames" value="${escapeHtml(order.buyer)}" placeholder="Choose or enter a buyer" ${locked ? "disabled" : ""} /></label><label>Reference<input value="${escapeHtml(order.reference)}" readonly /></label></div><label>Mailing address<textarea id="oneOffAddress" rows="3" ${locked ? "disabled" : ""}>${escapeHtml(address)}</textarea></label>${oneOffAddressWarnings.length ? `<div class="address-warnings">${oneOffAddressWarnings.map((warning) => `<span>⚑ ${escapeHtml(warning)}</span>`).join("")}</div>` : ""}
-      <section class="one-off-items"><div class="panel-header compact"><div><h3>Line items</h3><p>Add as many unrelated items as needed.</p></div></div><div class="one-off-item-list">${order.items.map((item) => `<article class="one-off-item ${item.packed ? "packed" : ""}"><label class="one-off-pack"><input type="checkbox" data-one-off-pack="${item.id}" ${item.packed ? "checked" : ""} ${locked ? "disabled" : ""} /> Packed</label>${item.imagePath ? `<img src="${fileUrl(item.imagePath)}" alt="" />` : `<div class="placeholder-thumb">No image</div>`}<div><strong>${escapeHtml(item.description)}</strong><small>${item.quantity} × ${money(item.price)}${item.imagePath ? ` · ${escapeHtml(fileName(item.imagePath))}` : ""}</small><label class="check-label"><input type="checkbox" data-one-off-show-image="${item.id}" ${item.includeImage === false ? "" : "checked"} ${locked ? "disabled" : ""} /> Show image on summaries and slips</label></div><strong>${money(item.quantity * item.price)}</strong><div class="row-actions"><button type="button" class="row-action" data-one-off-image="${item.id}" ${locked ? "disabled" : ""}>${item.imagePath ? "Replace image" : "Add image"}</button><button type="button" class="row-action" data-one-off-edit="${item.id}" ${locked ? "disabled" : ""}>Edit</button><button type="button" class="row-action danger-link" data-one-off-remove="${item.id}" ${locked ? "disabled" : ""}>Remove</button></div></article>`).join("") || `<p class="muted">No line items yet.</p>`}</div><form id="oneOffItemForm" class="add-on-form"><input id="oneOffItemDescription" placeholder="Item description" ${locked ? "disabled" : ""} /><input id="oneOffItemQuantity" type="number" min="1" step="1" value="1" title="Quantity" ${locked ? "disabled" : ""} /><input id="oneOffItemPrice" type="number" min="0" step="0.01" placeholder="Unit price" ${locked ? "disabled" : ""} /><button type="submit" class="primary" ${locked ? "disabled" : ""}>Add item</button></form></section>
+      <section class="one-off-items"><div class="panel-header compact"><div><h3>Line items</h3><p>Add as many unrelated items as needed.</p></div></div><div class="one-off-item-list">${order.items.map((item) => `<article class="one-off-item ${item.packed ? "packed" : ""}"><label class="one-off-pack"><input type="checkbox" data-one-off-pack="${item.id}" ${item.packed ? "checked" : ""} ${locked ? "disabled" : ""} /> Packed</label>${item.imagePath ? `<img src="${fileUrl(item.imagePath)}" alt="" />` : `<div class="placeholder-thumb">No image</div>`}<div><strong>${escapeHtml(item.description)}</strong><small>${item.quantity} × ${money(item.price)}${item.imagePath ? ` · ${escapeHtml(fileName(item.imagePath))}` : ""}</small><label class="check-label"><input type="checkbox" data-one-off-show-image="${item.id}" ${item.includeImage === false ? "" : "checked"} ${locked ? "disabled" : ""} /> Show image on summaries and slips</label></div><strong>${money(item.quantity * item.price)}</strong><div class="row-actions"><button type="button" class="row-action" data-one-off-image="${item.id}" ${locked ? "disabled" : ""}>${item.imagePath ? "Replace image" : "Add image"}</button><button type="button" class="row-action" data-one-off-edit="${item.id}" ${locked ? "disabled" : ""}>Edit</button><button type="button" class="row-action danger-link" data-one-off-remove="${item.id}" ${locked ? "disabled" : ""}>Remove</button></div></article>`).join("") || `<p class="muted">No line items yet.</p>`}</div><div id="oneOffItemForm" class="add-on-form"><input id="oneOffItemDescription" placeholder="Item description" ${locked ? "disabled" : ""} /><input id="oneOffItemQuantity" type="number" min="1" step="1" value="1" title="Quantity" ${locked ? "disabled" : ""} /><input id="oneOffItemPrice" type="number" min="0" step="0.01" placeholder="Unit price" ${locked ? "disabled" : ""} /><button id="addOneOffItemBtn" type="button" class="primary" ${locked ? "disabled" : ""}>Add item</button></div></section>
       <div class="packing-notes"><label>Internal notes<textarea id="oneOffNotes" rows="3" ${locked ? "disabled" : ""}>${escapeHtml(order.notes)}</textarea></label><label>Buyer-facing packing-slip note<textarea id="oneOffSlipNote" rows="3" ${locked ? "disabled" : ""}>${escapeHtml(order.packingSlipNote)}</textarea></label></div><details class="address-history"><summary>Order audit history (${order.audit.length})</summary>${order.audit.map((entry) => `<div><span>${escapeHtml(entry.message)}</span><small>${new Date(entry.at).toLocaleString()}</small></div>`).join("")}</details></section>
       <aside class="one-off-sidebar"><div class="totals"><div class="total-line"><span>Items (${totals.quantity})</span><strong>${money(totals.subtotal)}</strong></div><label>Shipping<select id="oneOffShipping" ${locked ? "disabled" : ""}><option value="">Select shipping…</option><option value="PWE" ${order.shippingMethod === "PWE" ? "selected" : ""}>PWE — ${money(order.pweShipping)}</option><option value="PMWT" ${order.shippingMethod === "PMWT" ? "selected" : ""}>PMWT — ${money(order.pmwtShipping)}${order.shippingAutoSelected ? " (rule)" : ""}</option></select></label><small class="shipping-rule-explanation">${escapeHtml(shippingReason)}</small><div class="total-line"><span>Shipping</span><strong>${money(totals.shipping)}</strong></div><label>Discount<input id="oneOffDiscount" type="number" min="0" step="0.01" value="${order.discount}" ${locked ? "disabled" : ""} /></label><label>Tax<input id="oneOffTax" type="number" min="0" step="0.01" value="${order.tax}" ${locked ? "disabled" : ""} /></label><label>Credit<input id="oneOffCredit" type="number" min="0" step="0.01" value="${order.credit}" ${locked ? "disabled" : ""} /></label><div class="total-line grand"><span>Total</span><strong>${money(totals.total)}</strong></div><label>Payment received<input id="oneOffPaymentAmount" type="number" min="0" step="0.01" value="${order.paymentAmount}" ${locked ? "disabled" : ""} /></label><div class="total-line"><span>Balance</span><strong>${money(totals.balance)}</strong></div></div>
       <label>Payment method<select id="oneOffPaymentMethod" ${locked ? "disabled" : ""}><option value="">Not recorded</option>${["Cash", "PayPal", "Venmo", "Zelle", "Apple Pay", "Cash App", "Other"].map((method) => `<option ${order.paymentMethod === method ? "selected" : ""}>${method}</option>`).join("")}</select></label><label>Tracking number<input id="oneOffTracking" value="${escapeHtml(order.trackingNumber)}" placeholder="Optional for PWE" ${locked ? "disabled" : ""} /></label>
@@ -2037,8 +2190,7 @@ function showView(view) {
   const previous = uiState().activeView || $$(".view.active")[0]?.id?.replace(/View$/, "");
   if (previous) uiState().scroll[previous] = document.querySelector("main")?.scrollTop || window.scrollY || 0;
   uiState().activeView = view;
-  const refresh = { command: renderCommandCenter, sale: () => { renderListings(); renderImages(); }, catalog: renderCatalog, claims: renderClaims, offers: renderOffers, orders: renderOrders, packing: renderPacking, pulling: renderPulling, notifications: renderNotifications, dashboard: renderDashboard, live: renderLiveSale, buyers: renderBuyerProfiles, health: renderHealthCheck, help: () => renderDetailedGuide() };
-  refresh[view]?.();
+  renderViewContent(view);
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === `${view}View`));
   const labels = { command: "COMMAND CENTER", sale: "SALE WORKSPACE", catalog: "CATALOG", claims: "CLAIMS DESK", offers: "OFFERS", orders: "BUYER ORDERS", packing: "PACKING", pulling: "CARD PULLING", notifications: "NOTIFICATIONS", dashboard: "PROFIT DASHBOARD", live: "LIVE SALE MODE", buyers: "BUYER PROFILES", health: "HEALTH CHECK", help: "HELP & GUIDE" };
@@ -3444,13 +3596,18 @@ async function deleteActiveSale() {
   saveSoon(); render(); toast("Sale removed from the active list. Its records were preserved.");
 }
 
-function renderArchivedSales() {
-  const archived = state.archivedSales || [];
+function updateArchivedSalesBadge() {
   ensureOneOffState();
+  const archived = state.archivedSales || [];
   const button = $("#archivedSalesBtn");
   const totalArchived = archived.length + state.archivedOneOffOrders.length;
   if (button) button.innerHTML = `<span>14</span> Archived Sale Records${totalArchived ? ` <b class="nav-count">${totalArchived}</b>` : ""}`;
   if ($("#oneOffArchiveCount")) $("#oneOffArchiveCount").textContent = state.archivedOneOffOrders.length ? `(${state.archivedOneOffOrders.length})` : "";
+}
+
+function renderArchivedSales() {
+  const archived = state.archivedSales || [];
+  updateArchivedSalesBadge();
   const list = $("#archivedSalesList");
   if (!list) return;
   list.innerHTML = archived.length ? archived.map((sale) => {
@@ -3559,7 +3716,7 @@ function assignBuyer(cardId, buyerName, offeredPrice, claimType = "claim", claim
     state.selectedBuyer = buyer;
   }
   recordAudit(claimType, previousBuyer && previousBuyer !== buyer ? `Moved ${card.ref} · ${card.name} from ${previousBuyer} to ${buyer}` : `${claimType === "offer" ? "Offer" : "Claim"} recorded for ${card.ref} · ${card.name}`, { cardId: card.id, buyer });
-  saveSoon(); render(); toast(hasOffer && !wasAcceptedOffer ? `${card.ref} offer sent to the Offers tab.` : `${card.ref} assigned to ${buyer}.`);
+  saveSoon(); if (uiState().activeView === "claims") refreshClaimRow(card.id); else render(); toast(hasOffer && !wasAcceptedOffer ? `${card.ref} offer sent to the Offers tab.` : `${card.ref} assigned to ${buyer}.`);
 }
 
 function acceptOffer(cardId) {
@@ -3755,7 +3912,7 @@ function clearClaim(cardId) {
   delete card.packed;
   delete card.claimNote;
   recordAudit("claim-cleared", `Cleared claim on ${card.ref} · ${card.name}`, { cardId: card.id, buyer: priorBuyer });
-  saveSoon(); render(); toast(`${card.ref} returned to available.`);
+  saveSoon(); if (uiState().activeView === "claims") refreshClaimRow(card.id); else render(); toast(`${card.ref} returned to available.`);
 }
 
 async function copyAndHideCard(cardId) {
@@ -3796,6 +3953,7 @@ function undoLastCompletion() {
     if (action.versionId) {
       const version = sale?.versions?.find((item) => item.id === action.versionId);
       if (sale && version) {
+        commitPendingSnapshot(version);
         const remaining = sale.versions.filter((item) => item.id !== version.id);
         Object.keys(sale).forEach((key) => delete sale[key]);
         Object.assign(sale, clone(version.data));
@@ -3824,6 +3982,7 @@ function undoLastCompletion() {
   const sale = activeSale();
   const version = sale.versions?.pop();
   if (version) {
+    commitPendingSnapshot(version);
     const remaining = sale.versions;
     Object.keys(sale).forEach((key) => delete sale[key]);
     Object.assign(sale, clone(version.data));
@@ -3843,6 +4002,7 @@ function restoreVersion(versionId) {
   const versions = sale.versions || [];
   const version = versions.find((item) => item.id === versionId);
   if (!version || !window.confirm(`Restore “${version.label}” from ${new Date(version.at).toLocaleString()}?`)) return;
+  commitPendingSnapshot(version);
   snapshotSale("Before restoring an earlier version", sale);
   const preservedVersions = sale.versions;
   Object.keys(sale).forEach((key) => delete sale[key]);
@@ -4760,7 +4920,7 @@ function bindEvents() {
   ["dragleave", "drop"].forEach((type) => $("#guidedSetupDropZone").addEventListener(type, () => $("#guidedSetupDropZone").classList.remove("drag-over")));
   $("#guidedSetupDropZone").addEventListener("drop", async (event) => { event.preventDefault(); await addGuidedSetupPaths(await droppedImagePaths(event.dataTransfer)); });
   [["#pullingBuyerFilter", "buyer"], ["#pullingPrimarySort", "primary"], ["#pullingSecondarySort", "secondary"], ["#pullingGroupBy", "group"]].forEach(([selector, key]) => $(selector).addEventListener("change", (event) => { pullingSettings()[key] = event.target.value; saveSoon(); renderPulling(); }));
-  $("#pullingSearch").addEventListener("input", (event) => { pullingSettings().query = event.target.value; renderPulling(); });
+  $("#pullingSearch").addEventListener("input", (event) => { pullingSettings().query = event.target.value; scheduleUiTask("pulling-search", renderPulling); });
   $("#pullingHidePulled").addEventListener("change", (event) => { pullingSettings().hidePulled = event.target.checked; saveSoon(); renderPulling(); });
   $("#pullingCards").addEventListener("change", (event) => { const card = activeSale().cards.find((item) => item.id === event.target.dataset.pullCard); if (!card) return; card.pulled = event.target.checked; card.pulledAt = card.pulled ? new Date().toISOString() : ""; saveSoon(); renderPulling(); renderNotifications(); });
   $("#pullingCards").addEventListener("click", (event) => { const label = event.target.dataset.pullGroup; if (!label) return; const cards = pullingCards().filter((card) => pullGroupLabel(card, pullingSettings().group) === label); const value = cards.some((card) => !card.pulled); cards.forEach((card) => { card.pulled = value; card.pulledAt = value ? new Date().toISOString() : ""; }); saveSoon(); renderPulling(); renderNotifications(); });
@@ -4778,7 +4938,7 @@ function bindEvents() {
   $("#cardStitcherBtn").addEventListener("click", () => window.cardSale.openCardStitcher());
   $("#contactSupportBtn").addEventListener("click", openSupportDialog);
   $("#saveDiagnosticBtn").addEventListener("click", openDiagnosticDialog);
-  $("#guideSearch").addEventListener("input", (event) => renderDetailedGuide(event.target.value));
+  $("#guideSearch").addEventListener("input", (event) => { const value = event.target.value; scheduleUiTask("guide-search", () => renderDetailedGuide(value)); });
   $("#expandGuideBtn").addEventListener("click", () => $$("#detailedGuideSections details").forEach((section) => section.open = true));
   $("#collapseGuideBtn").addEventListener("click", () => $$("#detailedGuideSections details").forEach((section) => section.open = false));
   $("#sendSupportBtn").addEventListener("click", sendSupportEmail);
@@ -4795,7 +4955,7 @@ function bindEvents() {
   $("#resetSaleIntroBtn").addEventListener("click", () => { $("#saleIntroTemplate").value = DEFAULT_SALE_INTRO; $("#saleIntroPreview").value = saleIntroduction(DEFAULT_SALE_INTRO); });
   $("#saveSaleIntroBtn").addEventListener("click", () => { state.preferences.saleIntroTemplate = $("#saleIntroTemplate").value.trim() || DEFAULT_SALE_INTRO; saveSoon(); toast("Sale introduction template saved."); });
   $("#copySaleIntroBtn").addEventListener("click", () => { state.preferences.saleIntroTemplate = $("#saleIntroTemplate").value.trim() || DEFAULT_SALE_INTRO; saveSoon(); copyText($("#saleIntroPreview").value, "Sale introduction copied."); });
-  $("#offerSearch").addEventListener("input", (event) => { offerDeskSettings().query = event.target.value; saveSoon(); renderOffers(); });
+  $("#offerSearch").addEventListener("input", (event) => { offerDeskSettings().query = event.target.value; saveSoon(); scheduleUiTask("offer-search", renderOffers); });
   [["#offerStatusFilter", "status"], ["#offerBuyerFilter", "buyer"], ["#offerMarginFilter", "margin"]].forEach(([selector, key]) => $(selector).addEventListener("change", (event) => { offerDeskSettings()[key] = event.target.value; saveSoon(); renderOffers(); }));
   $("#offersView").addEventListener("click", (event) => {
     const key = event.target.closest("[data-offer-sort]")?.dataset.offerSort;
@@ -4854,7 +5014,7 @@ function bindEvents() {
   $("#catalogTokenHelpBtn").addEventListener("click", () => window.cardSale.openCatalogUrl("https://dash.cloudflare.com/profile/api-tokens"));
   $("#catalogOpenLiveBtn").addEventListener("click", () => { saveCatalogSettingsFromForm(); const url = cloudflareCatalogSettings().publicUrl; if (!url) return toast("Enter the public catalog address first."); window.cardSale.openCatalogUrl(url); saveSoon(); });
   ["#catalogPageTitle", "#catalogPageIntro", "#catalogPageStatus", "#catalogPageNumberDirection", "#catalogPageShowPrice", "#catalogPageShowFlaws", "#catalogCloudflareAccount", "#catalogCloudflareProject", "#catalogPublicUrl"].forEach((selector) => $(selector).addEventListener("change", () => { saveCatalogSettingsFromForm(); saveSoon(); renderCatalog(); }));
-  $("#catalogCardSearch").addEventListener("input", renderCatalog); $("#catalogCardFilter").addEventListener("change", renderCatalog);
+  $("#catalogCardSearch").addEventListener("input", () => scheduleUiTask("catalog-search", renderCatalog)); $("#catalogCardFilter").addEventListener("change", renderCatalog);
   $("#catalogCardRows").addEventListener("click", (event) => { const editId = event.target.dataset.catalogEdit; const imageId = event.target.dataset.catalogImage; if (editId) openQuickEdit(editId); if (imageId) chooseManualImage(imageId); });
   $("#importPresetSelect").addEventListener("change", (event) => { $("#deleteImportPresetBtn").disabled = !event.target.value; if (event.target.value) applyImportPreset(event.target.value); });
   $("#importReview").addEventListener("click", (event) => { const group = event.target.closest("[data-import-fix]")?.dataset.importFix; if (group) bulkFixImportGroup(group); });
@@ -4904,7 +5064,7 @@ function bindEvents() {
   $("#autoMatchBtn").addEventListener("click", () => { if (isBeginnerMode()) openImagePreflight(); else autoMatchImages(); });
   $("#forceAllImageLookupBtn").addEventListener("click", forceSaleImageLookup);
   $("#missingImagesBtn").addEventListener("click", openMissingImages);
-  $("#missingImagesSearch").addEventListener("input", renderMissingImages);
+  $("#missingImagesSearch").addEventListener("input", () => scheduleUiTask("missing-image-search", renderMissingImages));
   $("#missingImagesPreflightBtn").addEventListener("click", openImagePreflight);
   $("#missingImagesLookupBtn").addEventListener("click", async () => { $("#missingImagesDialog").close(); await autoMatchImages(); });
   $("#missingImagesList").addEventListener("click", async (event) => {
@@ -4936,7 +5096,7 @@ function bindEvents() {
   $("#newOneOffOrderBtn").addEventListener("click", () => openOneOffOrders(true));
   $("#openOneOffOrdersBtn").addEventListener("click", () => openOneOffOrders(false));
   $("#createOneOffOrderBtn").addEventListener("click", createOneOffOrder);
-  $("#oneOffSearch").addEventListener("input", (event) => { oneOffQuery = event.target.value; renderOneOffOrders(); });
+  $("#oneOffSearch").addEventListener("input", (event) => { oneOffQuery = event.target.value; scheduleUiTask("one-off-search", renderOneOffOrders); });
   $("#oneOffOrderList").addEventListener("click", (event) => { const id = event.target.closest("[data-one-off-order]")?.dataset.oneOffOrder; if (id) { selectedOneOffOrderId = id; renderOneOffOrders(); } });
   $("#paymentQrSettingsBtn").addEventListener("click", () => { renderPaymentQrSettings(); $("#paymentQrDialog").showModal(); });
   $("#savePaymentQrSettingsBtn").addEventListener("click", savePaymentQrSettings);
@@ -4956,7 +5116,7 @@ function bindEvents() {
   $("#saleSelect").addEventListener("change", (event) => { state.activeSaleId = event.target.value; state.selectedBuyer = ""; resetListingView(); saveSoon(); render(); });
   $("#listingSort").addEventListener("change", (event) => { activeSale().sortMode = event.target.value; renumberCardReferences(activeSale(), { audit: false }); saveSoon(); renderListings(); });
   $$("[data-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; saleViewState().filter = state.filter; $$("[data-filter]").forEach((item) => item.classList.toggle("active", item === button)); saveSoon(); renderListings(); }));
-  $("#cardSearch").addEventListener("input", (event) => { state.query = event.target.value; saleViewState().query = state.query; saveSoon(); renderListings(); });
+  $("#cardSearch").addEventListener("input", (event) => { state.query = event.target.value; saleViewState().query = state.query; saveSoon(); scheduleUiTask("card-search", renderListings); });
   $("#listingRows").addEventListener("click", (event) => {
     const checkbox = event.target.closest("[data-select-listing]");
     if (!checkbox) return;
@@ -5051,7 +5211,11 @@ function bindEvents() {
       saveSoon(); renderImages(); toast("Image dragged and hidden. Ctrl+Z to undo.");
     }
   });
-  $("#claimSearch").addEventListener("input", (event) => { state.claimQuery = event.target.value; saleViewState().claimQuery = state.claimQuery; saveSoon(); renderClaims(); });
+  $("#claimSearch").addEventListener("input", (event) => { state.claimQuery = event.target.value; saleViewState().claimQuery = state.claimQuery; saveSoon(); scheduleUiTask("claim-search", renderClaims); });
+  $("#selectVisibleClaims").addEventListener("change", (event) => { const query = String(state.claimQuery || "").toLowerCase(); const visible = activeSale().cards.filter((card) => [...Object.values(card).filter((value) => typeof value !== "object"), ...Object.values(card.customFields || {})].join(" ").toLowerCase().includes(query)); visible.forEach((card) => event.target.checked ? selectedClaimIds.add(card.id) : selectedClaimIds.delete(card.id)); renderClaims(); });
+  $("#claimBulkBuyer").addEventListener("input", (event) => { claimBulkBuyerName = event.target.value; updateClaimBulkBar(); });
+  $("#assignSelectedClaimsBtn").addEventListener("click", assignSelectedClaims);
+  $("#clearClaimSelectionBtn").addEventListener("click", () => { selectedClaimIds.clear(); renderClaims(); });
   $("#claimRows").addEventListener("input", (event) => {
     if (!event.target.matches("[data-claim-offer]")) return;
     const row = event.target.closest("[data-claim-row]");
@@ -5069,6 +5233,7 @@ function bindEvents() {
     if (!belowCost && warning) warning.remove();
   });
   $("#claimRows").addEventListener("change", (event) => {
+    if (event.target.matches("[data-select-claim]")) { if (event.target.checked) selectedClaimIds.add(event.target.dataset.selectClaim); else selectedClaimIds.delete(event.target.dataset.selectClaim); event.target.closest("tr")?.classList.toggle("claim-row-selected", event.target.checked); updateClaimBulkBar(); return; }
     const type = event.target.dataset.claimType;
     if (!type) return;
     const row = event.target.closest("[data-claim-row]");
@@ -5110,7 +5275,7 @@ function bindEvents() {
   $("#listingTemplate").addEventListener("input", updateImportPreview);
   $("#confirmImportBtn").addEventListener("click", confirmImport);
   $("#applyMatchesBtn").addEventListener("click", applyReviewedMatches);
-  $("#matchSearch").addEventListener("input", (event) => { if (pendingMatches) { pendingMatches.query = event.target.value; renderMatchReview(); } });
+  $("#matchSearch").addEventListener("input", (event) => { if (pendingMatches) { pendingMatches.query = event.target.value; scheduleUiTask("match-search", renderMatchReview); } });
   $$('[data-match-filter]').forEach((button) => button.addEventListener("click", () => {
     if (!pendingMatches) return;
     pendingMatches.filter = button.dataset.matchFilter;
@@ -5187,7 +5352,7 @@ function bindEvents() {
   $("#confirmBuyerConflictBtn").addEventListener("click", () => { const pending = pendingBuyerConflict; pendingBuyerConflict = null; $("#buyerConflictDialog").close(); if (pending) assignBuyer(pending.cardId, pending.buyerName, pending.offeredPrice, pending.claimType, pending.claimNote, true); });
   $("#buyerConflictDialog").addEventListener("close", () => { if (!$("#buyerConflictDialog").open) pendingBuyerConflict = null; });
   $("#buyerList").addEventListener("click", (event) => { const button = event.target.closest("[data-buyer]"); if (button) { state.selectedBuyer = button.dataset.buyer; renderOrders(); } });
-  $("#orderSearch").addEventListener("input", (event) => { orderDeskSettings().query = event.target.value; saveSoon(); renderOrders(); });
+  $("#orderSearch").addEventListener("input", (event) => { orderDeskSettings().query = event.target.value; saveSoon(); scheduleUiTask("order-search", renderOrders); });
   $("#orderStatusFilter").addEventListener("change", (event) => { orderDeskSettings().status = event.target.value; saveSoon(); renderOrders(); });
   $("#orderGroupMode").addEventListener("change", (event) => { orderDeskSettings().groupMode = event.target.value; saveSoon(); renderOrders(); });
   $("#orderViewMode").addEventListener("change", (event) => { orderDeskSettings().viewMode = event.target.value; saveSoon(); renderOrders(); });
@@ -5222,12 +5387,15 @@ function bindEvents() {
     if (event.target.dataset.openBuyerProfile) { state.profileBuyer = event.target.dataset.openBuyerProfile; showView("buyers"); renderBuyerProfiles(); }
   });
   $("#orderDetail").addEventListener("submit", (event) => { if (event.target.id !== "addOnForm") return; event.preventDefault(); const name = $("#addOnName").value.trim(); if (!name) return toast("Enter an item name."); const item = { id: uid(), name, price: Math.max(0, Number($("#addOnPrice").value || 0)), quantity: Math.max(1, Math.floor(Number($("#addOnQuantity").value || 1))), packed: false }; addOnsForBuyer(state.selectedBuyer).push(item); refreshBuyerShippingAfterLineItemChange(state.selectedBuyer); recordAudit("order", `Added ${item.quantity} × ${item.name} to ${state.selectedBuyer}`, { buyer: state.selectedBuyer }); saveSoon(); renderOrders(); toast("Additional item added."); });
-  $("#oneOffOrderDetail").addEventListener("submit", (event) => {
-    if (event.target.id !== "oneOffItemForm") return; event.preventDefault(); const order = oneOffOrder(); if (!order || order.locked) return;
-    const description = $("#oneOffItemDescription").value.trim(); if (!description) return toast("Enter an item description.");
-    const item = { id: uid(), description, quantity: Math.max(1, Math.floor(Number($("#oneOffItemQuantity").value || 1))), price: Math.max(0, Number($("#oneOffItemPrice").value || 0)), imagePath: "", includeImage: true, packed: false };
-    order.items.push(item); applyOneOffShippingRule(order); recordOneOffAudit(order, `Added ${item.quantity} × ${item.description}`); saveSoon(); renderOneOffOrders();
-  });
+  function addOneOffItem() {
+    if (oneOffItemSubmissionLocked) return;
+    const order = oneOffOrder(); if (!order || order.locked) return;
+    const description = $("#oneOffItemDescription")?.value.trim(); if (!description) return toast("Enter an item description.");
+    oneOffItemSubmissionLocked = true; const button = $("#addOneOffItemBtn"); if (button) { button.disabled = true; button.dataset.processing = "true"; button.textContent = "Adding…"; }
+    const item = { id: uid(), description, quantity: Math.max(1, Math.floor(Number($("#oneOffItemQuantity")?.value || 1))), price: Math.max(0, Number($("#oneOffItemPrice")?.value || 0)), imagePath: "", includeImage: true, packed: false };
+    order.items.push(item); applyOneOffShippingRule(order); recordOneOffAudit(order, `Added ${item.quantity} × ${item.description}`); saveSoon(); renderOneOffOrders(); toast("Item added."); setTimeout(() => { oneOffItemSubmissionLocked = false; }, 350);
+  }
+  $("#oneOffOrderDetail").addEventListener("keydown", (event) => { if (event.key === "Enter" && event.target.closest("#oneOffItemForm")) { event.preventDefault(); addOneOffItem(); } });
   $("#oneOffOrderDetail").addEventListener("input", (event) => {
     const order = oneOffOrder(); if (!order) return;
     if (event.target.id === "oneOffNotes") order.notes = event.target.value;
@@ -5252,6 +5420,7 @@ function bindEvents() {
   });
   $("#oneOffOrderDetail").addEventListener("click", async (event) => {
     const order = oneOffOrder(); if (!order) return;
+    if (event.target.id === "addOneOffItemBtn") return addOneOffItem();
     const itemId = event.target.dataset.oneOffImage || event.target.dataset.oneOffEdit || event.target.dataset.oneOffRemove; const item = order.items.find((entry) => entry.id === itemId);
     if (event.target.dataset.oneOffImage && item) return chooseOneOffItemImage(order, item);
     if (event.target.dataset.oneOffEdit && item) { const description = window.prompt("Item description", item.description); if (description == null) return; const quantity = window.prompt("Quantity", item.quantity); if (quantity == null) return; const price = window.prompt("Unit price", item.price); if (price == null) return; item.description = description.trim() || item.description; item.quantity = Math.max(1, Math.floor(Number(quantity || 1))); item.price = Math.max(0, Number(price || 0)); item.packed = false; recordOneOffAudit(order, `Updated ${item.description}`); applyOneOffShippingRule(order); saveSoon(); return renderOneOffOrders(); }
@@ -5268,7 +5437,7 @@ function bindEvents() {
   $("#saveMessageTemplatesBtn").addEventListener("click", saveMessageTemplates);
   $("#resetMessageTemplatesBtn").addEventListener("click", resetMessageTemplates);
   $("#quickMessagesBtn").addEventListener("click", () => openQuickMessages());
-  $("#quickMessageSearch").addEventListener("input", renderQuickMessages);
+  $("#quickMessageSearch").addEventListener("input", () => scheduleUiTask("quick-message-search", renderQuickMessages));
   $("#quickMessageCategory").addEventListener("change", renderQuickMessages);
   $("#quickMessageBuyer").addEventListener("change", updateQuickMessagePreview);
   $("#quickMessageList").addEventListener("click", (event) => { const id = event.target.closest("[data-quick-message]")?.dataset.quickMessage; if (id) { selectedQuickMessageId = id; renderQuickMessages(); } });
@@ -5425,7 +5594,7 @@ function bindEvents() {
   $("#closeQuickEditBtn").addEventListener("click", closeQuickEdit);
   $("#saveQuickEditBtn").addEventListener("click", saveQuickEdit);
   $("#quickEditDrawer").addEventListener("input", (event) => { if (event.target.matches("input, textarea")) updateQuickEditPreview(); });
-  $("#buyerProfileSearch").addEventListener("input", (event) => { profileQuery = event.target.value; renderBuyerProfiles(); });
+  $("#buyerProfileSearch").addEventListener("input", (event) => { profileQuery = event.target.value; scheduleUiTask("buyer-profile-search", renderBuyerProfiles); });
   $("#mergeBuyerProfilesBtn").addEventListener("click", openBuyerMerge);
   $("#mergeBuyerSource").addEventListener("change", updateBuyerMergePreview);
   $("#mergeBuyerTarget").addEventListener("change", updateBuyerMergePreview);

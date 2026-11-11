@@ -129,15 +129,30 @@ async function v2CreateOrderPage(cards, settings, page, pageCount) {
   if (settings.showStatus && settings.status) { ctx.fillStyle = "#b7c7d7"; ctx.font = "24px system-ui"; ctx.fillText(settings.status, 64, 177); }
   const totalLines = page === pageCount ? [settings.showSubtotal, settings.showShipping, settings.showTotal, settings.showPayment].filter(Boolean).length + (settings.showTotal && Number(settings.discount || 0) ? 1 : 0) : 0;
   const totalsHeight = totalLines ? 52 + totalLines * 38 : 0; const paymentQrs = page === pageCount ? (settings.paymentQrs || []) : []; const qrHeight = paymentQrs.length ? 190 : 0;
-  const top = settings.showStatus ? 215 : 180; const gap = 26; const cols = settings.layout === "compact" ? 2 : 1; const rows = Math.ceil(cards.length / cols); const cellWidth = (width - 128 - gap * (cols - 1)) / cols; const cellHeight = Math.min((height - top - 100 - totalsHeight - qrHeight - gap * Math.max(0, rows - 1)) / Math.max(1, rows), settings.layout === "compact" ? 360 : 560);
-  for (let index = 0; index < cards.length; index += 1) {
-    const card = cards[index]; const col = index % cols; const row = Math.floor(index / cols); const x = 64 + col * (cellWidth + gap); const y = top + row * (cellHeight + gap);
-    ctx.fillStyle = "#112433"; ctx.beginPath(); ctx.roundRect(x, y, cellWidth, cellHeight, 22); ctx.fill();
-    const imageHeight = cellHeight - 105; ctx.fillStyle = "#e8eef4"; ctx.beginPath(); ctx.roundRect(x + 16, y + 16, cellWidth - 32, imageHeight - 16, 14); ctx.fill();
-    if (card.imagePath) { try { const dataUrl = await window.cardSale.packingFileDataUrl(card.imagePath); const image = await v2LoadImage(dataUrl); v2Contain(ctx, image, x + 24, y + 24, cellWidth - 48, imageHeight - 32); } catch {} }
-    else { ctx.fillStyle = "#6d7f90"; ctx.font = "700 24px system-ui"; ctx.textAlign = "center"; ctx.fillText("Image not available", x + cellWidth / 2, y + imageHeight / 2); ctx.textAlign = "left"; }
-    ctx.fillStyle = "#fff"; ctx.font = `700 ${cols === 2 ? 21 : 27}px system-ui`; const listing = v2ListingWithoutFlaws(card); ctx.fillText(listing.length > (cols === 2 ? 38 : 70) ? `${listing.slice(0, cols === 2 ? 37 : 69)}…` : listing, x + 20, y + cellHeight - 60);
-    ctx.fillStyle = accent; ctx.font = `800 ${cols === 2 ? 25 : 31}px system-ui`; ctx.fillText(money(card.claimPrice ?? card.price), x + 20, y + cellHeight - 22);
+  const top = settings.showStatus ? 215 : 180; const gap = 26;
+  if (settings.showImages === false) {
+    const availableHeight = Math.max(260, height - top - 100 - totalsHeight - qrHeight); const targetRows = Math.max(12, Math.floor(availableHeight / 25));
+    const cols = Math.min(8, Math.max(1, Math.ceil(cards.length / targetRows))); const rows = Math.max(1, Math.ceil(cards.length / cols)); const colGap = cols > 5 ? 8 : 16; const rowGap = rows > 36 ? 2 : 5;
+    const cellWidth = (width - 128 - colGap * (cols - 1)) / cols; const rowHeight = Math.min(52, Math.max(10, (availableHeight - rowGap * Math.max(0, rows - 1)) / rows));
+    const fontSize = Math.max(8, Math.min(20, rowHeight * .38)); const priceWidth = Math.min(82, cellWidth * .28); const maxChars = Math.max(5, Math.floor((cellWidth - priceWidth - 28) / Math.max(5, fontSize * .53)));
+    cards.forEach((card, index) => {
+      const col = Math.floor(index / rows); const row = index % rows; const x = 64 + col * (cellWidth + colGap); const y = top + row * (rowHeight + rowGap);
+      ctx.fillStyle = row % 2 ? "#0d2030" : "#112433"; ctx.beginPath(); ctx.roundRect(x, y, cellWidth, rowHeight, Math.min(9, rowHeight / 3)); ctx.fill();
+      const listing = `${card.ref ? `${card.ref} · ` : ""}${v2ListingWithoutFlaws(card)}`; const shown = listing.length > maxChars ? `${listing.slice(0, Math.max(1, maxChars - 1))}…` : listing;
+      ctx.textBaseline = "middle"; ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = `700 ${fontSize}px system-ui`; ctx.fillText(shown, x + 10, y + rowHeight / 2);
+      ctx.textAlign = "right"; ctx.fillStyle = accent; ctx.font = `800 ${fontSize}px system-ui`; ctx.fillText(money(card.claimPrice ?? card.price), x + cellWidth - 10, y + rowHeight / 2); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    });
+  } else {
+    const cols = settings.layout === "compact" ? 2 : 1; const rows = Math.ceil(cards.length / cols); const cellWidth = (width - 128 - gap * (cols - 1)) / cols; const cellHeight = Math.min((height - top - 100 - totalsHeight - qrHeight - gap * Math.max(0, rows - 1)) / Math.max(1, rows), settings.layout === "compact" ? 360 : 560);
+    for (let index = 0; index < cards.length; index += 1) {
+      const card = cards[index]; const col = index % cols; const row = Math.floor(index / cols); const x = 64 + col * (cellWidth + gap); const y = top + row * (cellHeight + gap);
+      ctx.fillStyle = "#112433"; ctx.beginPath(); ctx.roundRect(x, y, cellWidth, cellHeight, 22); ctx.fill();
+      const imageHeight = cellHeight - 105; ctx.fillStyle = "#e8eef4"; ctx.beginPath(); ctx.roundRect(x + 16, y + 16, cellWidth - 32, imageHeight - 16, 14); ctx.fill();
+      if (card.imagePath) { try { const dataUrl = await window.cardSale.packingFileDataUrl(card.imagePath); const image = await v2LoadImage(dataUrl); v2Contain(ctx, image, x + 24, y + 24, cellWidth - 48, imageHeight - 32); } catch {} }
+      else { ctx.fillStyle = "#6d7f90"; ctx.font = "700 24px system-ui"; ctx.textAlign = "center"; ctx.fillText("Image not available", x + cellWidth / 2, y + imageHeight / 2); ctx.textAlign = "left"; }
+      ctx.fillStyle = "#fff"; ctx.font = `700 ${cols === 2 ? 21 : 27}px system-ui`; const listing = v2ListingWithoutFlaws(card); ctx.fillText(listing.length > (cols === 2 ? 38 : 70) ? `${listing.slice(0, cols === 2 ? 37 : 69)}…` : listing, x + 20, y + cellHeight - 60);
+      ctx.fillStyle = accent; ctx.font = `800 ${cols === 2 ? 25 : 31}px system-ui`; ctx.fillText(money(card.claimPrice ?? card.price), x + 20, y + cellHeight - 22);
+    }
   }
   if (totalLines) {
     const x = 64; const boxWidth = width - 128; const boxY = height - totalsHeight - qrHeight - 56;
@@ -165,14 +180,20 @@ async function v2CreateOrderPage(cards, settings, page, pageCount) {
 
 function v2OrderSignature(cards) { return cards.map((card) => `${card.id}:${card.claimPrice ?? card.price}:${card.imagePath || ""}`).join("|"); }
 async function v2GenerateOrderCards() {
-  const cards = cardsForBuyer(state.selectedBuyer); if (!cards.length) return toast("Choose a buyer order first.");
-  const order = orderFor(state.selectedBuyer); const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0); const shipping = shippingAmount(order); const discount = Number(order.discount || 0);
-  const qrSettings = ensurePaymentQrSettings(); const enabledQrs = PAYMENT_QR_METHODS.map(([key]) => qrSettings[key]).filter((item) => item.enabled && item.value.trim()); const paymentQrs = $("#orderCardShowPaymentQrs").checked ? await Promise.all(enabledQrs.map(async (item) => ({ label: item.label, dataUrl: await window.cardSale.packingQrDataUrl(item.value, ensurePackingSettings().accent || "#19b56b") }))) : [];
-  const settings = { format: $("#orderCardFormat").value, layout: $("#orderCardLayout").value, heading: $("#orderCardHeading").value.trim(), showStatus: $("#orderCardShowStatus").checked, status: $("#orderCardStatus").value.trim(), showSubtotal: $("#orderCardShowSubtotal").checked, showShipping: $("#orderCardShowShipping").checked, showTotal: $("#orderCardShowTotal").checked, showPayment: $("#orderCardShowPayment").checked, showPaymentQrs: $("#orderCardShowPaymentQrs").checked, paymentQrs, subtotal, shipping, discount, total: subtotal + shipping - discount, shippingMethod: order.shippingMethod || "", paymentLabel: ["paid", "packed", "shipped"].includes(order.status) ? `Paid${order.paymentMethod ? ` via ${order.paymentMethod}` : ""}` : "Payment due" };
-  const perPage = settings.format === "vertical" ? (settings.layout === "compact" ? 8 : 4) : settings.format === "letter" ? (settings.layout === "compact" ? 10 : 5) : (settings.layout === "compact" ? 6 : 3);
-  const groups = []; for (let index = 0; index < cards.length; index += perPage) groups.push(cards.slice(index, index + perPage));
-  v2OrderPages = []; for (let index = 0; index < groups.length; index += 1) v2OrderPages.push(await v2CreateOrderPage(groups[index], settings, index + 1, groups.length));
-  v2OrderPageIndex = 0; order.visualOrderCard = { signature: v2OrderSignature(cards), settings, generatedAt: new Date().toISOString() }; state.preferences ||= {}; state.preferences.visualOrderCardSettings = { format: settings.format, layout: settings.layout, heading: settings.heading, showStatus: settings.showStatus, status: settings.status, showSubtotal: settings.showSubtotal, showShipping: settings.showShipping, showTotal: settings.showTotal, showPayment: settings.showPayment, showPaymentQrs: settings.showPaymentQrs }; saveSoon(); v2RenderOrderPreview();
+  const button = $("#previewOrderCardsBtn"); if (button?.dataset.processing === "true") return;
+  if (button) { button.dataset.processing = "true"; button.disabled = true; button.textContent = "Generating…"; }
+  try {
+    const cards = cardsForBuyer(state.selectedBuyer); if (!cards.length) return toast("Choose a buyer order first.");
+    const order = orderFor(state.selectedBuyer); const subtotal = cards.reduce((sum, card) => sum + Number(card.claimPrice ?? card.price ?? 0), 0); const shipping = shippingAmount(order); const discount = Number(order.discount || 0);
+    const qrSettings = ensurePaymentQrSettings(); const enabledQrs = PAYMENT_QR_METHODS.map(([key]) => qrSettings[key]).filter((item) => item.enabled && item.value.trim()); const paymentQrs = $("#orderCardShowPaymentQrs").checked ? await Promise.all(enabledQrs.map(async (item) => ({ label: item.label, dataUrl: await window.cardSale.packingQrDataUrl(item.value, ensurePackingSettings().accent || "#19b56b") }))) : [];
+    const settings = { format: $("#orderCardFormat").value, layout: $("#orderCardLayout").value, heading: $("#orderCardHeading").value.trim(), showImages: $("#orderCardShowImages").checked, showStatus: $("#orderCardShowStatus").checked, status: $("#orderCardStatus").value.trim(), showSubtotal: $("#orderCardShowSubtotal").checked, showShipping: $("#orderCardShowShipping").checked, showTotal: $("#orderCardShowTotal").checked, showPayment: $("#orderCardShowPayment").checked, showPaymentQrs: $("#orderCardShowPaymentQrs").checked, paymentQrs, subtotal, shipping, discount, total: subtotal + shipping - discount, shippingMethod: order.shippingMethod || "", paymentLabel: ["paid", "packed", "shipped"].includes(order.status) ? `Paid${order.paymentMethod ? ` via ${order.paymentMethod}` : ""}` : "Payment due" };
+    const perPage = settings.showImages === false ? Math.max(1, cards.length) : settings.format === "vertical" ? (settings.layout === "compact" ? 8 : 4) : settings.format === "letter" ? (settings.layout === "compact" ? 10 : 5) : (settings.layout === "compact" ? 6 : 3);
+    const groups = []; for (let index = 0; index < cards.length; index += perPage) groups.push(cards.slice(index, index + perPage));
+    v2OrderPages = []; for (let index = 0; index < groups.length; index += 1) v2OrderPages.push(await v2CreateOrderPage(groups[index], settings, index + 1, groups.length));
+    v2OrderPageIndex = 0; order.visualOrderCard = { signature: v2OrderSignature(cards), settings, generatedAt: new Date().toISOString() }; state.preferences ||= {}; state.preferences.visualOrderCardSettings = { format: settings.format, layout: settings.layout, heading: settings.heading, showImages: settings.showImages, showStatus: settings.showStatus, status: settings.status, showSubtotal: settings.showSubtotal, showShipping: settings.showShipping, showTotal: settings.showTotal, showPayment: settings.showPayment, showPaymentQrs: settings.showPaymentQrs }; saveSoon(); v2RenderOrderPreview();
+  } finally {
+    if (button?.isConnected) { delete button.dataset.processing; button.disabled = false; button.textContent = "Generate preview"; }
+  }
 }
 function v2RenderOrderPreview() {
   $("#orderCardPreview").innerHTML = v2OrderPages.length ? `<button type="button" data-order-page-prev>‹</button><img src="${v2OrderPages[v2OrderPageIndex]}" alt="Order card page ${v2OrderPageIndex + 1}" /><button type="button" data-order-page-next>›</button>` : '<div class="empty-state"><p>Generate a preview before saving or copying.</p></div>';
@@ -182,6 +203,7 @@ function v2OpenOrderCards() {
   const cards = cardsForBuyer(state.selectedBuyer); const order = orderFor(state.selectedBuyer); const stale = order.visualOrderCard && order.visualOrderCard.signature !== v2OrderSignature(cards);
   const settings = state.preferences?.visualOrderCardSettings || order.visualOrderCard?.settings || {};
   if (settings.format) $("#orderCardFormat").value = settings.format; if (settings.layout) $("#orderCardLayout").value = settings.layout; if (settings.heading) $("#orderCardHeading").value = settings.heading;
+  $("#orderCardShowImages").checked = settings.showImages !== false;
   $("#orderCardShowStatus").checked = Boolean(settings.showStatus); if (settings.status) $("#orderCardStatus").value = settings.status;
   $("#orderCardShowSubtotal").checked = Boolean(settings.showSubtotal); $("#orderCardShowShipping").checked = Boolean(settings.showShipping); $("#orderCardShowTotal").checked = Boolean(settings.showTotal); $("#orderCardShowPayment").checked = Boolean(settings.showPayment); $("#orderCardShowPaymentQrs").checked = Boolean(settings.showPaymentQrs);
   $("#orderCardStaleMessage").classList.toggle("hidden", !stale); $("#orderCardStaleMessage").textContent = stale ? "This order changed since the last visual card was generated. Create a fresh preview before sharing it." : "";

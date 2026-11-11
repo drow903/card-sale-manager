@@ -1,3 +1,19 @@
+# Card Sale Manager 2.3.2
+
+## Improvements
+
+- Adds multi-select assignment in Claims Desk, including Select visible, a shared buyer field, and a single full-price assignment action for all selected cards.
+- Queues notifications so rapid actions no longer overwrite messages, while keeping every notification above open modal windows.
+- Adds repeat-click protection to One-Off Order item creation and visual buyer-summary generation.
+- Adds image-free visual buyer summaries that keep orders of up to 50 cards on one compact page.
+- Rebuilds only the active workspace and updates individual claim rows when possible.
+- Indexes duplicate cards and buyer orders once per render instead of repeatedly scanning the complete sale.
+- Caches searchable card text and gently debounces search fields for smoother typing.
+- Defers safety-snapshot completion and full-state saves until the interface is idle without weakening Undo or update protection.
+- Skips redundant saves when nothing has changed.
+- Adds a repeatable isolated Electron benchmark covering 300-card sales, One-Off Orders, notifications, summaries, repeat-click protection, and bulk claims.
+- Refreshes the Message Templates layout and adds breathing room to Buyer Orders.
+
 # Card Sale Manager 2.3.1
 
 ## Fixes

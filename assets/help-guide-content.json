@@ -188,10 +188,12 @@
         "Find the card in Claims Desk.",
         "Check Claim for a full-price claim or Offer for a lower proposed price.",
         "Enter the buyer and offer price when needed, then save the assignment.",
+        "When one buyer claimed several cards, select those rows, enter the buyer once in Assign selected to, and choose Assign selected. Bulk assignment records full-price claims for every selected card.",
         "Open Offers to accept, reject, or counter pending offers.",
         "For a bundle offer, select the cards in Sale Workspace, assign the buyer and total offer, then review it in Offers. An accepted bundle spreads the discount proportionally across the cards."
       ],
       "tips": [
+        "Select visible follows the current Claims Desk search, so you can filter first and assign only the matching cards.",
         "Rejecting an offer returns the card to the open pool and removes that buyer from the card.",
         "Use the editable counter message when you want CSM to include the listed price, original offer, and your counter."
       ]
@@ -487,13 +489,13 @@
       "paragraphs": [
         "Visual Buyer Order cards use the seller branding already saved in Packing Slip Studio. Each purchased card shows its front image, customer-facing listing text without flaws, and the final paid price.",
         "Buyer names, addresses, private notes, purchase prices, and profit information are never included. Card subtotal, shipping method and charge, final order total, and payment status are separate optional switches and stay off until the seller enables them. CSM remembers these visual-summary choices and does not send anything automatically.",
-        "Square and vertical layouts save numbered PNG images to Downloads. Letter output creates a printable PDF. A missing image uses a clear placeholder instead of silently dropping the card."
+        "Square and vertical layouts save numbered PNG images to Downloads. Letter output creates a printable PDF. A missing image uses a clear placeholder instead of silently dropping the card. For long orders, turn off Include card images to create a compact, image-free list that keeps the whole order on one page."
       ],
       "steps": [
         "Open Buyer Orders and choose the order.",
         "Choose Create visual order cards.",
         "Pick Showcase or Compact and Square, Vertical, or Printable Letter.",
-        "Edit the heading and optional status line. If wanted, choose which subtotal, shipping, final total, or payment details should appear, then choose Generate preview.",
+        "Choose whether to include card images. Edit the heading and optional status line. If wanted, choose which subtotal, shipping, final total, or payment details should appear, then choose Generate preview.",
         "Review every page before copying the shown page or saving the complete numbered set."
       ],
       "tips": [
