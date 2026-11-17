@@ -1,4 +1,4 @@
-const results = { passed: false, oneOff: {}, performance: {}, visualSummaries: {}, notifications: {}, bulkClaims: {}, doubleClick: {} };
+const results = { passed: false, oneOff: {}, performance: {}, visualSummaries: {}, notifications: {}, bulkClaims: {}, postOrder: {}, buyerProfiles: {}, doubleClick: {} };
 const assertQa = (condition, message) => { if (!condition) throw new Error(message); };
 const waitQa = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const timedQa = async (work) => { const started = performance.now(); await work(); return Math.round((performance.now() - started) * 10) / 10; };
@@ -30,6 +30,30 @@ qaOrder.trackingNumber = "9400000000000000000000"; setOneOffStatus(qaOrder, "shi
 const qaOrderId = qaOrder.id; closeOneOffOrder(qaOrder); assertQa(state.archivedOneOffOrders.some((order) => order.id === qaOrderId), "Closed one-off order was not archived");
 reopenOneOffOrder(qaOrderId); assertQa(state.oneOffOrders.some((order) => order.id === qaOrderId), "Archived one-off order could not be reopened");
 results.oneOff = { itemsAdded: 2, edited: true, removed: true, imageIncludedOnSlip: true, packingSlipGenerated: true, paid: true, packed: true, shipped: true, archived: true, reopened: true };
+
+// Manual multi-card ordering must preserve the selected order and synchronize attached images.
+const orderCards = Array.from({ length: 6 }, (_item, index) => testCard(index, { imagePath: `C:\\QA\\image-${index + 1}.jpg` }));
+const orderSale = { id: "qa-post-order", name: "QA post order", imageMode: "single", sortMode: "spreadsheet", pweShipping: 1, pmwtShipping: 5, template: DEFAULT_TEMPLATE, cards: orderCards, images: orderCards.map((card, index) => ({ id: `qa-image-${index + 1}`, path: card.imagePath, name: `image-${index + 1}.jpg` })), orders: {}, bundles: [], customFieldDefinitions: [] };
+state.sales = [orderSale]; state.activeSaleId = orderSale.id; state.query = ""; state.filter = "all"; selectedListingIds = new Set([orderCards[1].id, orderCards[3].id]);
+moveSelectedCards("top");
+assertQa(orderSale.sortMode === "custom", "A manual multi-card move did not switch the workspace to Custom order");
+assertQa(sortedSaleCards(orderSale).slice(0, 2).map((card) => card.id).join("|") === `${orderCards[1].id}|${orderCards[3].id}`, "Selected cards did not move together while preserving their displayed order");
+assertQa(orderedSaleImages(orderSale).slice(0, 2).map((image) => image.path).join("|") === `${orderCards[1].imagePath}|${orderCards[3].imagePath}`, "The image post queue did not follow the manually arranged table order");
+results.postOrder = { multiSelect: true, relativeOrderPreserved: true, imageQueueSynchronized: true };
+
+// Buyer rename and merge must reach active/archived sales and standalone orders.
+state.buyerProfiles = { "Old Buyer": { ...blankBuyerProfile(), aliases: [] }, "Merge Me": { ...blankBuyerProfile(), aliases: ["M. Buyer"] }, "Keep Buyer": { ...blankBuyerProfile(), tags: ["Repeat"] } };
+orderSale.cards[0].buyer = "Old Buyer"; orderSale.cards[0].status = "claimed"; orderSale.orders = { "Old Buyer": { status: "awaiting", shippingMethod: "" } };
+state.oneOffOrders = [{ id: "qa-oneoff-rename", buyer: "Old Buyer", items: [], status: "draft" }, { id: "qa-oneoff-merge", buyer: "Merge Me", items: [], status: "draft" }];
+state.archivedOneOffOrders = [{ id: "qa-oneoff-archive", buyer: "Merge Me", items: [], status: "closed" }]; state.profileBuyer = "Old Buyer";
+$("#renameBuyerOriginal").value = "Old Buyer"; $("#renameBuyerName").value = "Renamed Buyer"; await renameBuyerProfile();
+assertQa(orderSale.cards[0].buyer === "Renamed Buyer" && orderSale.orders["Renamed Buyer"] && !orderSale.orders["Old Buyer"], "Buyer rename did not update sale cards and orders");
+assertQa(state.oneOffOrders[0].buyer === "Renamed Buyer" && state.buyerProfiles["Renamed Buyer"].aliases.includes("Old Buyer"), "Buyer rename did not update one-off orders and preserve the old name as an alias");
+orderSale.cards[1].buyer = "Merge Me"; orderSale.cards[1].status = "claimed"; orderSale.orders["Merge Me"] = { status: "awaiting", shippingMethod: "" };
+openBuyerMerge("Merge Me", "Keep Buyer"); await mergeBuyerProfiles();
+assertQa(orderSale.cards[1].buyer === "Keep Buyer" && !state.buyerProfiles["Merge Me"], "Buyer merge did not move card history and remove the duplicate profile");
+assertQa(state.oneOffOrders[1].buyer === "Keep Buyer" && state.archivedOneOffOrders[0].buyer === "Keep Buyer", "Buyer merge did not update active and archived one-off orders");
+results.buyerProfiles = { renamedEverywhere: true, oldNameKeptAsAlias: true, mergedOneOffHistory: true };
 
 // Large-sale rendering test using 300 cards and 30 buyers.
 const performanceSale = { id: "qa-performance-sale", name: "QA 300-card performance sale", pweShipping: 1, pmwtShipping: 5, shippingRules: { cardCountEnabled: true, maxPweCards: 3, valueEnabled: true, maxPweValue: 50 }, template: DEFAULT_TEMPLATE, imageMode: "single", images: [], orders: {}, bundles: [], customFieldDefinitions: [], cards: Array.from({ length: 300 }, (_item, index) => testCard(index, index % 3 === 0 ? { status: "claimed", buyer: `Buyer ${index % 30}`, claimType: "claim", claimPrice: 1 + (index % 25), claimedAt: new Date().toISOString() } : {})) };

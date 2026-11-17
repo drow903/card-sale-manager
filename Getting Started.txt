@@ -32,6 +32,12 @@ a newer cloud revision without confirmation. Verified backups are stored in a
 .csm-backups folder beside the portable file. Ctrl+O opens a CSM file and
 Ctrl+S saves one.
 
+Portable recovery copies rotate automatically. The default is one new copy
+every 30 minutes with a maximum of five new rotating backups per CSM file.
+Change either value in the Portable CSM file window. CSM never rotates the
+primary file, manual exports, protected update archives, or older unclassified
+recovery files.
+
 The Portable CSM file screen can restore those recovery copies, review missing
 images one at a time, and maintain the recent-file list. Recent files can be
 pinned, shown in File Explorer, or removed from the list. If a file has changed
@@ -231,6 +237,9 @@ and orders after reviewing the preview.
     deletion or reordering. CSM's permanent internal card IDs keep images,
     claims, offers, and audit history connected even when a reference changes.
     Freeze references once posted if you do not want automatic renumbering.
+    To create a manual posting order, select several cards and choose Move
+    selected. Move them together to the top, bottom, one position up or down,
+    or an exact starting position. The image Post queue updates to match.
 18. Card Pulling Mode can sort and group sold cards by buyer, year, player,
     price, purchase date, location, or any imported custom field. Check cards
     as they are pulled or preview a printable pull sheet in the same order.
@@ -240,6 +249,9 @@ and orders after reviewing the preview.
     to it, or snooze/dismiss it.
 20. Buyer Profiles stores tags, notes, addresses, purchase history, and likely
     repeat-buyer matches. Profit Dashboard includes private inventory aging.
+    Use Rename buyer to correct a name everywhere without creating a new
+    profile. Use Merge profiles when two saved names belong to the same person;
+    regular and one-off order history are combined after a safety backup.
 21. Before finishing a sale, use Health Check and the Sale Closing Assistant to
     review missing images, incomplete orders, unpaid buyers, and unsold cards.
 22. Sale Presets saves reusable shipping prices and listing formats.

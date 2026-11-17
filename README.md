@@ -39,6 +39,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Retains extra spreadsheet columns as typed custom fields that can be searched, edited, inserted into listing templates, printed on packing slips, and used for sorting or grouping.
 - Includes Card Pulling Mode with buyer filtering, pull progress, printable pull sheets, and multi-level sorting/grouping by location or any standard or imported custom field.
 - Keeps listing references sequential after deletion, sorting, or reordering while permanent internal IDs preserve claims, offers, images, and history; references can also be frozen after posting starts.
+- Moves any selected group of Sale Workspace cards together to a chosen position and refreshes the image Post queue to match the table immediately.
 - Adds a notification center for offers, payment, addresses, image problems, pulling, packing, tracking, shipping, profit warnings, and portable-file issues, with direct links, snoozing, and dismissal.
 - Supports bulk card deletion, bulk image confirmation, and duplicate-card labels.
 - Keeps image lookup and exclusion folders shared across sales.
@@ -53,7 +54,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Adds optional PayPal, Venmo, Zelle, Apple Pay, and Cash App QR codes to visual buyer summaries.
 - Keeps sale data stored locally on the computer.
 - Saves and opens portable `.csm` workspace files from OneDrive or another synced folder while retaining the normal local recovery copy.
-- Detects newer cloud copies and active-file locks, creates verified portable-file backups, and opens potentially conflicting files read-only.
+- Detects newer cloud copies and active-file locks, creates verified portable-file backups, and opens potentially conflicting files read-only. New rotating portable backups default to every 30 minutes with a five-copy limit per file.
 - Relinks moved OneDrive images automatically from relative paths or with a one-time image-folder selection, and can create a portable folder containing the CSM file and its images.
 - Reviews unresolved images inside the CSM file screen, where each link can be replaced manually or intentionally left unmatched.
 - Restores verified portable-file recovery copies without leaving the app.
@@ -77,6 +78,7 @@ A local-first Windows desktop app for preparing card-sale listings, matching car
 - Avoids creating permanent buyer profiles for pending offers; profiles begin with an accepted claim or offer, an order, or an intentional manual save.
 - Remembers buyer aliases and address history, flags missing, incomplete, changed, duplicate, invalid-state, malformed ZIP, duplicate-line, and PO-box mailing-address concerns, and lets a seller explicitly validate a confirmed address so the same change warning does not return.
 - Keeps the Buyer Profiles directory in its own scrolling panel while the selected profile remains visible beside it.
+- Renames buyers everywhere without creating a second profile, and safely merges duplicate names across regular and one-off order history.
 - Generates editable sale-introduction posts from the current sale and saved shipping settings.
 - Includes a Packing Slip Studio with saved branded templates, logos, custom colors and messages, local QR codes, links, card thumbnails, configurable sections, live previews, and letter/half-sheet/4×6/compact layouts.
 - Prints filtered buyer slips in one job, exports combined PDFs, tracks successful prints and reprints, and can add a shipping-label page.

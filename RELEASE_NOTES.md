@@ -1,3 +1,16 @@
+# Card Sale Manager 2.4.0
+
+## Highlights
+
+- Adds multi-card manual posting order in Sale Workspace. Selected cards can move together to the top, bottom, one position up or down, or an exact starting position while preserving their relative order.
+- Keeps the image Post queue synchronized immediately with dropdown sorting, single-card moves, drag reordering, and multi-card moves.
+- Adds direct buyer renaming across active and archived sales, regular orders, one-off orders, and Buyer Profiles while retaining the old name as an alias.
+- Routes rename collisions into the existing merge workflow instead of overwriting a buyer.
+- Expands buyer merging to active and archived one-off orders and creates a verified local safety backup before merging or renaming.
+- Changes portable CSM recovery copies to a configurable rotating system that defaults to one backup every 30 minutes and keeps at most five new rotating copies per file.
+- Restricts automatic cleanup to backups positively identified as CSM 2.4 rotating copies. Primary CSM files, manual exports, protected update archives, and older unclassified recovery files are never deleted automatically.
+- Updates the built-in user guide and release QA for the new ordering, buyer-management, and backup controls.
+
 # Card Sale Manager 2.3.2
 
 ## Improvements

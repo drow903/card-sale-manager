@@ -144,9 +144,30 @@ function activeCsmBackupFolder() {
   return path.join(path.dirname(activeCsmDocument.path), ".csm-backups", path.basename(activeCsmDocument.path, path.extname(activeCsmDocument.path)));
 }
 
+function portableBackupPolicy(payload = activeCsmDocument?.envelope?.data) {
+  const saved = payload?.preferences?.portableBackups || {};
+  return {
+    intervalMinutes: Math.max(15, Math.min(1440, Math.round(Number(saved.intervalMinutes) || 30))),
+    maxBackups: Math.max(1, Math.min(10, Math.round(Number(saved.maxBackups) || 5)))
+  };
+}
+
+function rotatingCsmBackupName(name) {
+  return /^CSM-Rotating-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-.*\.csm$/i.test(String(name || ""));
+}
+
+async function pruneRotatingCsmBackups(folder, maxBackups = 5) {
+  if (!folder) return [];
+  let names = [];
+  try { names = (await fs.promises.readdir(folder)).filter((name) => rotatingCsmBackupName(name)).sort().reverse(); } catch { return []; }
+  await Promise.all(names.slice(maxBackups).map((name) => fs.promises.unlink(path.join(folder, name)).catch(() => {})));
+  return names.slice(0, maxBackups);
+}
+
 async function listCsmBackups() {
   const folder = activeCsmBackupFolder();
   if (!folder) return [];
+  await pruneRotatingCsmBackups(folder, portableBackupPolicy().maxBackups);
   let names;
   try { names = (await fs.promises.readdir(folder)).filter((name) => name.endsWith(".csm")).sort().reverse(); } catch { return []; }
   const backups = [];
@@ -193,21 +214,22 @@ function activeForeignLock(filePath) {
   return Number.isFinite(age) && age < 12 * 60 * 60 * 1000 ? lock : null;
 }
 
-async function writeCsmBackup(filePath, reason = "save", minimumAgeMs = 15 * 60 * 1000) {
+async function writeCsmBackup(filePath, reason = "save", options = {}) {
   if (!fs.existsSync(filePath)) return null;
+  const minimumAgeMs = Number.isFinite(Number(options.minimumAgeMs)) ? Number(options.minimumAgeMs) : 30 * 60 * 1000;
+  const maxBackups = Math.max(1, Math.min(10, Math.round(Number(options.maxBackups) || 5)));
   const folder = path.join(path.dirname(filePath), ".csm-backups", path.basename(filePath, path.extname(filePath)));
   await fs.promises.mkdir(folder, { recursive: true });
-  const existing = (await fs.promises.readdir(folder)).filter((name) => name.endsWith(".csm")).sort().reverse();
+  const existing = (await fs.promises.readdir(folder)).filter((name) => rotatingCsmBackupName(name)).sort().reverse();
   if (minimumAgeMs && existing[0]) {
     const newest = await fs.promises.stat(path.join(folder, existing[0]));
     if (Date.now() - newest.mtimeMs < minimumAgeMs) return path.join(folder, existing[0]);
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const destination = path.join(folder, `${stamp}-${String(reason).replace(/[^a-z0-9-]/gi, "-")}.csm`);
+  const destination = path.join(folder, `CSM-Rotating-${stamp}-${String(reason).replace(/[^a-z0-9-]/gi, "-")}.csm`);
   await fs.promises.copyFile(filePath, destination);
   parseEnvelope(await fs.promises.readFile(destination, "utf8"));
-  const files = (await fs.promises.readdir(folder)).filter((name) => name.endsWith(".csm")).sort().reverse();
-  await Promise.all(files.slice(20).map((name) => fs.promises.unlink(path.join(folder, name)).catch(() => {})));
+  await pruneRotatingCsmBackups(folder, maxBackups);
   return destination;
 }
 
@@ -235,6 +257,7 @@ async function openCsmDocument(filePath, options = {}) {
   releaseCsmLock();
   const readOnly = Boolean(options.readOnly);
   activeCsmDocument = { path: resolvedPath, revision: Number(envelope.revision || 0), documentId: envelope.documentId, readOnly, conflict: false, envelope, missingImages: resolved.missing };
+  await pruneRotatingCsmBackups(activeCsmBackupFolder(), portableBackupPolicy(envelope.data).maxBackups);
   if (!readOnly) writeCsmLock(resolvedPath);
   await rememberCsmFile(resolvedPath);
   return { success: true, data: resolved.data, document: csmStatus(), autoRelinked: Object.keys(resolved.replacements).length, missingImages: resolved.missing.length };
@@ -261,7 +284,8 @@ async function saveActiveCsmDocument(payload, options = {}) {
   envelope.documentId = activeCsmDocument.documentId || envelope.documentId;
   const serialized = JSON.stringify(envelope, null, 2);
   const temp = `${activeCsmDocument.path}.${csmInstanceId}.tmp`;
-  await writeCsmBackup(activeCsmDocument.path, options.reason || "pre-save", options.forceBackup ? 0 : undefined);
+  const backupPolicy = portableBackupPolicy(payload);
+  await writeCsmBackup(activeCsmDocument.path, options.reason || "pre-save", { minimumAgeMs: options.forceBackup ? 0 : backupPolicy.intervalMinutes * 60 * 1000, maxBackups: backupPolicy.maxBackups });
   await fs.promises.writeFile(temp, serialized, "utf8");
   parseEnvelope(await fs.promises.readFile(temp, "utf8"));
   await fs.promises.rename(temp, activeCsmDocument.path);

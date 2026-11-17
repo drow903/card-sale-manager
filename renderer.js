@@ -409,6 +409,14 @@ function ensurePweLabelSettings() {
   return state.preferences.pweLabel;
 }
 
+function ensurePortableBackupSettings() {
+  state.preferences ||= {};
+  state.preferences.portableBackups ||= { intervalMinutes: 30, maxBackups: 5 };
+  state.preferences.portableBackups.intervalMinutes = [15, 30, 60].includes(Number(state.preferences.portableBackups.intervalMinutes)) ? Number(state.preferences.portableBackups.intervalMinutes) : 30;
+  state.preferences.portableBackups.maxBackups = Math.max(1, Math.min(10, Math.round(Number(state.preferences.portableBackups.maxBackups) || 5)));
+  return state.preferences.portableBackups;
+}
+
 function importPresets() {
   state.importPresets ||= [];
   return state.importPresets;
@@ -994,8 +1002,11 @@ function renderCsmFileManager(refreshRecent = false) {
     const activeLink = links.find(({ sale }) => state.sales.some((item) => item.id === sale.id));
     return `<article class="csm-manager-item"><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(item.fileName || item.originalPath)}</small></div><div class="row-actions">${activeLink ? `<button type="button" class="secondary" data-csm-manual-image="${escapeHtml(activeLink.card.id)}" data-csm-sale="${escapeHtml(activeLink.sale.id)}" data-csm-image-slot="${escapeHtml(activeLink.slot)}">Choose image</button>` : ""}<button type="button" class="secondary" data-csm-clear-image="${escapeHtml(item.originalPath)}">Leave unmatched</button></div></article>`;
   }).join("");
-  $("#csmBackupSection").classList.toggle("hidden", !portableDocument.active || !csmBackups.length);
-  $("#csmBackupList").innerHTML = csmBackups.map((item) => `<article class="csm-manager-item"><div><strong>${escapeHtml(new Date(item.savedAt).toLocaleString())}</strong><small>Revision ${Number(item.revision || 0)} · ${Math.max(1, Math.round(Number(item.size || 0) / 1024))} KB</small></div><button type="button" class="secondary" data-restore-csm-backup="${escapeHtml(item.path)}">Restore</button></article>`).join("");
+  const backupSettings = ensurePortableBackupSettings();
+  $("#csmBackupSection").classList.toggle("hidden", !portableDocument.active);
+  $("#portableBackupInterval").value = String(backupSettings.intervalMinutes);
+  $("#portableBackupLimit").value = String(backupSettings.maxBackups);
+  $("#csmBackupList").innerHTML = csmBackups.length ? csmBackups.map((item) => `<article class="csm-manager-item"><div><strong>${escapeHtml(new Date(item.savedAt).toLocaleString())}</strong><small>Revision ${Number(item.revision || 0)} · ${Math.max(1, Math.round(Number(item.size || 0) / 1024))} KB</small></div><button type="button" class="secondary" data-restore-csm-backup="${escapeHtml(item.path)}">Restore</button></article>`).join("") : `<div class="empty-state"><p>No rotating recovery copies have been created yet.</p></div>`;
   $("#recentCsmFiles").innerHTML = recentCsmFiles.length ? recentCsmFiles.map((item) => `<article class="recent-csm-item ${item.exists === false ? "missing" : ""}"><button type="button" class="recent-csm-main" data-open-csm="${escapeHtml(item.path)}" ${item.exists === false ? "disabled" : ""}><span>${item.pinned ? "★ " : ""}${escapeHtml(item.name || item.path.split(/[\\/]/).pop())}</span><small>${item.exists === false ? "File unavailable · " : ""}${escapeHtml(item.path)}</small></button><div class="recent-csm-actions"><button type="button" class="secondary" data-csm-recent-action="pin" data-csm-path="${escapeHtml(item.path)}">${item.pinned ? "Unpin" : "Pin"}</button><button type="button" class="secondary" data-csm-recent-action="reveal" data-csm-path="${escapeHtml(item.path)}">Show</button><button type="button" class="secondary" data-csm-recent-action="remove" data-csm-path="${escapeHtml(item.path)}">Remove</button></div></article>`).join("") : `<div class="empty-state"><p>No recent CSM files yet.</p></div>`;
   $("#csmFileBtn").textContent = portableDocument.active ? `CSM: ${portableDocument.name}` : "Portable CSM file";
   document.title = portableDocument.active ? `${activeSale().name} — Card Sale Manager` : "Card Sale Manager";
@@ -1495,6 +1506,7 @@ function updateListingBulkControls(visibleCards = []) {
   $("#listingSelectionCount").textContent = `${selectedListingIds.size} selected`;
   $("#deleteSelectedCardsBtn").disabled = selectedListingIds.size === 0;
   $("#bulkEditBtn").disabled = selectedListingIds.size === 0;
+  $("#moveSelectedCardsBtn").disabled = selectedListingIds.size === 0;
   $("#attachOrderedImagesBtn").disabled = selectedListingIds.size === 0 || (currentLicense.configured && !currentLicense.licensed);
   const selectedCards = activeSale().cards.filter((card) => selectedListingIds.has(card.id));
   $("#bundleOfferBtn").disabled = selectedCards.length < 2 || selectedCards.some((card) => card.status !== "available" || card.buyer || card.bundleId);
@@ -2094,6 +2106,8 @@ function renderBuyerProfiles() {
   if (!buyer) { $("#buyerProfileDetail").innerHTML = `<div class="empty-state"><h3>No buyer history yet</h3><p>Profiles are created when a card is claimed or an offer is accepted.</p><button type="button" class="primary" data-empty-action="claims">Open Claims Desk</button></div>`; return; }
   const history = buyerHistory(buyer); const profile = buyerProfile(buyer); const matches = repeatBuyerMatches(buyer); const warnings = addressWarnings(buyer);
   $("#buyerProfileDetail").innerHTML = `<div class="panel-header"><div><h2>${escapeHtml(buyer)}</h2><p>${history.cards.length} lifetime cards · ${history.oneOffOrders.length} one-off order${history.oneOffOrders.length === 1 ? "" : "s"} · ${money(history.spent)} spent</p></div><span class="status ${warnings.length ? "offered" : "available"}">${warnings.length ? `${warnings.length} address warning${warnings.length === 1 ? "" : "s"}` : "Address ready"}</span></div><div class="profile-content"><div class="profile-stats"><article><span>Favorite player</span><strong>${escapeHtml(history.player || "—")}</strong></article><article><span>Favorite brand</span><strong>${escapeHtml(history.brand || "—")}</strong></article><article><span>Favorite year</span><strong>${escapeHtml(history.year || "—")}</strong></article></div>${warnings.length ? `<div class="address-warnings">${warnings.map((warning) => `<span>⚑ ${escapeHtml(warning)}${/PO box/i.test(warning) ? `<button type="button" class="warning-dismiss-x" data-dismiss-profile-po-box aria-label="Dismiss PO box warning" title="Dismiss this warning">×</button>` : ""}</span>`).join("")}</div>` : ""}<label>Facebook names / aliases<input id="profileAliases" value="${escapeHtml(profile.aliases.join(", "))}" placeholder="Alex Smith, Alex S." /><small>Claims under these names will be assigned to this buyer.</small></label><label>Buyer tags<input id="profileTags" value="${escapeHtml(profile.tags.join(", "))}" placeholder="Vintage, Yankees, set builder" /></label><label>Mailing address<textarea id="profileAddress" rows="4">${escapeHtml(profile.address || "")}</textarea></label><label>Notes<textarea id="profileNotes" rows="4">${escapeHtml(profile.notes || "")}</textarea></label><div class="profile-save-actions"><button id="saveBuyerProfileBtn" class="primary">Save and validate profile</button><button id="deleteBuyerProfileBtn" type="button" class="secondary danger-button">Delete buyer profile</button></div>${profile.previousAddresses.length ? `<details class="address-history"><summary>Previous addresses (${profile.previousAddresses.length})</summary>${profile.previousAddresses.slice().reverse().map((item) => `<div><span>${escapeHtml(item.address).replace(/\n/g, "<br>")}</span><small>${new Date(item.changedAt).toLocaleDateString()}</small></div>`).join("")}</details>` : ""}${matches.length ? `<section class="profile-alert"><h3>Available cards this buyer may like</h3>${matches.map((card) => `<button data-profile-card="${card.id}"><strong>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</strong><span>${money(card.price)}</span></button>`).join("")}</section>` : ""}<section><h3>Purchase history</h3><div class="profile-history">${history.cards.slice().reverse().map((card) => `<article><span>${escapeHtml(card.year)} ${escapeHtml(card.set)} ${escapeHtml(card.name)}</span><strong>${money(card.claimPrice ?? card.price)}</strong></article>`).join("")}${history.oneOffOrders.slice().reverse().map((order) => `<article><span><strong>${escapeHtml(order.reference)}</strong> · One-off order · ${order.items.reduce((sum, item) => sum + item.quantity, 0)} item${order.items.reduce((sum, item) => sum + item.quantity, 0) === 1 ? "" : "s"}</span><strong>${money(oneOffTotals(order).total)}</strong></article>`).join("") || (history.cards.length ? "" : "No purchases recorded.")}</div></section></div>`;
+  const deleteProfileButton = $("#deleteBuyerProfileBtn");
+  if (deleteProfileButton) deleteProfileButton.insertAdjacentHTML("beforebegin", `<button id="renameBuyerProfileBtn" type="button" class="secondary">Rename buyer</button>`);
 }
 
 async function deleteBuyerProfile(name) {
@@ -2293,7 +2307,50 @@ function moveCardToPosition(cardId) {
   ordered.forEach((item, index) => item.customOrder = index + 1);
   sale.sortMode = "custom";
   renumberCardReferences(sale, { audit: false });
-  saveSoon(); renderListings(); toast(`${card.name} moved to position ${position}.`);
+  saveSoon(); renderListings(); renderImages(); toast(`${card.name} moved to position ${position}. Post queue updated.`);
+}
+
+function selectedCardsInDisplayedOrder() {
+  return sortedSaleCards(activeSale()).filter((card) => selectedListingIds.has(card.id));
+}
+
+function openMoveSelectedCards() {
+  const sale = activeSale(); const selected = selectedCardsInDisplayedOrder();
+  if (!selected.length) return toast("Select at least one card to move.");
+  const ordered = sortedSaleCards(sale);
+  const positions = selected.map((card) => ordered.findIndex((item) => item.id === card.id) + 1);
+  const first = Math.min(...positions); const last = Math.max(...positions); const maxStart = Math.max(1, sale.cards.length - selected.length + 1);
+  $("#moveSelectedCardsSummary").textContent = `${selected.length} selected card${selected.length === 1 ? "" : "s"} currently span position${first === last ? "" : "s"} ${first}${first === last ? "" : `–${last}`}. They will move together as one block.`;
+  $("#moveSelectedCardsPosition").max = String(maxStart); $("#moveSelectedCardsPosition").value = String(Math.min(first, maxStart));
+  $("#moveSelectedCardsDialog").showModal();
+}
+
+function moveSelectedCards(action, requestedPosition = null) {
+  const sale = activeSale(); const ordered = sortedSaleCards(sale); const selected = ordered.filter((card) => selectedListingIds.has(card.id));
+  if (!selected.length) return toast("Select at least one card to move.");
+  const selectedIds = new Set(selected.map((card) => card.id));
+  const firstSelectedIndex = ordered.findIndex((card) => selectedIds.has(card.id));
+  const insertionBeforeRemoval = ordered.slice(0, firstSelectedIndex).filter((card) => !selectedIds.has(card.id)).length;
+  const remaining = ordered.filter((card) => !selectedIds.has(card.id));
+  let insertionIndex;
+  if (action === "top") insertionIndex = 0;
+  else if (action === "bottom") insertionIndex = remaining.length;
+  else if (action === "up") insertionIndex = Math.max(0, insertionBeforeRemoval - 1);
+  else if (action === "down") insertionIndex = Math.min(remaining.length, insertionBeforeRemoval + 1);
+  else {
+    const position = Number(requestedPosition); const maxStart = remaining.length + 1;
+    if (!Number.isInteger(position) || position < 1 || position > maxStart) return toast(`Enter a starting position from 1 to ${maxStart}.`);
+    insertionIndex = position - 1;
+  }
+  const next = [...remaining.slice(0, insertionIndex), ...selected, ...remaining.slice(insertionIndex)];
+  const unchanged = next.every((card, index) => card.id === ordered[index]?.id) && sale.sortMode === "custom";
+  if (unchanged) { $("#moveSelectedCardsDialog").close(); return toast("Those cards are already in that position."); }
+  snapshotSale(`Before moving ${selected.length} selected card${selected.length === 1 ? "" : "s"}`);
+  next.forEach((card, index) => card.customOrder = index + 1); sale.sortMode = "custom";
+  renumberCardReferences(sale, { audit: false });
+  recordAudit("listing-order", `Moved ${selected.length} selected card${selected.length === 1 ? "" : "s"} to position ${insertionIndex + 1}`, { cardIds: selected.map((card) => card.id) });
+  saveSoon(); $("#moveSelectedCardsDialog").close(); renderListings(); renderImages();
+  toast(`${selected.length} card${selected.length === 1 ? "" : "s"} moved to position ${insertionIndex + 1}. Post queue updated.`);
 }
 
 function openCloseSale() {
@@ -4754,12 +4811,44 @@ function openSaleReplies() {
 }
 function saveSaleReplies() { $$('[data-sale-reply]').forEach((input) => ensureSaleReplies()[input.dataset.saleReply] = input.value.trim() || DEFAULT_SALE_REPLIES[input.dataset.saleReply]); saveSoon(); toast("Sale reply library saved."); }
 
-function openBuyerMerge() {
+function openBuyerMerge(sourceName = "", targetName = "") {
   const names = allBuyerNames(); if (names.length < 2) return toast("At least two buyer profiles are needed to merge.");
   const options = names.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
-  $("#mergeBuyerSource").innerHTML = options; $("#mergeBuyerTarget").innerHTML = options; $("#mergeBuyerTarget").selectedIndex = 1; updateBuyerMergePreview(); $("#mergeBuyerDialog").showModal();
+  $("#mergeBuyerSource").innerHTML = options; $("#mergeBuyerTarget").innerHTML = options;
+  if (sourceName && names.includes(sourceName)) $("#mergeBuyerSource").value = sourceName;
+  if (targetName && names.includes(targetName)) $("#mergeBuyerTarget").value = targetName;
+  else $("#mergeBuyerTarget").selectedIndex = Math.min(1, names.length - 1);
+  updateBuyerMergePreview(); $("#mergeBuyerDialog").showModal();
 }
-function updateBuyerMergePreview() { const source = $("#mergeBuyerSource").value; const target = $("#mergeBuyerTarget").value; const count = historicalSales().flatMap((sale) => sale.cards).filter((card) => card.buyer === source).length; $("#mergeBuyerPreview").textContent = source === target ? "Choose two different profiles." : `${count} card record${count === 1 ? "" : "s"}, orders, and saved profile details will move from ${source} to ${target}.`; }
+function updateBuyerMergePreview() { const source = $("#mergeBuyerSource").value; const target = $("#mergeBuyerTarget").value; const count = historicalSales().flatMap((sale) => sale.cards).filter((card) => card.buyer === source).length; const oneOffs = [...(state.oneOffOrders || []), ...(state.archivedOneOffOrders || [])].filter((order) => order.buyer === source).length; $("#mergeBuyerPreview").textContent = source === target ? "Choose two different profiles." : `${count} card record${count === 1 ? "" : "s"}, ${oneOffs} one-off order${oneOffs === 1 ? "" : "s"}, orders, and saved profile details will move from ${source} to ${target}.`; }
+
+function openRenameBuyer(name = state.profileBuyer) {
+  if (!name) return toast("Choose a buyer first.");
+  $("#renameBuyerOriginal").value = name; $("#renameBuyerName").value = name; $("#renameBuyerDialog").showModal();
+  setTimeout(() => { $("#renameBuyerName").focus(); $("#renameBuyerName").select(); }, 0);
+}
+
+async function renameBuyerProfile() {
+  const source = $("#renameBuyerOriginal").value.trim(); const requested = $("#renameBuyerName").value.replace(/\s+/g, " ").trim();
+  if (!source || !requested) return toast("Enter the buyer’s new name.");
+  if (source === requested) { $("#renameBuyerDialog").close(); return toast("The buyer name was not changed."); }
+  const collision = allBuyerNames().find((name) => name !== source && name.toLowerCase() === requested.toLowerCase());
+  if (collision) { $("#renameBuyerDialog").close(); openBuyerMerge(source, collision); return toast(`${collision} already exists. Review the merge instead of overwriting that profile.`); }
+  await saveNow(); const backup = await window.cardSale.backup(`before-rename-buyer-${Date.now()}`);
+  if (!backup?.ok) return toast("CSM could not create a safety backup, so the buyer was not renamed.");
+  historicalSales().forEach((sale) => {
+    sale.cards.forEach((card) => { if (card.buyer === source) card.buyer = requested; });
+    (sale.bundles || []).forEach((bundle) => { if (bundle.buyer === source) bundle.buyer = requested; });
+    if (sale.orders?.[source]) { sale.orders[requested] = sale.orders[source]; delete sale.orders[source]; }
+    (sale.audit || []).forEach((item) => { if (item.buyer === source) item.buyer = requested; });
+  });
+  [...(state.oneOffOrders || []), ...(state.archivedOneOffOrders || [])].forEach((order) => { if (order.buyer === source) order.buyer = requested; });
+  const profile = state.buyerProfiles?.[source] || blankBuyerProfile(); profile.aliases = [...new Set([...(profile.aliases || []), source].filter((name) => name.toLowerCase() !== requested.toLowerCase()))];
+  state.buyerProfiles[requested] = profile; delete state.buyerProfiles[source];
+  if (state.selectedBuyer === source) state.selectedBuyer = requested; state.profileBuyer = requested;
+  recordAudit("buyer-rename", `Renamed buyer ${source} to ${requested}`, { buyer: requested });
+  $("#renameBuyerDialog").close(); saveSoon(); render(); toast(`${source} renamed to ${requested} everywhere.`);
+}
 
 function openOneOffOrders(create = false) {
   ensureOneOffState();
@@ -4817,8 +4906,10 @@ function savePaymentQrSettings() {
   PAYMENT_QR_METHODS.forEach(([key]) => { settings[key].enabled = Boolean($(`[data-payment-qr-enabled="${key}"]`)?.checked); settings[key].value = String($(`[data-payment-qr-value="${key}"]`)?.value || "").trim(); });
   saveSoon(); $("#paymentQrDialog").close(); toast("Payment QR options saved.");
 }
-function mergeBuyerProfiles() {
+async function mergeBuyerProfiles() {
   const source = $("#mergeBuyerSource").value; const target = $("#mergeBuyerTarget").value; if (!source || !target || source === target) return toast("Choose two different buyer profiles.");
+  await saveNow(); const backup = await window.cardSale.backup(`before-merge-buyers-${Date.now()}`);
+  if (!backup?.ok) return toast("CSM could not create a safety backup, so the profiles were not merged.");
   const from = buyerProfile(source); const to = ensureBuyerProfile(target); let moved = 0;
   historicalSales().forEach((sale) => {
     sale.cards.forEach((card) => { if (card.buyer === source) { card.buyer = target; moved += 1; } });
@@ -4830,9 +4921,10 @@ function mergeBuyerProfiles() {
     }
     (sale.audit || []).forEach((item) => { if (item.buyer === source) item.buyer = target; });
   });
+  [...(state.oneOffOrders || []), ...(state.archivedOneOffOrders || [])].forEach((order) => { if (order.buyer === source) { order.buyer = target; moved += 1; } });
   to.aliases = [...new Set([...(to.aliases || []), source, ...(from.aliases || [])])]; to.tags = [...new Set([...(to.tags || []), ...(from.tags || [])])];
   to.notes = [to.notes, from.notes].filter(Boolean).join("\n"); if (!to.address && from.address) { to.address = from.address; to.validatedAddress = from.validatedAddress || ""; to.addressValidatedAt = from.addressValidatedAt || ""; } to.previousAddresses = [...(to.previousAddresses || []), ...(from.previousAddresses || [])]; to.dismissedPoBoxWarnings = [...new Set([...(to.dismissedPoBoxWarnings || []), ...(from.dismissedPoBoxWarnings || [])])];
-  delete state.buyerProfiles[source]; state.selectedBuyer = target; state.profileBuyer = target; recordAudit("buyer-merge", `Merged ${source} into ${target}`, { buyer: target }); $("#mergeBuyerDialog").close(); saveSoon(); render(); toast(`${source} merged into ${target} across ${moved} card records.`);
+  delete state.buyerProfiles[source]; state.selectedBuyer = target; state.profileBuyer = target; recordAudit("buyer-merge", `Merged ${source} into ${target}`, { buyer: target }); $("#mergeBuyerDialog").close(); saveSoon(); render(); toast(`${source} merged into ${target} across ${moved} linked records.`);
 }
 
 function openCarryover() {
@@ -5114,7 +5206,7 @@ function bindEvents() {
     state.sales.push(sale); state.activeSaleId = sale.id; state.selectedBuyer = ""; resetListingView(); $("#newSaleDialog").close(); saveSoon(); render(); toast(sale.beginnerJourney ? "New sale created. CSM will guide you through the first one." : "New sale created."); if (sale.beginnerJourney) setTimeout(openGuidedSetup, 250);
   });
   $("#saleSelect").addEventListener("change", (event) => { state.activeSaleId = event.target.value; state.selectedBuyer = ""; resetListingView(); saveSoon(); render(); });
-  $("#listingSort").addEventListener("change", (event) => { activeSale().sortMode = event.target.value; renumberCardReferences(activeSale(), { audit: false }); saveSoon(); renderListings(); });
+  $("#listingSort").addEventListener("change", (event) => { activeSale().sortMode = event.target.value; renumberCardReferences(activeSale(), { audit: false }); saveSoon(); renderListings(); renderImages(); });
   $$("[data-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; saleViewState().filter = state.filter; $$("[data-filter]").forEach((item) => item.classList.toggle("active", item === button)); saveSoon(); renderListings(); }));
   $("#cardSearch").addEventListener("input", (event) => { state.query = event.target.value; saleViewState().query = state.query; saveSoon(); scheduleUiTask("card-search", renderListings); });
   $("#listingRows").addEventListener("click", (event) => {
@@ -5167,7 +5259,7 @@ function bindEvents() {
     const from = ordered.findIndex((card) => card.id === draggedListingId); const to = ordered.findIndex((card) => card.id === target.dataset.listingRow);
     const [moved] = ordered.splice(from, 1); ordered.splice(to, 0, moved); ordered.forEach((card, index) => card.customOrder = index + 1);
     renumberCardReferences(activeSale(), { audit: false });
-    draggedListingId = ""; saveSoon(); renderListings();
+    draggedListingId = ""; saveSoon(); renderListings(); renderImages();
   });
   ["dragenter", "dragover"].forEach((type) => $("#listingRows").addEventListener(type, (event) => {
     if (![...(event.dataTransfer?.types || [])].includes("Files")) return;
@@ -5197,6 +5289,9 @@ function bindEvents() {
     renderListings();
   });
   $("#deleteSelectedCardsBtn").addEventListener("click", deleteSelectedCards);
+  $("#moveSelectedCardsBtn").addEventListener("click", openMoveSelectedCards);
+  $("#moveSelectedCardsDialog").addEventListener("click", (event) => { const action = event.target.dataset.moveSelectedAction; if (action) moveSelectedCards(action); });
+  $("#applySelectedCardsPositionBtn").addEventListener("click", () => moveSelectedCards("position", $("#moveSelectedCardsPosition").value));
   $("#imageQueue").addEventListener("dragstart", async (event) => {
     const image = event.target.closest("[data-image-path]");
     if (!image) return;
@@ -5573,6 +5668,8 @@ function bindEvents() {
     const button = event.target.closest("[data-open-csm]"); if (button && !button.disabled) openCsmFile(button.dataset.openCsm);
   });
   $("#openCsmBackupsBtn").addEventListener("click", () => window.cardSale.revealCsm("backups"));
+  $("#portableBackupInterval").addEventListener("change", (event) => { ensurePortableBackupSettings().intervalMinutes = Number(event.target.value) || 30; saveSoon(); toast("Portable backup interval saved."); });
+  $("#portableBackupLimit").addEventListener("change", (event) => { const value = Math.max(1, Math.min(10, Math.round(Number(event.target.value) || 5))); ensurePortableBackupSettings().maxBackups = value; event.target.value = String(value); saveSoon(); toast(`CSM will keep up to ${value} rotating portable backup${value === 1 ? "" : "s"}.`); });
   $("#csmBackupList").addEventListener("click", async (event) => { const button = event.target.closest("[data-restore-csm-backup]"); if (!button || !window.confirm("Restore this recovery copy? CSM will protect the current version first.")) return; const result = await window.cardSale.restoreCsmBackup(button.dataset.restoreCsmBackup); if (!result?.success) return toast(result?.message || "That recovery copy could not be restored."); window.location.reload(); });
   $("#csmMissingImages").addEventListener("click", async (event) => {
     const choose = event.target.closest("[data-csm-manual-image]");
@@ -5599,7 +5696,10 @@ function bindEvents() {
   $("#mergeBuyerSource").addEventListener("change", updateBuyerMergePreview);
   $("#mergeBuyerTarget").addEventListener("change", updateBuyerMergePreview);
   $("#confirmMergeBuyerBtn").addEventListener("click", mergeBuyerProfiles);
+  $("#confirmRenameBuyerBtn").addEventListener("click", renameBuyerProfile);
+  $("#renameBuyerDialog").addEventListener("submit", (event) => { event.preventDefault(); renameBuyerProfile(); });
   $("#buyerProfileList").addEventListener("click", (event) => { const button = event.target.closest("[data-profile-buyer]"); if (button) { state.profileBuyer = button.dataset.profileBuyer; renderBuyerProfiles(); } });
+  $("#buyerProfileDetail").addEventListener("click", (event) => { if (event.target.id === "renameBuyerProfileBtn") openRenameBuyer(); });
   $("#buyerProfileDetail").addEventListener("click", (event) => { if (event.target.matches("[data-dismiss-profile-po-box]")) { const profile = ensureBuyerProfile(state.profileBuyer); profile.dismissedPoBoxWarnings ||= []; const key = `${normalizedAddress(profile.address)}|*`; if (!profile.dismissedPoBoxWarnings.includes(key)) profile.dismissedPoBoxWarnings.push(key); saveSoon(); renderBuyerProfiles(); renderOrders(); return toast("PO box warning dismissed for this saved address."); } if (event.target.id === "saveBuyerProfileBtn") { const profile = ensureBuyerProfile(state.profileBuyer); const nextAddress = $("#profileAddress").value.trim(); if (profile.address && normalizedAddress(profile.address) !== normalizedAddress(nextAddress)) profile.previousAddresses.push({ address: profile.address, changedAt: new Date().toISOString() }); profile.aliases = $("#profileAliases").value.split(",").map((alias) => alias.trim()).filter(Boolean); profile.tags = $("#profileTags").value.split(",").map((tag) => tag.trim()).filter(Boolean); profile.address = nextAddress; profile.validatedAddress = nextAddress; profile.addressValidatedAt = nextAddress ? new Date().toISOString() : ""; profile.notes = $("#profileNotes").value.trim(); profile.manuallySaved = true; saveSoon(); renderBuyerProfiles(); renderOrders(); toast(addressWarnings(state.profileBuyer).length ? "Profile saved. Review the remaining address warnings." : "Buyer profile saved and address validated."); } if (event.target.id === "deleteBuyerProfileBtn") deleteBuyerProfile(state.profileBuyer); if (event.target.dataset.profileCard) { showView("sale"); resetListingView(); state.query = activeSale().cards.find((card) => card.id === event.target.dataset.profileCard)?.name || ""; $("#cardSearch").value = state.query; renderListings(); } });
   $("#setupChooseFolderBtn").addEventListener("click", async () => { const folder = await window.cardSale.chooseLookupFolder(); if (folder) $("#setupImageFolder").value = folder; });
   $("#setupBackBtn").addEventListener("click", () => { setupStep = Math.max(0, setupStep - 1); renderSetupStep(); });

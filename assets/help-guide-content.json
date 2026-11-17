@@ -299,7 +299,7 @@
       "summary": "Manage every listing, image, custom field, order, and bulk change in the active sale.",
       "paragraphs": [
         "Sale Workspace is the main editing screen. Search and filter cards, copy individual listings, change images, select several rows, build bundles, bulk edit, review teams, carry over unsold cards, and close the sale. Selection controls and the most common card actions stay visible; Bundle offer, Teams, Catalog, Custom fields, References, carryover, and closing tools are grouped under Additional actions. Performance mode defaults to Auto and turns on deferred off-screen rendering for very large sales; use the sidebar button to force it on or off when troubleshooting. Long image-folder scans can be canceled from the real progress display without attaching partial matches.",
-        "The Post queue follows listing order. Copying listing text hides only the listing. Dragging an image hides only the image. Ctrl+Z restores the most recently hidden item.",
+        "The Post queue follows listing order. Copying listing text hides only the listing. Dragging an image hides only the image. Ctrl+Z restores the most recently hidden item. After selecting several cards, use Move selected to move them together to the top, bottom, one position up or down, or an exact starting position. Their relative order is preserved and the image queue refreshes immediately to match.",
         "Each listing shows a preparation badge such as Ready, Missing image, Image needs review, Price needs review, or Team not set. These badges use the same checklist as Command Center and Fix Center.",
         "Columns lets you simplify the table. Selection buttons can target a continuous range, visible rows, every filtered result, or the entire sale. Shift-clicking card checkboxes also selects a continuous range. Clicking a card title opens its detail drawer. Card numbers with letters, dashes, prefixes, and suffixes are kept intact and sorted naturally.",
         "Attach images in order is designed for sellers who do not want to rename files. Photograph selected cards in listing order, add the same number of images, inspect the preview, and confirm. CSM will not silently reuse one file or apply an oversized batch."
@@ -396,7 +396,8 @@
         "Profiles follow the buyer across sales. The buyer directory scrolls independently so the search and selected profile stay in place. Add aliases when one person uses different Facebook display names. Tags such as Vintage, Yankees, or Set Builder make the directory easier to search.",
         "Use Save and validate profile after confirming a changed mailing address with the buyer. That address becomes the approved address and clears the prior-address change warning; other problems such as a missing ZIP remain visible until corrected.",
         "Delete a profile when it was created by mistake, such as a rejected offer from someone who never became a customer. Historical sale records remain protected.",
-        "Use Merge profiles when two names belong to the same buyer. CSM moves their card history, orders, aliases, tags, notes, and address into the profile you keep."
+        "Use Rename buyer when the buyer is correct but their saved name needs to change. CSM updates active and archived sales, regular orders, one-off orders, and the directory while keeping the old name as an alias. If the new name already belongs to another profile, CSM opens the merge workflow instead of overwriting it.",
+        "Use Merge profiles when two names belong to the same buyer. CSM creates a safety backup, then moves their card history, regular and one-off orders, aliases, tags, notes, and address into the profile you keep."
       ]
     },
     {
@@ -437,9 +438,9 @@
       "title": "Use a portable CSM file",
       "summary": "Move one workspace between computers without turning CSM into a cloud service.",
       "paragraphs": [
-        "A portable .csm file contains your CSM workspace. Store it locally, on a USB or network drive, or in OneDrive, Google Drive, Dropbox, or another synced folder.",
+        "A portable .csm file contains your CSM workspace. Store it locally, on a USB or network drive, or in OneDrive, Google Drive, Dropbox, or another synced folder. By default, CSM creates no more than one rotating portable recovery copy every 30 minutes and keeps the newest five.",
         "Never edit the same file on two computers at once. Close CSM on the first computer and wait for the storage service to finish syncing before opening it on the second. CSM warns about locks and newer copies, but waiting for sync is still important.",
-        "Images remain separate files. If image paths differ on another computer, use the portable-file manager to choose the image folder and relink them."
+        "Images remain separate files. If image paths differ on another computer, use the portable-file manager to choose the image folder and relink them. The portable-file manager also lets you change the rotating-backup interval and maximum. Rotation deletes only recovery copies explicitly created by CSM as rotating backups; it never deletes the primary file, manual exports, protected update archives, or older unclassified files."
       ],
       "steps": [
         "Choose Portable CSM file in the sidebar.",
@@ -455,7 +456,7 @@
       "title": "Backups updates and recovery",
       "summary": "Understand what CSM saves and where to look when something goes wrong.",
       "paragraphs": [
-        "CSM saves locally as you work and shows Changes saved locally in the lower-left corner. Daily rotating backups protect recent work. Before an update, CSM creates a permanent update archive of the local workspace and any open portable file.",
+        "CSM saves locally as you work and shows Changes saved locally in the lower-left corner. Daily local backups protect recent work. Open portable files also receive rotating recovery copies; the default is every 30 minutes with a maximum of five. Before an update, CSM creates a separate permanent update archive of the local workspace and any open portable file.",
         "Updates should not remove sales or buyer profiles. If the current workspace ever looks wrong, stop entering new data until you inspect the portable file, update archive, and daily backups. Restoring one copy can replace newer work, so protect the current file first.",
         "Open data folder shows the local files CSM manages. Restore earlier version returns only the active sale to an earlier snapshot. The portable-file manager handles full-workspace recovery copies."
       ]

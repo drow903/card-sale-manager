@@ -162,6 +162,10 @@ tr:last-child td { border-bottom: 0; }
 .workspace-selection-group,.workspace-primary-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-width: 0; }
 .workspace-primary-actions { justify-content: flex-end; }
 .workspace-primary-actions button { white-space: nowrap; }
+.reorder-choice-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.reorder-choice-grid button { min-height: 44px; }
+.portable-backup-settings { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 12px 0; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--blue-soft); }
+.portable-backup-settings p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .selection-count { display: inline-flex; align-items: center; min-height: 28px; padding: 0 9px; border-radius: 999px; background: var(--soft); color: var(--ink); font-weight: 800; white-space: nowrap; }
 
 .archive-tabs { margin: 0 0 14px; width: fit-content; }
