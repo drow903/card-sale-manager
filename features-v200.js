@@ -96,22 +96,35 @@ function v2LivePayload() {
 
 function v2SyncPopout() { window.cardSale.syncLivePopout(v2LivePayload()).catch(() => {}); }
 
-async function v2HandlePopoutAction(action) {
+async function v2HandlePopoutAction(action, copyListing = copyAndHideCard) {
   const sale = v2SaleSettings(); const cards = liveCards(); const current = cards[Math.max(0, Math.min(liveIndex, cards.length - 1))];
-  if (action.type === "preferences") { Object.assign(sale.livePopoutPreferences, action.values || {}); saveSoon(); }
-  if (action.type === "previous") liveIndex = Math.max(0, liveIndex - 1);
-  if (action.type === "next") {
-    if (current?.liveCopyPending) { current.liveCopyPending = false; current.hiddenAfterCopy = true; current.completedAt = new Date().toISOString(); }
-    else liveIndex = Math.min(Math.max(0, cards.length - 1), liveIndex + 1);
-    saveSoon(); renderLiveSale();
+  let result = { requestId: action.requestId || "", ok: true, message: "" };
+  try {
+    if (action.type === "preferences") { Object.assign(sale.livePopoutPreferences, action.values || {}); saveSoon(); }
+    if (action.type === "previous") liveIndex = Math.max(0, liveIndex - 1);
+    if (action.type === "next") {
+      if (current?.liveCopyPending) { current.liveCopyPending = false; current.hiddenAfterCopy = true; current.completedAt = new Date().toISOString(); }
+      else liveIndex = Math.min(Math.max(0, cards.length - 1), liveIndex + 1);
+      saveSoon(); renderLiveSale();
+    }
+    if (action.type === "undo") undoLastCompletion();
+    if (action.type === "image-dragged") { const record = sale.images?.find((item) => String(item.path).toLowerCase() === String(action.path).toLowerCase()); if (record) { record.hiddenAfterDrag = true; record.hiddenAt = new Date().toISOString(); undoStack.push({ saleId: sale.id, imageId: record.id }); saveSoon(); } renderLiveSale(); }
+    if (action.type === "copy") {
+      if (!current || current.id !== action.cardId) throw new Error("That listing changed before it could be copied. Review the current card and try again.");
+      if (action.autoAdvance === false) {
+        const copied = await window.cardSale.copyText(formatLine(current)).catch(() => false); if (!copied) throw new Error("The listing could not be copied to the clipboard.");
+        current.postedAt ||= new Date().toISOString(); current.liveCopyPending = true; saveSoon(); renderLiveSale(); toast("Listing copied. Use Next when you’re ready."); result.message = "Listing copied ✓";
+      } else {
+        const copied = await copyListing(current.id); if (!copied) throw new Error("The listing could not be copied to the clipboard.");
+        liveIndex = Math.min(liveIndex, Math.max(0, liveCards().length - 1)); renderLiveSale(); result.message = "Listing copied and advanced ✓";
+      }
+    }
+  } catch (error) {
+    result = { ...result, ok: false, message: error?.message || "The pop-out action could not be completed." }; toast(result.message);
+  } finally {
+    v2SyncPopout(); if (result.requestId) window.cardSale.sendLivePopoutResult(result).catch(() => {});
   }
-  if (action.type === "undo") undoLastCompletion();
-  if (action.type === "image-dragged") { const record = sale.images?.find((item) => String(item.path).toLowerCase() === String(action.path).toLowerCase()); if (record) { record.hiddenAfterDrag = true; record.hiddenAt = new Date().toISOString(); undoStack.push({ saleId: sale.id, imageId: record.id }); saveSoon(); } renderLiveSale(); }
-  if (action.type === "copy" && current) {
-    if (action.autoAdvance === false) { await window.cardSale.copyText(formatLine(current)); current.postedAt ||= new Date().toISOString(); current.liveCopyPending = true; saveSoon(); renderLiveSale(); toast("Listing copied. Use Next when you’re ready."); }
-    else copyAndHideCard(current.id);
-  }
-  v2SyncPopout();
+  return result;
 }
 
 function v2LoadImage(source) { return new Promise((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error("The image file could not be decoded.")); image.src = source; }); }
@@ -330,5 +343,5 @@ function v2Init() {
   v2UpdateCaptureBadge();
 }
 
-window.CSMV2 = { syncPopout: v2SyncPopout, updateCaptureBadge: v2UpdateCaptureBadge, openOrderCards: v2OpenOrderCards };
+window.CSMV2 = { syncPopout: v2SyncPopout, updateCaptureBadge: v2UpdateCaptureBadge, pendingCaptureCount: () => v2PendingCaptures().length, openOrderCards: v2OpenOrderCards };
 window.addEventListener("DOMContentLoaded", v2Init);

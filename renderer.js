@@ -86,6 +86,7 @@ let listingSelectionAnchor = "";
 let selectedMatchIds = new Set();
 let selectedClaimIds = new Set();
 let claimBulkBuyerName = "";
+let selectedOrderBuyers = new Set();
 let availableUpdate = null;
 let liveIndex = 0;
 let profileQuery = "";
@@ -126,6 +127,10 @@ let lastSavedRevision = -1;
 let saveIdleHandle = null;
 let pendingSaleSnapshots = [];
 let snapshotIdleHandle = null;
+let viewBackStack = [];
+let viewForwardStack = [];
+let applyingViewHistory = false;
+let lastMouseNavigationAt = 0;
 const runtimeErrors = [];
 const scrubDiagnosticText = (value) => String(value ?? "").replace(/file:\/{2,3}[^\s)]+/gi, "[local path]").replace(/[A-Za-z]:[\\/][^\n\r]*/g, "[local path]").slice(0, 2000);
 window.addEventListener("error", (event) => { runtimeErrors.push({ at: new Date().toISOString(), type: "error", message: scrubDiagnosticText(event.message || "Unknown renderer error").slice(0, 500) }); if (runtimeErrors.length > 25) runtimeErrors.shift(); });
@@ -375,6 +380,7 @@ function ensureMessageTemplates() {
 
 function ensureQuickMessages() {
   const templates = ensureMessageTemplates();
+  state.preferences.hiddenQuickMessageBuiltins ||= [];
   state.preferences.quickMessages ||= QUICK_MESSAGE_BUILTINS.map(([key, name, category], index) => ({ id: `builtin-${key}`, builtInKey: key, name, category, body: templates[key], pinned: index === 0, versions: [], updatedAt: "" }));
   QUICK_MESSAGE_BUILTINS.forEach(([key, name, category]) => {
     let item = state.preferences.quickMessages.find((message) => message.builtInKey === key);
@@ -387,14 +393,21 @@ function ensureQuickMessages() {
 }
 
 function quickMessageById(id) { return ensureQuickMessages().find((message) => message.id === id); }
+function visibleQuickMessages() {
+  const hidden = new Set(state.preferences.hiddenQuickMessageBuiltins || []);
+  return ensureQuickMessages().filter((message) => !message.builtInKey || !hidden.has(message.builtInKey));
+}
+function hiddenQuickMessageDefaults() { return [...new Set(state.preferences.hiddenQuickMessageBuiltins || [])]; }
 
 function quickMessageRecommendationIds(buyer = state.selectedBuyer) {
-  if (!buyer || !buyers().includes(buyer)) return ["builtin-orderSummary"];
+  const available = new Set(visibleQuickMessages().map((message) => message.id));
+  const keepAvailable = (ids) => ids.filter((id) => available.has(id));
+  if (!buyer || !buyers().includes(buyer)) return keepAvailable(["builtin-orderSummary"]);
   const order = orderFor(buyer);
-  if (order.status === "shipped") return ["builtin-shipped"];
-  if (order.status === "packed") return ["builtin-shipped", "builtin-delayed"];
-  if (["paid"].includes(order.status)) return ["builtin-paymentReceived", "builtin-delayed"];
-  return ["builtin-orderSummary", "builtin-paymentDue"];
+  if (order.status === "shipped") return keepAvailable(["builtin-shipped"]);
+  if (order.status === "packed") return keepAvailable(["builtin-shipped", "builtin-delayed"]);
+  if (["paid"].includes(order.status)) return keepAvailable(["builtin-paymentReceived", "builtin-delayed"]);
+  return keepAvailable(["builtin-orderSummary", "builtin-paymentDue"]);
 }
 
 function ensureSaleIntroTemplate() {
@@ -639,14 +652,14 @@ function workspaceColumns() {
 }
 
 function uiState() {
-  state.uiState ||= { activeView: "command", scroll: {}, saleViews: {} };
-  state.uiState.scroll ||= {}; state.uiState.saleViews ||= {};
+  state.uiState ||= { activeView: "command", scroll: {}, panelScroll: {}, saleViews: {} };
+  state.uiState.scroll ||= {}; state.uiState.panelScroll ||= {}; state.uiState.saleViews ||= {};
   return state.uiState;
 }
 
 function saleViewState(sale = activeSale()) {
   const root = uiState();
-  root.saleViews[sale.id] ||= { filter: "all", query: "", claimQuery: "", selectedListingIds: [] };
+  root.saleViews[sale.id] ||= { filter: "all", query: "", claimQuery: "", selectedListingIds: [], selectedClaimIds: [], liveIndex: 0, packingBuyer: "" };
   return root.saleViews[sale.id];
 }
 
@@ -1271,6 +1284,7 @@ function render() {
   const view = uiState().activeView || $$(".view.active")[0]?.id?.replace(/View$/, "") || "command";
   renderViewContent(view);
   if (view !== "notifications") updateNotificationBadge();
+  updateWorkflowBadges();
   updateArchivedSalesBadge();
   applyDisplayPreferences();
   renderCsmFileManager(false);
@@ -1402,6 +1416,20 @@ function updateNotificationBadge() {
   badge.textContent = activeCount; badge.classList.toggle("hidden", activeCount === 0);
 }
 
+function updateWorkflowBadges() {
+  const sale = activeSale(); if (!sale) return;
+  const pendingOffers = sale.cards.filter((card) => !card.bundleId && card.claimType === "offer" && ["pending", "countered"].includes(card.offerStatus || "pending")).length + (sale.bundles || []).filter((bundle) => ["pending", "countered"].includes(bundle.status || "pending")).length;
+  const counts = {
+    sale: salePreparationIssues(sale).length,
+    claims: sale.cards.filter((card) => card.status !== "available" && !card.buyer).length + Number(window.CSMV2?.pendingCaptureCount?.() || 0),
+    offers: pendingOffers,
+    pulling: sale.cards.filter((card) => cardInOrder(card) && !card.pulled).length,
+    orders: buyers().filter((buyer) => orderFlags(buyer).length > 0).length,
+    packing: buyers().filter((buyer) => { const order = orderFor(buyer); return ["paid", "packed"].includes(order.status) && (order.status !== "shipped" || !orderItemsPacked(buyer)); }).length
+  };
+  Object.entries(counts).forEach(([view, count]) => { const badge = $(`#${view}NavCount`); if (!badge) return; badge.textContent = count > 99 ? "99+" : String(count); badge.classList.toggle("hidden", count === 0); badge.title = `${count} item${count === 1 ? "" : "s"} need attention`; });
+}
+
 function openNotification(id) {
   const item = visibleNotifications({ includeSnoozed: true }).find((notification) => notification.id === id) || saleNotifications().find((notification) => notification.id === id); if (!item) return;
   if (item.buyer) state.selectedBuyer = item.buyer;
@@ -1478,6 +1506,7 @@ function renderListingsContent() {
     ? `<div class="empty-icon">⌕</div><h3>No cards match this view</h3><p>Clear the search or switch listing filters to see the rest of the sale.</p><div class="empty-actions"><button type="button" class="primary" data-clear-listing-view>Show all cards</button></div>`
     : `<div class="empty-icon">▤</div><h3>Build your first card list</h3><p>Use Guided Sale Setup to bring in a spreadsheet and images together, or add cards another way.</p><div class="empty-actions"><button type="button" class="secondary" data-empty-action="add-card">Add single card</button><button type="button" class="secondary" data-empty-action="import">Choose spreadsheet</button><button type="button" class="primary" data-empty-action="guided-setup">Guided sale setup</button></div>`;
   const view = saleViewState(sale); view.filter = state.filter; view.query = state.query; view.selectedListingIds = [...selectedListingIds];
+  $("#clearListingFiltersBtn")?.classList.toggle("hidden", state.filter === "all" && !state.query);
   updateListingBulkControls(cards);
 }
 
@@ -1493,7 +1522,7 @@ function filteredListingCards() {
 function resetListingView() {
   const view = saleViewState(); state.filter = view.filter || "all"; state.query = view.query || ""; state.claimQuery = view.claimQuery || "";
   selectedListingIds = new Set(view.selectedListingIds || []);
-  selectedClaimIds.clear(); claimBulkBuyerName = "";
+  selectedClaimIds = new Set(view.selectedClaimIds || []); claimBulkBuyerName = view.claimBulkBuyerName || ""; liveIndex = Number(view.liveIndex || 0);
   const search = $("#cardSearch");
   if (search) search.value = state.query;
   if ($("#claimSearch")) $("#claimSearch").value = state.claimQuery;
@@ -1503,12 +1532,15 @@ function resetListingView() {
 function updateListingBulkControls(visibleCards = []) {
   const visibleIds = visibleCards.map((card) => card.id);
   const checked = visibleIds.filter((id) => selectedListingIds.has(id)).length;
-  $("#listingSelectionCount").textContent = `${selectedListingIds.size} selected`;
+  const selectedCards = activeSale().cards.filter((card) => selectedListingIds.has(card.id));
+  const selectedValue = selectedCards.reduce((sum, card) => sum + Number(card.price || 0), 0);
+  const selectedCost = selectedCards.reduce((sum, card) => sum + Number(card.purchasePrice || 0), 0);
+  $("#listingSelectionCount").textContent = selectedCards.length ? `${selectedCards.length} selected · ${money(selectedValue)} list · ${money(selectedCost)} cost` : "0 selected";
+  $(".workspace-action-bar")?.classList.toggle("has-selection", selectedCards.length > 0);
   $("#deleteSelectedCardsBtn").disabled = selectedListingIds.size === 0;
   $("#bulkEditBtn").disabled = selectedListingIds.size === 0;
   $("#moveSelectedCardsBtn").disabled = selectedListingIds.size === 0;
   $("#attachOrderedImagesBtn").disabled = selectedListingIds.size === 0 || (currentLicense.configured && !currentLicense.licensed);
-  const selectedCards = activeSale().cards.filter((card) => selectedListingIds.has(card.id));
   $("#bundleOfferBtn").disabled = selectedCards.length < 2 || selectedCards.some((card) => card.status !== "available" || card.buyer || card.bundleId);
   $("#selectAllListings").checked = visibleIds.length > 0 && checked === visibleIds.length;
   $("#selectAllListings").indeterminate = checked > 0 && checked < visibleIds.length;
@@ -1626,18 +1658,20 @@ function renderClaimsContent() {
   const query = String(state.claimQuery || "").toLowerCase();
   const cards = sale.cards.filter((card) => cardSearchText(card).includes(query));
   selectedClaimIds = new Set([...selectedClaimIds].filter((id) => sale.cards.some((card) => card.id === id)));
-  $("#claimRows").innerHTML = cards.length ? cards.map((card) => claimRowHtml(card, sale)).join("") : `<tr><td colspan="9"><div class="empty-state"><h3>No cards are ready for claims</h3><p>Import or add cards in Sale Workspace first.</p><button type="button" class="primary" data-empty-action="sale">Open Sale Workspace</button></div></td></tr>`;
+  $("#claimRows").innerHTML = cards.length ? cards.map((card) => claimRowHtml(card, sale)).join("") : `<tr><td colspan="9"><div class="empty-state"><h3>${sale.cards.length ? "No cards match this search" : "No cards are ready for claims"}</h3><p>${sale.cards.length ? "Clear the search to return to the complete claims list." : "Import or add cards in Sale Workspace first."}</p><button type="button" class="primary" ${sale.cards.length ? "data-clear-claim-view" : 'data-empty-action="sale"'}>${sale.cards.length ? "Clear search" : "Open Sale Workspace"}</button></div></td></tr>`;
+  $("#clearClaimFiltersBtn")?.classList.toggle("hidden", !state.claimQuery);
   updateClaimBulkBar(cards);
   renderClaimTimeline(sale);
   $("#claimActivityWidth").value = Math.max(260, Math.min(520, Number(state.preferences?.claimActivityWidth || 330)));
   $("#toggleClaimActivityBtn").textContent = state.preferences?.claimActivityCollapsed ? "Expand" : "Collapse";
   requestAnimationFrame(() => { if (lastClaimCardId) $(`[data-claim-row="${CSS.escape(lastClaimCardId)}"]`)?.scrollIntoView({ block: "nearest" }); });
+  const view = saleViewState(sale); view.claimQuery = state.claimQuery; view.selectedClaimIds = [...selectedClaimIds]; view.claimBulkBuyerName = claimBulkBuyerName;
 }
 
 function updateClaimBulkBar(visibleCards = activeSale().cards.filter((card) => cardSearchText(card).includes(String(state.claimQuery || "").toLowerCase()))) {
   const visibleIds = visibleCards.map((card) => card.id); const selectedVisible = visibleIds.filter((id) => selectedClaimIds.has(id)).length;
   const selectAll = $("#selectVisibleClaims"); if (selectAll) { selectAll.checked = Boolean(visibleIds.length && selectedVisible === visibleIds.length); selectAll.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length; }
-  if ($("#claimSelectionCount")) $("#claimSelectionCount").textContent = `${selectedClaimIds.size} selected`;
+  if ($("#claimSelectionCount")) { const selected = activeSale().cards.filter((card) => selectedClaimIds.has(card.id)); const value = selected.reduce((sum, card) => sum + Number(card.price || 0), 0); $("#claimSelectionCount").textContent = selected.length ? `${selected.length} selected · ${money(value)}` : "0 selected"; }
   if ($("#claimBulkBuyer") && document.activeElement !== $("#claimBulkBuyer")) $("#claimBulkBuyer").value = claimBulkBuyerName;
   if ($("#assignSelectedClaimsBtn")) $("#assignSelectedClaimsBtn").disabled = !selectedClaimIds.size || !claimBulkBuyerName.trim();
   if ($("#clearClaimSelectionBtn")) $("#clearClaimSelectionBtn").disabled = !selectedClaimIds.size;
@@ -1712,6 +1746,7 @@ function renderOffers() {
   const pending = allOffers.filter((record) => record.status !== "accepted");
   $("#pendingOfferCount").textContent = `${pending.length} pending`;
   $("#offerShownCount").textContent = `${offers.length} of ${allOffers.length} shown`;
+  $("#clearOfferFiltersBtn")?.classList.toggle("hidden", !settings.query && settings.status === "all" && settings.buyer === "all" && settings.margin === "all");
   $$('[data-offer-sort]').forEach((button) => { button.querySelector("span").textContent = settings.sortKey === button.dataset.offerSort ? (settings.sortDirection === "asc" ? "▲" : "▼") : ""; });
   $("#offersEmpty").classList.toggle("hidden", offers.length !== 0);
   $("#offerRows").innerHTML = offers.map((record) => {
@@ -1736,6 +1771,7 @@ function renderOrdersContent() {
   $("#orderStatusFilter").value = settings.status;
   $("#orderGroupMode").value = settings.groupMode;
   $("#orderViewMode").value = settings.viewMode;
+  $("#clearOrderFiltersBtn")?.classList.toggle("hidden", !settings.query && settings.status === "all" && settings.groupMode === "alphabetical");
   const query = settings.query.trim().toLowerCase();
   const names = allNames.filter((buyer) => {
     const order = orderFor(buyer); const flags = orderFlags(buyer);
@@ -1746,6 +1782,7 @@ function renderOrdersContent() {
     if (settings.status === "missing-address" && buyerProfile(buyer).address?.trim()) return false;
     return true;
   });
+  selectedOrderBuyers = new Set([...selectedOrderBuyers].filter((buyer) => allNames.includes(buyer)));
   if (!names.includes(state.selectedBuyer)) state.selectedBuyer = names[0] || allNames[0] || "";
   $("#buyerCount").textContent = names.length === allNames.length ? `${allNames.length} active order${allNames.length === 1 ? "" : "s"}` : `${names.length} of ${allNames.length} orders shown`;
   const buyerButton = (buyer) => {
@@ -1754,7 +1791,7 @@ function renderOrdersContent() {
     const flags = orderFlags(buyer);
     const visualStatus = ["paid", "packed", "shipped"].includes(order.status) ? order.status : "unpaid";
     const thumbnails = settings.viewMode === "expanded" ? `<span class="buyer-order-thumbs">${cards.slice(0, 4).map((card) => card.imagePath ? `<img src="${fileUrl(card.imagePath)}" alt="" />` : `<i>${escapeHtml(card.ref)}</i>`).join("")}</span>` : "";
-    return `<button class="buyer-button order-${visualStatus} ${flags.length ? "has-warning" : ""} ${buyer === state.selectedBuyer ? "active" : ""}" data-buyer="${escapeHtml(buyer)}"><strong data-private="buyer">${escapeHtml(buyer)}</strong><span class="buyer-total">${money(totals.total)}</span><small>${totals.cardCount} cards${totals.addOnCount ? ` + ${totals.addOnCount} add-ons` : ""} · ${escapeHtml(order.shippingMethod || "Shipping needed")} · ${escapeHtml(order.status)}${flags.length ? ` · ⚑ ${flags.length}` : ""}</small>${thumbnails}<span class="order-state-badge">${escapeHtml(flags.length ? "Needs attention" : visualStatus)}</span></button>`;
+    return `<div class="buyer-select-row"><input type="checkbox" data-select-order="${escapeHtml(buyer)}" ${selectedOrderBuyers.has(buyer) ? "checked" : ""} aria-label="Select ${escapeHtml(buyer)} order" /><button class="buyer-button order-${visualStatus} ${flags.length ? "has-warning" : ""} ${buyer === state.selectedBuyer ? "active" : ""}" data-buyer="${escapeHtml(buyer)}"><strong data-private="buyer">${escapeHtml(buyer)}</strong><span class="buyer-total">${money(totals.total)}</span><small>${totals.cardCount} cards${totals.addOnCount ? ` + ${totals.addOnCount} add-ons` : ""} · ${escapeHtml(order.shippingMethod || "Shipping needed")} · ${escapeHtml(order.status)}${flags.length ? ` · ⚑ ${flags.length}` : ""}</small>${thumbnails}<span class="order-state-badge">${escapeHtml(flags.length ? "Needs attention" : visualStatus)}</span></button></div>`;
   };
   if (!names.length) $("#buyerList").innerHTML = `<div class="empty-state"><h3>${allNames.length ? "No orders match these filters" : "No buyer orders yet"}</h3><p>${allNames.length ? "Clear or change the order filters." : "Assign a full-price claim or accept an offer to create the first order."}</p>${allNames.length ? "" : '<button type="button" class="primary" data-empty-action="claims">Open Claims Desk</button>'}</div>`;
   else if (settings.groupMode === "status") {
@@ -1764,7 +1801,43 @@ function renderOrdersContent() {
       return `<section class="buyer-status-group ${collapsed ? "collapsed" : ""}"><button type="button" class="buyer-group-heading" data-order-group="${key}"><span>${collapsed ? "▸" : "▾"} ${label}</span><small>${group.length} order${group.length === 1 ? "" : "s"} · ${money(total)}</small></button><div>${group.map(buyerButton).join("")}</div></section>`;
     }).join("");
   } else $("#buyerList").innerHTML = names.map(buyerButton).join("");
+  updateOrderBulkBar(names);
   renderOrderDetail();
+}
+
+function updateOrderBulkBar(visibleNames = []) {
+  const selected = buyers().filter((buyer) => selectedOrderBuyers.has(buyer));
+  const total = selected.reduce((sum, buyer) => sum + orderTotals(buyer).total, 0);
+  $("#orderSelectionCount").textContent = selected.length ? `${selected.length} selected · ${money(total)}` : "0 selected";
+  $("#clearOrderSelectionBtn").disabled = selected.length === 0;
+  $("#applyOrderBulkActionBtn").disabled = selected.length === 0 || !$("#orderBulkAction").value;
+  const shownSelected = visibleNames.filter((buyer) => selectedOrderBuyers.has(buyer)).length;
+  $("#selectVisibleOrders").checked = Boolean(visibleNames.length && shownSelected === visibleNames.length);
+  $("#selectVisibleOrders").indeterminate = shownSelected > 0 && shownSelected < visibleNames.length;
+}
+
+function visibleOrderNames() {
+  const settings = orderDeskSettings(); const query = settings.query.trim().toLowerCase();
+  return buyers().filter((buyer) => { const order = orderFor(buyer); const flags = orderFlags(buyer); if (query && !buyer.toLowerCase().includes(query)) return false; if (settings.status === "attention" && !flags.length) return false; if (settings.status === "unpaid" && ["paid", "packed", "shipped"].includes(order.status)) return false; if (["paid", "packed", "shipped"].includes(settings.status) && order.status !== settings.status) return false; if (settings.status === "missing-address" && buyerProfile(buyer).address?.trim()) return false; return true; });
+}
+
+function applyBulkOrderAction() {
+  const action = $("#orderBulkAction").value; const names = buyers().filter((buyer) => selectedOrderBuyers.has(buyer));
+  if (!action || !names.length) return;
+  const labels = { unpaid: "mark unpaid", paid: "mark paid", packed: "mark packed", shipped: "mark shipped", "shipping-pwe": "change to PWE shipping", "shipping-pmwt": "change to PMWT shipping" };
+  if (!window.confirm(`${labels[action][0].toUpperCase()}${labels[action].slice(1)} for ${names.length} selected order${names.length === 1 ? "" : "s"}?`)) return;
+  snapshotSale(`Before bulk order action: ${labels[action]}`);
+  let changed = 0; let skipped = 0;
+  names.forEach((buyer) => {
+    const order = orderFor(buyer);
+    if (action === "packed" && !orderItemsPacked(buyer)) { skipped += 1; return; }
+    if (action === "shipped" && (!orderItemsPacked(buyer) || !order.shippingMethod || !buyerProfile(buyer).address?.trim() || (order.shippingMethod === "PMWT" && !order.trackingNumber))) { skipped += 1; return; }
+    if (action === "shipping-pwe" || action === "shipping-pmwt") { order.shippingMethod = action === "shipping-pwe" ? "PWE" : "PMWT"; order.shippingAutoSelected = false; }
+    else { order.status = action === "unpaid" ? "awaiting" : action; if (action === "paid") order.paidAt ||= new Date().toISOString(); if (action === "packed") order.packedAt ||= new Date().toISOString(); if (action === "shipped") { order.shippedAt ||= new Date().toISOString(); order.locked = true; } }
+    recordAudit("order-bulk", `${buyer}: ${labels[action]}`, { buyer }); changed += 1;
+  });
+  if (!changed) { activeSale().versions?.pop(); undoStack.pop(); return toast("None of the selected orders were ready for that action."); }
+  selectedOrderBuyers.clear(); $("#orderBulkAction").value = ""; saveSoon(); render(); toast(`${changed} order${changed === 1 ? "" : "s"} updated${skipped ? ` · ${skipped} skipped because required steps were incomplete` : ""}.`);
 }
 
 function oneOffStatusLabel(status) {
@@ -1993,6 +2066,8 @@ function pullGroupLabel(card, key) {
 function renderPulling() {
   if (!$("#pullingCards")) return;
   populatePullingControls();
+  const pullingView = pullingSettings();
+  $("#clearPullingFiltersBtn")?.classList.toggle("hidden", pullingView.buyer === "all" && !pullingView.query && !pullingView.hidePulled && pullingView.group === "none");
   const cards = pullingCards();
   const all = activeSale().cards.filter(cardInOrder);
   const pulled = all.filter((card) => card.pulled).length;
@@ -2020,9 +2095,10 @@ async function previewPullSheet() {
 function renderPacking() {
   const names = buyers();
   const select = $("#packingBuyer");
-  const current = select.value || names[0] || "";
+  const current = saleViewState().packingBuyer || select.value || names[0] || "";
   select.innerHTML = names.map((buyer) => { const status = orderFor(buyer).status; const suffix = status === "shipped" ? " (Shipped)" : status === "packed" ? " (Packed)" : ""; return `<option value="${escapeHtml(buyer)}" ${buyer === current ? "selected" : ""}>${escapeHtml(buyer)}${suffix}</option>`; }).join("");
   const buyer = select.value || names[0];
+  saleViewState().packingBuyer = buyer || "";
   if (!buyer) {
     $("#packingWarnings").innerHTML = "";
     $("#packingContent").innerHTML = `<div class="panel empty-state"><h3>No orders to pack</h3><p>Assign claims first, then confirm payment and shipping in Buyer Orders.</p><button type="button" class="primary" data-empty-action="claims">Open Claims Desk</button></div>`;
@@ -2184,11 +2260,52 @@ function renderLiveSale() {
     return;
   }
   liveIndex = Math.max(0, Math.min(liveIndex, cards.length - 1));
+  saleViewState(sale).liveIndex = liveIndex;
   const card = cards[liveIndex];
   const imageMode = saleImageMode(sale);
   const liveImages = requiredImageSlots(sale).map((slot) => { const path = imagePathFor(card, slot); const name = fileName(path); return `<div class="live-scan"><strong>${imageMode === "front-back" ? imageSlotLabel(slot) : "Card image"}</strong>${path ? `<img loading="lazy" draggable="true" data-live-image="${escapeHtml(path)}" src="${fileUrl(path)}" alt="${escapeHtml(card.name)} ${imageSlotLabel(slot)}" /><small>Drag this image to Facebook</small><div class="live-file-meta"><span class="live-file-name" title="${escapeHtml(path)}">${escapeHtml(name)}</span><div class="live-file-actions"><button class="row-action" data-live-file-action="copy" data-file-path="${escapeHtml(path)}">Copy filename</button><button class="row-action" data-live-file-action="folder" data-file-path="${escapeHtml(path)}">Open folder</button><button class="row-action" data-live-file-action="path" data-file-path="${escapeHtml(path)}">Full path</button><button class="row-action" data-live-file-action="resolve" data-card-id="${card.id}">Resolve</button><button class="row-action danger-link" data-live-file-action="remove" data-card-id="${card.id}" data-image-slot="${slot}">Remove & rematch</button></div></div>` : `<div class="empty-icon">▧</div><p>No ${imageSlotLabel(slot).toLowerCase()} matched</p><button class="secondary" data-live-file-action="resolve" data-card-id="${card.id}">Find image</button>`}</div>`; }).join("");
   $("#liveSaleContent").innerHTML = `<div class="live-overall-progress"><div><strong>${posted} of ${total} cards posted</strong><span>${overallPercent}% complete</span></div><progress max="${Math.max(1, total)}" value="${posted}"></progress></div><div class="live-progress"><strong>Next card ${liveIndex + 1} of ${cards.length}</strong><span>${cards.length} available and not copied</span></div><div class="live-layout"><div class="live-image ${imageMode === "front-back" ? "paired" : ""}">${liveImages}</div><div class="live-copy"><p class="eyebrow">READY TO POST</p><h2>${escapeHtml(card.name)}</h2><pre>${escapeHtml(formatLine(card))}</pre><div class="live-actions"><button class="primary" data-live-copy="${card.id}">Copy listing</button>${imageMode === "front-back" ? `<button class="secondary" data-live-image-card="${card.id}" data-live-image-side="front">${card.imagePath ? "Change front" : "Add front"}</button><button class="secondary" data-live-image-card="${card.id}" data-live-image-side="back">${card.backImagePath ? "Change back" : "Add back"}</button>` : `<button class="secondary" data-live-image-card="${card.id}" data-live-image-side="single">${card.imagePath ? "Change image" : "Add image"}</button>`}<button class="secondary" data-live-prev>Previous</button><button class="secondary" data-live-next>Skip / next</button></div><p class="live-private">Cost ${card.purchasePrice !== "" ? money(card.purchasePrice) : "—"} · Purchased ${displayPurchaseDate(card.purchaseDate)} · ${escapeHtml(card.notes || "No flaws listed")}</p></div></div>`;
   window.CSMV2?.syncPopout?.();
+}
+
+const VIEW_SCROLL_TARGETS = {
+  sale: ["#saleView .table-wrap", "#imageQueue"], claims: ["#claimRows", "#claimTimeline"], offers: ["#offersView .table-wrap"],
+  orders: ["#buyerList", "#orderDetail"], packing: ["#packingContent"], pulling: ["#pullingCards"], buyers: ["#buyerProfileList", "#buyerProfileDetail"]
+};
+
+function currentViewSnapshot() {
+  return { view: uiState().activeView || "command", saleId: state.activeSaleId, selectedBuyer: state.selectedBuyer || "", profileBuyer: state.profileBuyer || "", liveIndex };
+}
+
+function capturePanelScroll(view = uiState().activeView || "command", saleId = state.activeSaleId) {
+  const key = `${saleId}:${view}`;
+  uiState().panelScroll[key] = (VIEW_SCROLL_TARGETS[view] || []).map((selector) => {
+    const node = $(selector); return { selector, top: node?.scrollTop || 0, left: node?.scrollLeft || 0 };
+  });
+}
+
+function restorePanelScroll(view = uiState().activeView || "command", saleId = state.activeSaleId) {
+  const key = `${saleId}:${view}`;
+  (uiState().panelScroll[key] || []).forEach(({ selector, top, left }) => { const node = $(selector); if (node) { node.scrollTop = Number(top || 0); node.scrollLeft = Number(left || 0); } });
+}
+
+function applyViewSnapshot(snapshot) {
+  if (!snapshot) return;
+  applyingViewHistory = true;
+  if (state.sales.some((sale) => sale.id === snapshot.saleId)) state.activeSaleId = snapshot.saleId;
+  state.selectedBuyer = snapshot.selectedBuyer || state.selectedBuyer;
+  state.profileBuyer = snapshot.profileBuyer || state.profileBuyer;
+  liveIndex = Number(snapshot.liveIndex || 0);
+  resetListingView(); render(); showView(snapshot.view || "command");
+  applyingViewHistory = false;
+}
+
+function navigateViewHistory(direction) {
+  if ($$("dialog[open]").length || $("#quickEditDrawer.open")) return toast("Finish or close the open editor before navigating away.");
+  const source = direction === "back" ? viewBackStack : viewForwardStack;
+  const target = source.pop(); if (!target) return toast(direction === "back" ? "There isn’t an earlier CSM screen yet." : "There isn’t a later CSM screen yet.");
+  (direction === "back" ? viewForwardStack : viewBackStack).push(currentViewSnapshot());
+  applyViewSnapshot(target);
 }
 
 function showView(view) {
@@ -2202,7 +2319,8 @@ function showView(view) {
   }
   bypassReadinessOnce = false;
   const previous = uiState().activeView || $$(".view.active")[0]?.id?.replace(/View$/, "");
-  if (previous) uiState().scroll[previous] = document.querySelector("main")?.scrollTop || window.scrollY || 0;
+  if (previous) { uiState().scroll[previous] = document.querySelector("main")?.scrollTop || window.scrollY || 0; capturePanelScroll(previous); }
+  if (!applyingViewHistory && previous && previous !== view) { viewBackStack.push(currentViewSnapshot()); viewBackStack = viewBackStack.slice(-75); viewForwardStack = []; }
   uiState().activeView = view;
   renderViewContent(view);
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
@@ -2211,7 +2329,7 @@ function showView(view) {
   $("#viewEyebrow").textContent = labels[view];
   updateFacebookShortcut(view);
   renderBeginnerCoach(view);
-  requestAnimationFrame(() => { const main = document.querySelector("main"); if (main) main.scrollTop = Number(uiState().scroll[view] || 0); });
+  requestAnimationFrame(() => { const main = document.querySelector("main"); if (main) main.scrollTop = Number(uiState().scroll[view] || 0); restorePanelScroll(view); });
   saveSoon();
 }
 
@@ -3974,10 +4092,10 @@ function clearClaim(cardId) {
 
 async function copyAndHideCard(cardId) {
   const card = activeSale().cards.find((item) => item.id === cardId);
-  if (!card || card.hiddenAfterCopy) return;
+  if (!card || card.hiddenAfterCopy) return false;
   const line = formatLine(card);
   const copied = await window.cardSale.copyText(line).catch(() => false);
-  if (!copied) return toast("The listing could not be copied. Please try again.");
+  if (!copied) { toast("The listing could not be copied. Please try again."); return false; }
   card.hiddenAfterCopy = true;
   card.completedBy = "copied";
   card.completedAt = new Date().toISOString();
@@ -3985,6 +4103,7 @@ async function copyAndHideCard(cardId) {
   undoStack.push({ saleId: activeSale().id, cardId });
   saveSoon(); renderListings();
   toast("Listing copied and hidden. Ctrl+Z to undo.");
+  return true;
 }
 
 function restoreCard(cardId, message = "Card restored to the workspace.") {
@@ -4070,9 +4189,18 @@ function restoreVersion(versionId) {
   saveSoon(); render(); renderVersionList(); toast("Earlier sale version restored.");
 }
 
-async function copyText(text, message = "Copied") {
+function showCopiedButtonFeedback(button = document.activeElement) {
+  if (!(button instanceof HTMLButtonElement) || button.closest(".nav-list")) return;
+  clearTimeout(Number(button.dataset.copiedTimer || 0));
+  button.dataset.originalCopyLabel ||= button.textContent;
+  button.textContent = "Copied ✓"; button.classList.add("copied-feedback");
+  const timer = setTimeout(() => { if (!button.isConnected) return; button.textContent = button.dataset.originalCopyLabel || "Copy"; button.classList.remove("copied-feedback"); delete button.dataset.originalCopyLabel; delete button.dataset.copiedTimer; }, 1400);
+  button.dataset.copiedTimer = String(timer);
+}
+
+async function copyText(text, message = "Copied", button = document.activeElement) {
   const copied = await window.cardSale.copyText(text).catch(() => false);
-  if (copied) return toast(message);
+  if (copied) { showCopiedButtonFeedback(button); return toast(message); }
   if (currentLicense.configured && !currentLicense.licensed) {
     renderLicenseDialog({ ...currentLicense, message: "Activate Card Sale Manager to copy sale listings and buyer messages." });
     return $("#licenseDialog").showModal();
@@ -4150,7 +4278,7 @@ function quickMessageText(message, buyer) {
 }
 
 function openQuickMessages(id = "", buyer = state.selectedBuyer) {
-  ensureQuickMessages(); selectedQuickMessageId = id || quickMessageRecommendationIds(buyer)[0] || ensureQuickMessages()[0]?.id;
+  ensureQuickMessages(); selectedQuickMessageId = id || quickMessageRecommendationIds(buyer)[0] || visibleQuickMessages()[0]?.id;
   $("#quickMessagePreview").readOnly = false; $("#quickMessagePreview").setAttribute("aria-label", "Message preview and one-time edits"); $("#quickMessagePreview").dataset.private = "message"; $("#quickMessageBuyer").dataset.private = "buyer";
   if (!$("#moveQuickMessageUpBtn")) $("#duplicateQuickMessageBtn").insertAdjacentHTML("beforebegin", '<button id="moveQuickMessageUpBtn" type="button" class="secondary" title="Move earlier">↑</button><button id="moveQuickMessageDownBtn" type="button" class="secondary" title="Move later">↓</button>');
   $("#quickMessageBuyer").innerHTML = buyers().map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
@@ -4159,18 +4287,19 @@ function openQuickMessages(id = "", buyer = state.selectedBuyer) {
 }
 
 function renderQuickMessages() {
-  const messages = ensureQuickMessages(); const query = String($("#quickMessageSearch")?.value || "").toLowerCase(); const selectedCategory = $("#quickMessageCategory")?.value || "all";
+  const messages = visibleQuickMessages(); const query = String($("#quickMessageSearch")?.value || "").toLowerCase(); const selectedCategory = $("#quickMessageCategory")?.value || "all";
   const categories = [...new Set(messages.map((item) => item.category || "General"))].sort();
   $("#quickMessageCategory").innerHTML = `<option value="all">All categories</option>${categories.map((category) => `<option ${category === selectedCategory ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}`;
   $("#quickMessageCategories").innerHTML = categories.map((category) => `<option value="${escapeHtml(category)}"></option>`).join("");
   const shown = messages.filter((item) => (selectedCategory === "all" || item.category === selectedCategory) && (!query || `${item.name} ${item.category} ${item.body}`.toLowerCase().includes(query))).sort((a, b) => Number(b.pinned) - Number(a.pinned));
-  const recommended = quickMessageRecommendationIds($("#quickMessageBuyer").value).map(quickMessageById).filter(Boolean); const recent = (state.preferences.recentQuickMessages || []).map(quickMessageById).filter(Boolean).slice(0, 3);
+  const visibleIds = new Set(messages.map((item) => item.id)); const recommended = quickMessageRecommendationIds($("#quickMessageBuyer").value).map(quickMessageById).filter((item) => item && visibleIds.has(item.id)); const recent = (state.preferences.recentQuickMessages || []).map(quickMessageById).filter((item) => item && visibleIds.has(item.id)).slice(0, 3);
   $("#quickMessageSuggestions").innerHTML = `${recommended.length ? `<small>Suggested now</small>${recommended.map((item) => `<button type="button" data-quick-message="${item.id}">★ ${escapeHtml(item.name)}</button>`).join("")}` : ""}${recent.length ? `<small>Recently used</small>${recent.map((item) => `<button type="button" data-quick-message="${item.id}">${escapeHtml(item.name)}</button>`).join("")}` : ""}`;
   $("#quickMessageList").innerHTML = shown.map((item) => `<button type="button" class="${item.id === selectedQuickMessageId ? "active" : ""}" data-quick-message="${item.id}"><strong>${item.pinned ? "★ " : ""}${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category || "General")}</small></button>`).join("") || `<p class="muted">No messages match.</p>`;
-  let message = quickMessageById(selectedQuickMessageId); if (!message) { message = shown[0] || messages[0]; selectedQuickMessageId = message?.id || ""; }
-  if (!message) return;
+  let message = messages.find((item) => item.id === selectedQuickMessageId); if (!message) { message = shown[0] || messages[0]; selectedQuickMessageId = message?.id || ""; }
+  $("#restoreQuickMessageDefaultsBtn").classList.toggle("hidden", hiddenQuickMessageDefaults().length === 0);
+  if (!message) { quickMessageDraft = null; $("#quickMessageName").value = ""; $("#quickMessageBody").value = ""; $("#quickMessagePreview").value = ""; return; }
   quickMessageDraft = clone(message); $("#quickMessageName").value = message.name; $("#quickMessageEditCategory").value = message.category || "General"; $("#quickMessageBody").value = message.body; $("#quickMessagePinned").checked = Boolean(message.pinned);
-  $("#deleteQuickMessageBtn").disabled = Boolean(message.builtInKey); $("#resetQuickMessageBtn").disabled = !message.builtInKey; updateQuickMessagePreview();
+  $("#deleteQuickMessageBtn").disabled = false; $("#deleteQuickMessageBtn").textContent = message.builtInKey ? "Hide default" : "Delete"; $("#resetQuickMessageBtn").disabled = !message.builtInKey; updateQuickMessagePreview();
 }
 
 function updateQuickMessagePreview() {
@@ -4184,6 +4313,14 @@ function saveQuickMessage() {
   if (existing) Object.assign(existing, clone(quickMessageDraft), { updatedAt: new Date().toISOString() }); else ensureQuickMessages().push({ ...clone(quickMessageDraft), id: quickMessageDraft.id || uid(), updatedAt: new Date().toISOString(), versions: [] });
   const saved = quickMessageById(quickMessageDraft.id); if (saved?.builtInKey) ensureMessageTemplates()[saved.builtInKey] = saved.body;
   saveSoon(); renderQuickMessages(); toast("Message saved.");
+}
+
+function copySelectedQuickMessage(event) {
+  if (!quickMessageDraft) return toast("Choose a message first.");
+  updateQuickMessagePreview();
+  if ($("#quickMessageWarnings").textContent.trim()) return toast("Fix the missing placeholders before copying.");
+  const id = selectedQuickMessageId; state.preferences.recentQuickMessages = [id, ...(state.preferences.recentQuickMessages || []).filter((item) => item !== id)].slice(0, 8);
+  copyText($("#quickMessagePreview").value, "Message copied.", event?.currentTarget); saveSoon();
 }
 
 const PACKING_PRINT_STYLES = `
@@ -4973,6 +5110,15 @@ function applyCarryover() {
 }
 
 function bindEvents() {
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("button.primary, button.danger-button"); if (!button || button.classList.contains("nav-item")) return;
+    const now = Date.now(); const lockedUntil = Number(button.dataset.rapidLockUntil || 0);
+    if (now < lockedUntil) { event.preventDefault(); event.stopImmediatePropagation(); return; }
+    button.dataset.rapidLockUntil = String(now + 700); button.classList.add("action-pending"); setTimeout(() => button.classList.remove("action-pending"), 700);
+  }, true);
+  const handleMouseNavigation = (direction) => { const now = Date.now(); if (now - lastMouseNavigationAt < 250) return; lastMouseNavigationAt = now; navigateViewHistory(direction); };
+  window.cardSale.onNavigateCommand((direction) => handleMouseNavigation(direction));
+  window.addEventListener("mouseup", (event) => { if (event.button === 3 || event.button === 4) { event.preventDefault(); handleMouseNavigation(event.button === 3 ? "back" : "forward"); } });
   $$(".nav-item[data-view]").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
   $("#brandLockup").addEventListener("click", handleOwnerGesture);
   $("#privacyModeBtn").addEventListener("click", () => { if (!currentLicense.owner) return; state.preferences.privacyMode = !state.preferences.privacyMode; applyDisplayPreferences(); saveSoon(); toast(state.preferences.privacyMode ? "Privacy mode is hiding personal information." : "Privacy mode turned off."); });
@@ -5014,6 +5160,7 @@ function bindEvents() {
   [["#pullingBuyerFilter", "buyer"], ["#pullingPrimarySort", "primary"], ["#pullingSecondarySort", "secondary"], ["#pullingGroupBy", "group"]].forEach(([selector, key]) => $(selector).addEventListener("change", (event) => { pullingSettings()[key] = event.target.value; saveSoon(); renderPulling(); }));
   $("#pullingSearch").addEventListener("input", (event) => { pullingSettings().query = event.target.value; scheduleUiTask("pulling-search", renderPulling); });
   $("#pullingHidePulled").addEventListener("change", (event) => { pullingSettings().hidePulled = event.target.checked; saveSoon(); renderPulling(); });
+  $("#clearPullingFiltersBtn").addEventListener("click", () => { Object.assign(pullingSettings(), { buyer: "all", query: "", hidePulled: false, group: "none" }); saveSoon(); renderPulling(); toast("Pulling filters cleared."); });
   $("#pullingCards").addEventListener("change", (event) => { const card = activeSale().cards.find((item) => item.id === event.target.dataset.pullCard); if (!card) return; card.pulled = event.target.checked; card.pulledAt = card.pulled ? new Date().toISOString() : ""; saveSoon(); renderPulling(); renderNotifications(); });
   $("#pullingCards").addEventListener("click", (event) => { const label = event.target.dataset.pullGroup; if (!label) return; const cards = pullingCards().filter((card) => pullGroupLabel(card, pullingSettings().group) === label); const value = cards.some((card) => !card.pulled); cards.forEach((card) => { card.pulled = value; card.pulledAt = value ? new Date().toISOString() : ""; }); saveSoon(); renderPulling(); renderNotifications(); });
   $("#pullingCheckAllBtn").addEventListener("click", () => { const cards = pullingCards(); const value = cards.some((card) => !card.pulled); cards.forEach((card) => { card.pulled = value; card.pulledAt = value ? new Date().toISOString() : ""; }); saveSoon(); renderPulling(); renderNotifications(); toast(value ? "Shown cards marked pulled." : "Shown cards marked unpulled."); });
@@ -5049,6 +5196,7 @@ function bindEvents() {
   $("#copySaleIntroBtn").addEventListener("click", () => { state.preferences.saleIntroTemplate = $("#saleIntroTemplate").value.trim() || DEFAULT_SALE_INTRO; saveSoon(); copyText($("#saleIntroPreview").value, "Sale introduction copied."); });
   $("#offerSearch").addEventListener("input", (event) => { offerDeskSettings().query = event.target.value; saveSoon(); scheduleUiTask("offer-search", renderOffers); });
   [["#offerStatusFilter", "status"], ["#offerBuyerFilter", "buyer"], ["#offerMarginFilter", "margin"]].forEach(([selector, key]) => $(selector).addEventListener("change", (event) => { offerDeskSettings()[key] = event.target.value; saveSoon(); renderOffers(); }));
+  $("#clearOfferFiltersBtn").addEventListener("click", () => { Object.assign(offerDeskSettings(), { query: "", status: "all", buyer: "all", margin: "all" }); saveSoon(); renderOffers(); toast("Offer filters cleared."); });
   $("#offersView").addEventListener("click", (event) => {
     const key = event.target.closest("[data-offer-sort]")?.dataset.offerSort;
     if (!key) return;
@@ -5209,6 +5357,7 @@ function bindEvents() {
   $("#listingSort").addEventListener("change", (event) => { activeSale().sortMode = event.target.value; renumberCardReferences(activeSale(), { audit: false }); saveSoon(); renderListings(); renderImages(); });
   $$("[data-filter]").forEach((button) => button.addEventListener("click", () => { state.filter = button.dataset.filter; saleViewState().filter = state.filter; $$("[data-filter]").forEach((item) => item.classList.toggle("active", item === button)); saveSoon(); renderListings(); }));
   $("#cardSearch").addEventListener("input", (event) => { state.query = event.target.value; saleViewState().query = state.query; saveSoon(); scheduleUiTask("card-search", renderListings); });
+  $("#clearListingFiltersBtn").addEventListener("click", () => { state.filter = "all"; state.query = ""; saleViewState().filter = "all"; saleViewState().query = ""; $("#cardSearch").value = ""; $$('[data-filter]').forEach((button) => button.classList.toggle("active", button.dataset.filter === "all")); saveSoon(); renderListings(); toast("Listing filters cleared."); });
   $("#listingRows").addEventListener("click", (event) => {
     const checkbox = event.target.closest("[data-select-listing]");
     if (!checkbox) return;
@@ -5307,6 +5456,7 @@ function bindEvents() {
     }
   });
   $("#claimSearch").addEventListener("input", (event) => { state.claimQuery = event.target.value; saleViewState().claimQuery = state.claimQuery; saveSoon(); scheduleUiTask("claim-search", renderClaims); });
+  $("#clearClaimFiltersBtn").addEventListener("click", () => { state.claimQuery = ""; saleViewState().claimQuery = ""; $("#claimSearch").value = ""; saveSoon(); renderClaims(); toast("Claims search cleared."); });
   $("#selectVisibleClaims").addEventListener("change", (event) => { const query = String(state.claimQuery || "").toLowerCase(); const visible = activeSale().cards.filter((card) => [...Object.values(card).filter((value) => typeof value !== "object"), ...Object.values(card.customFields || {})].join(" ").toLowerCase().includes(query)); visible.forEach((card) => event.target.checked ? selectedClaimIds.add(card.id) : selectedClaimIds.delete(card.id)); renderClaims(); });
   $("#claimBulkBuyer").addEventListener("input", (event) => { claimBulkBuyerName = event.target.value; updateClaimBulkBar(); });
   $("#assignSelectedClaimsBtn").addEventListener("click", assignSelectedClaims);
@@ -5446,11 +5596,17 @@ function bindEvents() {
   $("#pickImageLeaveUnmatchedBtn").addEventListener("click", () => choosePickImage(""));
   $("#confirmBuyerConflictBtn").addEventListener("click", () => { const pending = pendingBuyerConflict; pendingBuyerConflict = null; $("#buyerConflictDialog").close(); if (pending) assignBuyer(pending.cardId, pending.buyerName, pending.offeredPrice, pending.claimType, pending.claimNote, true); });
   $("#buyerConflictDialog").addEventListener("close", () => { if (!$("#buyerConflictDialog").open) pendingBuyerConflict = null; });
-  $("#buyerList").addEventListener("click", (event) => { const button = event.target.closest("[data-buyer]"); if (button) { state.selectedBuyer = button.dataset.buyer; renderOrders(); } });
+  $("#buyerList").addEventListener("click", (event) => { const button = event.target.closest("[data-buyer]"); if (button) { state.selectedBuyer = button.dataset.buyer; saveSoon(); renderOrders(); } });
+  $("#buyerList").addEventListener("change", (event) => { const buyer = event.target.dataset.selectOrder; if (!buyer) return; event.target.checked ? selectedOrderBuyers.add(buyer) : selectedOrderBuyers.delete(buyer); updateOrderBulkBar(visibleOrderNames()); });
   $("#orderSearch").addEventListener("input", (event) => { orderDeskSettings().query = event.target.value; saveSoon(); scheduleUiTask("order-search", renderOrders); });
   $("#orderStatusFilter").addEventListener("change", (event) => { orderDeskSettings().status = event.target.value; saveSoon(); renderOrders(); });
   $("#orderGroupMode").addEventListener("change", (event) => { orderDeskSettings().groupMode = event.target.value; saveSoon(); renderOrders(); });
   $("#orderViewMode").addEventListener("change", (event) => { orderDeskSettings().viewMode = event.target.value; saveSoon(); renderOrders(); });
+  $("#clearOrderFiltersBtn").addEventListener("click", () => { Object.assign(orderDeskSettings(), { query: "", status: "all", groupMode: "alphabetical" }); saveSoon(); renderOrders(); toast("Order filters cleared."); });
+  $("#selectVisibleOrders").addEventListener("change", (event) => { visibleOrderNames().forEach((buyer) => event.target.checked ? selectedOrderBuyers.add(buyer) : selectedOrderBuyers.delete(buyer)); renderOrders(); });
+  $("#orderBulkAction").addEventListener("change", () => updateOrderBulkBar(visibleOrderNames()));
+  $("#applyOrderBulkActionBtn").addEventListener("click", applyBulkOrderAction);
+  $("#clearOrderSelectionBtn").addEventListener("click", () => { selectedOrderBuyers.clear(); renderOrders(); });
   $("#buyerList").addEventListener("click", (event) => { const key = event.target.closest("[data-order-group]")?.dataset.orderGroup; if (!key) return; const settings = orderDeskSettings(); settings.collapsedGroups[key] = !settings.collapsedGroups[key]; saveSoon(); renderOrders(); });
   $("#shippingRulesBtn").addEventListener("click", openShippingRules);
   $("#saveShippingRulesBtn").addEventListener("click", saveShippingRules);
@@ -5541,15 +5697,17 @@ function bindEvents() {
   $("#quickMessagesDialog").addEventListener("click", (event) => { const field = event.target.dataset.insertMessageField; const condition = event.target.dataset.insertCondition; if (field || condition) { const area = $("#quickMessageBody"); const text = field || `[[if:${condition}]]\nYour text here\n[[/if]]`; area.setRangeText(text, area.selectionStart, area.selectionEnd, "end"); area.focus(); updateQuickMessagePreview(); return; } const direction = event.target.id === "moveQuickMessageUpBtn" ? -1 : event.target.id === "moveQuickMessageDownBtn" ? 1 : 0; if (!direction) return; const list = ensureQuickMessages(); const index = list.findIndex((item) => item.id === selectedQuickMessageId); const target = index + direction; if (index < 0 || target < 0 || target >= list.length) return; [list[index], list[target]] = [list[target], list[index]]; saveSoon(); renderQuickMessages(); });
   $("#addQuickMessageBtn").addEventListener("click", () => { const item = { id: uid(), name: "New message", category: "General", body: "Hi {firstName},\n\n", pinned: false, versions: [] }; ensureQuickMessages().push(item); selectedQuickMessageId = item.id; saveSoon(); renderQuickMessages(); });
   $("#saveQuickMessageBtn").addEventListener("click", saveQuickMessage);
-  $("#copyQuickMessageBtn").addEventListener("click", () => { if ($("#quickMessageWarnings").textContent.trim()) return toast("Fix the missing placeholders before copying."); const id = selectedQuickMessageId; state.preferences.recentQuickMessages = [id, ...(state.preferences.recentQuickMessages || []).filter((item) => item !== id)].slice(0, 8); copyText($("#quickMessagePreview").value, "Message copied."); saveSoon(); });
+  $("#copyQuickMessageBtn").addEventListener("click", copySelectedQuickMessage);
+  $("#copyQuickMessageTopBtn").addEventListener("click", copySelectedQuickMessage);
   $("#duplicateQuickMessageBtn").addEventListener("click", () => { updateQuickMessagePreview(); const copy = { ...clone(quickMessageDraft), id: uid(), builtInKey: "", name: `${quickMessageDraft.name} copy`, versions: [] }; ensureQuickMessages().push(copy); selectedQuickMessageId = copy.id; saveSoon(); renderQuickMessages(); });
-  $("#deleteQuickMessageBtn").addEventListener("click", () => { const message = quickMessageById(selectedQuickMessageId); if (!message || message.builtInKey || !window.confirm(`Delete “${message.name}”?`)) return; state.preferences.quickMessages = ensureQuickMessages().filter((item) => item.id !== message.id); selectedQuickMessageId = state.preferences.quickMessages[0]?.id || ""; saveSoon(); renderQuickMessages(); });
+  $("#deleteQuickMessageBtn").addEventListener("click", () => { const message = quickMessageById(selectedQuickMessageId); if (!message) return; const builtIn = Boolean(message.builtInKey); if (!window.confirm(builtIn ? `Hide the default message “${message.name}”?\n\nYou can restore hidden defaults later.` : `Permanently delete “${message.name}”?`)) return; if (builtIn) state.preferences.hiddenQuickMessageBuiltins = [...new Set([...(state.preferences.hiddenQuickMessageBuiltins || []), message.builtInKey])]; else state.preferences.quickMessages = ensureQuickMessages().filter((item) => item.id !== message.id); selectedQuickMessageId = visibleQuickMessages()[0]?.id || ""; saveSoon(); renderQuickMessages(); toast(builtIn ? "Default message hidden." : "Custom message deleted."); });
+  $("#restoreQuickMessageDefaultsBtn").addEventListener("click", () => { const count = hiddenQuickMessageDefaults().length; if (!count || !window.confirm(`Restore ${count} hidden default message${count === 1 ? "" : "s"}?`)) return; state.preferences.hiddenQuickMessageBuiltins = []; selectedQuickMessageId ||= "builtin-orderSummary"; saveSoon(); renderQuickMessages(); toast("Hidden default messages restored."); });
   $("#resetQuickMessageBtn").addEventListener("click", () => { const message = quickMessageById(selectedQuickMessageId); if (!message?.builtInKey) return; message.versions ||= []; message.versions.unshift({ at: new Date().toISOString(), body: message.body }); message.body = DEFAULT_MESSAGE_TEMPLATES[message.builtInKey]; ensureMessageTemplates()[message.builtInKey] = message.body; saveSoon(); renderQuickMessages(); toast("Built-in message restored."); });
   $("#quickMessageHistoryBtn").addEventListener("click", () => { const message = quickMessageById(selectedQuickMessageId); if (!message?.versions?.length) return toast("This message has no earlier versions yet."); const choices = message.versions.map((item, index) => `${index + 1}. ${new Date(item.at).toLocaleString()}`).join("\n"); const answer = window.prompt(`Enter a version number to restore:\n${choices}`); const version = message.versions[Number(answer) - 1]; if (!version) return; message.body = version.body; saveSoon(); renderQuickMessages(); toast("Earlier message restored."); });
   $("#cancelOrderScope").addEventListener("change", (event) => $("#cancelOrderCards").classList.toggle("hidden", event.target.value === "all"));
   $("#cancelOrderAction").addEventListener("change", (event) => $("#cancelOrderBuyerLabel").classList.toggle("hidden", event.target.value !== "move"));
   $("#confirmCancelOrderBtn").addEventListener("click", applyCancelOrder);
-  $("#packingBuyer").addEventListener("change", renderPacking);
+  $("#packingBuyer").addEventListener("change", (event) => { saleViewState().packingBuyer = event.target.value; saveSoon(); renderPacking(); });
   $("#packingContent").addEventListener("input", (event) => {
     const buyer = $("#packingBuyer").value;
     if (event.target.id === "trackingNumber") { orderFor(buyer).trackingNumber = event.target.value.trim(); const button = $("#copyTrackingMessageBtn"); const track = $("#openTrackingBtn"); if (button) button.disabled = !orderFor(buyer).trackingNumber; if (track) { track.disabled = !orderFor(buyer).trackingNumber; track.dataset.openTracking = trackingUrl(orderFor(buyer).trackingNumber); } saveSoon(); }
@@ -5751,6 +5909,7 @@ function bindEvents() {
   $("#safeDeleteDialog").addEventListener("close", () => { if (!safeDeleteResolver) return; const resolve = safeDeleteResolver; safeDeleteResolver = null; resolve(false); });
   document.addEventListener("click", (event) => {
     if (event.target.closest("[data-clear-listing-view]")) { state.filter = "all"; state.query = ""; $("#cardSearch").value = ""; $$("[data-filter]").forEach((button) => button.classList.toggle("active", button.dataset.filter === "all")); renderListings(); return; }
+    if (event.target.closest("[data-clear-claim-view]")) { state.claimQuery = ""; saleViewState().claimQuery = ""; $("#claimSearch").value = ""; renderClaims(); return; }
     const action = event.target.closest("[data-empty-action]")?.dataset.emptyAction;
     if (!action) return;
     if (action === "images") { if ($("#imageInboxDialog")?.open) $("#imageInboxDialog").close(); openImageWorkflow(); }
@@ -5913,7 +6072,7 @@ async function init() {
   renderCsmFileManager(false);
   window.cardSale.onCsmOpenRequest((filePath) => openCsmFile(filePath));
   window.cardSale.onPrepareClose(async () => {
-    try { await saveNow(); await window.cardSale.backup("close"); } catch {}
+    try { capturePanelScroll(); const saleView = saleViewState(); saleView.liveIndex = liveIndex; saleView.selectedClaimIds = [...selectedClaimIds]; saleView.claimBulkBuyerName = claimBulkBuyerName; await saveNow(); await window.cardSale.backup("close"); } catch {}
     await window.cardSale.closeReady();
   });
   window.cardSale.onUpdateProgress((details) => {

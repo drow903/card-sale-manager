@@ -1,5 +1,7 @@
 let viewState = null;
 let activeSide = "front";
+let pendingCopyRequest = "";
+let copyFeedback = "";
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const fileUrl = (value) => value ? encodeURI(`file:///${String(value).replace(/\\/g, "/")}`) : "";
@@ -20,21 +22,24 @@ function render() {
   if (!viewState.card) { $("#content").innerHTML = `<div class="empty"><strong>No unposted cards remain.</strong><p>Restore a copied listing to continue.</p></div>`; return; }
   const card = viewState.card;
   const images = (card.images || []).map((image) => `<div class="scan ${activeSide === image.slot ? "active" : ""}" data-side="${escapeHtml(image.slot)}"><strong>${escapeHtml(image.label)}</strong>${image.path ? `<img draggable="true" data-drag-path="${escapeHtml(image.path)}" data-drag-slot="${escapeHtml(image.slot)}" src="${fileUrl(image.path)}" alt="" /><small title="${escapeHtml(image.path)}">${escapeHtml(image.fileName)}</small><span class="indicator ${image.dragged ? "done" : ""}">${image.dragged ? "Dragged ✓" : "Drag to Facebook"}</span>` : `<div class="empty">No image</div>`}</div>`).join("");
-  $("#content").innerHTML = `<div class="card-title"><h1>${escapeHtml(card.name)}</h1><span>${viewState.currentIndex + 1} of ${viewState.available}</span></div><div class="images">${images}</div><div class="listing">${escapeHtml(card.listing)}</div><div class="actions"><button class="primary" id="copyBtn">${card.copyPending ? "Copied ✓" : "Copy listing"}</button><span class="indicator ${card.copyPending ? "done" : ""}">${card.copyPending ? "Listing copied" : ""}</span></div>`;
+  $("#content").innerHTML = `<div class="card-title"><h1>${escapeHtml(card.name)}</h1><span>${viewState.currentIndex + 1} of ${viewState.available}</span></div><div class="images">${images}</div><div class="listing">${escapeHtml(card.listing)}</div><div class="actions"><button class="primary" id="copyBtn" ${pendingCopyRequest ? "disabled" : ""}>${pendingCopyRequest ? "Copying…" : card.copyPending ? "Copied ✓" : "Copy listing"}</button><span class="indicator ${card.copyPending ? "done" : ""}">${escapeHtml(copyFeedback || (card.copyPending ? "Listing copied" : ""))}</span></div>`;
   document.querySelectorAll("[data-side]").forEach((node) => node.addEventListener("click", () => { activeSide = node.dataset.side; render(); }));
   document.querySelectorAll("[data-drag-path]").forEach((image) => image.addEventListener("dragstart", async (event) => {
     event.preventDefault();
     const ok = await window.csmLive.startDrag(image.dataset.dragPath);
     if (ok) window.csmLive.action({ type: "image-dragged", cardId: card.id, path: image.dataset.dragPath, slot: image.dataset.dragSlot });
   }));
-  $("#copyBtn").addEventListener("click", () => {
+  $("#copyBtn").addEventListener("click", async () => {
     const dragged = card.images.some((image) => image.dragged);
     if (!dragged && !window.confirm("You haven’t dragged this card’s image yet. Copy and continue anyway?")) return;
-    window.csmLive.action({ type: "copy", cardId: card.id, autoAdvance: $("#autoAdvance").checked });
+    pendingCopyRequest = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`; copyFeedback = "Sending listing to the clipboard…"; render();
+    const delivered = await window.csmLive.action({ type: "copy", cardId: card.id, autoAdvance: $("#autoAdvance").checked, requestId: pendingCopyRequest }).catch(() => false);
+    if (!delivered) { pendingCopyRequest = ""; copyFeedback = "CSM could not reach the main window. Try reopening the pop-out."; render(); }
   });
 }
 
 window.csmLive.onState((state) => { viewState = state; render(); });
+window.csmLive.onActionResult((result) => { if (!result || result.requestId !== pendingCopyRequest) return; pendingCopyRequest = ""; copyFeedback = result.ok ? (result.message || "Listing copied ✓") : (result.message || "The listing could not be copied. Try again."); render(); setTimeout(() => { if (!pendingCopyRequest) { copyFeedback = ""; render(); } }, 2200); });
 $("#settingsBtn").addEventListener("click", () => $("#settings").classList.toggle("hidden"));
 $("#closeBtn").addEventListener("click", () => window.csmLive.close());
 $("#previousBtn").addEventListener("click", () => window.csmLive.action({ type: "previous" }));

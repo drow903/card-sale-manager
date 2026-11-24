@@ -836,6 +836,10 @@ function createWindow() {
       sandbox: false
     }
   });
+  mainWindow.on("app-command", (_event, command) => {
+    if (command === "browser-backward") mainWindow.webContents.send("app:navigate-command", "back");
+    if (command === "browser-forward") mainWindow.webContents.send("app:navigate-command", "forward");
+  });
   mainWindow.loadFile("index.html");
   mainWindow.on("closed", () => { mainWindow = null; });
   mainWindow.on("close", (event) => {
@@ -865,9 +869,11 @@ function createWindow() {
     mainWindow.webContents.once("did-finish-load", async () => {
       await new Promise((resolve) => setTimeout(resolve, 2400));
       const captureName = path.basename(process.env.CARD_SALE_CAPTURE_PATH || "").toLowerCase();
-      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["facebook-capture", "order-cards", "sale-trailer", "beginner-setup", "missing-images", "sale-readiness", "one-off", "dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder", "image-workflow"].find((view) => captureName.includes(view)) || "");
+      const captureView = process.env.CARD_SALE_CAPTURE_VIEW || (["quick-messages", "facebook-capture", "order-cards", "sale-trailer", "beginner-setup", "missing-images", "sale-readiness", "one-off", "dashboard", "orders", "packing", "live", "claims", "offers-accept", "offers-counter", "offers", "buyers", "health", "help", "command", "sale", "setup", "walkthrough", "pwe-label", "quick-edit", "closing", "copied", "folders", "csm-file", "team-review", "catalog-builder", "image-workflow"].find((view) => captureName.includes(view)) || "");
       if (captureView && captureView !== "setup") await mainWindow.webContents.executeJavaScript("document.querySelectorAll('dialog[open]').forEach((item) => item.close())");
-      if (captureView === "facebook-capture") {
+      if (captureView === "quick-messages") {
+        mainWindow.setSize(1366, 768); await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; currentLicense={configured:false,licensed:true,owner:false,catalogVisible:false}; applyLicenseEntitlements(currentLicense); openQuickMessages(); true");
+      } else if (captureView === "facebook-capture") {
         await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; currentLicense={configured:true,licensed:true,owner:true,catalogVisible:true}; applyLicenseEntitlements(currentLicense); showView('claims'); v2RenderCaptureDialog(); document.querySelector('#facebookCaptureDialog').showModal()");
       } else if (captureView === "order-cards") {
         await mainWindow.webContents.executeJavaScript("state.preferences ||= {}; state.preferences.setupCompleted=true; showView('orders'); v2OpenOrderCards()");
@@ -940,6 +946,7 @@ function createWindow() {
       } else if (["command", "sale", "dashboard", "orders", "packing", "live", "offers", "buyers", "health", "help"].includes(captureView)) {
         await mainWindow.webContents.executeJavaScript(`showView(${JSON.stringify(captureView)})`);
       }
+      if (process.env.CARD_SALE_CAPTURE_THEME) await mainWindow.webContents.executeJavaScript(`state.preferences.theme=${JSON.stringify(process.env.CARD_SALE_CAPTURE_THEME)}; applyDisplayPreferences()`);
       await new Promise((resolve) => setTimeout(resolve, 150));
       if (captureView === "one-off") { await new Promise((resolve) => setTimeout(resolve, 800)); await mainWindow.webContents.executeJavaScript("state.preferences.setupCompleted=true; document.querySelectorAll('dialog[open]').forEach((item)=>item.close()); renderOneOffOrders(); const target=document.querySelector('#oneOffOrdersDialog'); if(!target.open) target.showModal()"); await new Promise((resolve) => setTimeout(resolve, 350)); }
       if (["live-light", "live-dark", "live-contrast", "live-system"].includes(captureView)) {
@@ -1021,7 +1028,8 @@ app.whenReady().then(() => {
   });
   ipcMain.handle("live-popout:open", (_event, payload) => { if (!paidAllowed()) return false; openLivePopout(payload); return true; });
   ipcMain.handle("live-popout:sync", (_event, payload) => { if (livePopoutWindow && !livePopoutWindow.isDestroyed()) livePopoutWindow.webContents.send("live-popout:state", payload); return true; });
-  ipcMain.handle("live-popout:action", (_event, action) => { mainWindow?.webContents.send("live-popout:action", action); return true; });
+  ipcMain.handle("live-popout:action", (_event, action) => { if (!mainWindow || mainWindow.isDestroyed()) return false; mainWindow.webContents.send("live-popout:action", action); return true; });
+  ipcMain.handle("live-popout:result", (_event, result) => { if (livePopoutWindow && !livePopoutWindow.isDestroyed()) livePopoutWindow.webContents.send("live-popout:result", result); return true; });
   ipcMain.handle("live-popout:opacity", (_event, value) => { if (!livePopoutWindow || livePopoutWindow.isDestroyed()) return false; const opacity = Math.max(0.65, Math.min(1, Number(value || 1))); livePopoutWindow.setOpacity(opacity); return true; });
   ipcMain.handle("live-popout:close", () => { livePopoutWindow?.close(); return true; });
   if (!hasSingleInstanceLock) return;

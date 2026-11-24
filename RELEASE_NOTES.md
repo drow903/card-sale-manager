@@ -1,3 +1,18 @@
+# Card Sale Manager 2.4.1
+
+## Improvements
+
+- Keeps the selected-message copy action visible at the top of the Reusable Buyer Messages window, even while editing or scrolling through a long message.
+- Reworks the buyer-message and message-template windows to fit common laptop displays without horizontal scrolling.
+- Allows unused built-in quick messages to be hidden and restored later.
+- Adds bulk status and shipping actions to Buyer Orders.
+- Adds workflow counters, clearer empty states, one-click filter clearing, and more useful selection totals throughout the sale workflow.
+- Restores the seller's active sale, workspace, buyer, filters, sorting, and scroll position between sessions.
+- Adds mouse Back and Forward button navigation while protecting open editors and unsaved dialogs.
+- Adds immediate visual confirmation after copying and guards against accidental double-click actions.
+- Fixes Live Sale pop-out copying so the listing is copied before the queue advances and success or failure is shown inside the pop-out.
+- Improves responsiveness for large sales and adds repeatable usability and performance checks.
+
 # Card Sale Manager 2.4.0
 
 ## Highlights

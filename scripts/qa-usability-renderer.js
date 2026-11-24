@@ -1,4 +1,4 @@
-const results = { passed: false, oneOff: {}, performance: {}, visualSummaries: {}, notifications: {}, bulkClaims: {}, postOrder: {}, buyerProfiles: {}, doubleClick: {} };
+const results = { passed: false, oneOff: {}, performance: {}, visualSummaries: {}, notifications: {}, bulkClaims: {}, bulkOrders: {}, postOrder: {}, buyerProfiles: {}, messageLibrary: {}, navigation: {}, livePopout: {}, doubleClick: {} };
 const assertQa = (condition, message) => { if (!condition) throw new Error(message); };
 const waitQa = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const timedQa = async (work) => { const started = performance.now(); await work(); return Math.round((performance.now() - started) * 10) / 10; };
@@ -102,6 +102,34 @@ assertQa(toastQueue.length === 2, `Notification queue expected 2 waiting message
 assertQa($("#toast").textContent.includes("QA notice two"), "The second queued notification was not displayed in order");
 results.notifications = { aboveModal: true, queuedInOrder: true, waitingAfterFirst: 2 };
 $("#messageTemplatesDialog").close();
+
+// Built-in quick messages can be hidden without being destroyed, then restored.
+state.preferences.hiddenQuickMessageBuiltins = ["delayed"]; renderQuickMessages();
+assertQa(!visibleQuickMessages().some((message) => message.builtInKey === "delayed"), "Hidden built-in message still appeared in the message library");
+assertQa(quickMessageById("builtin-delayed")?.body, "Hiding a built-in message destroyed its recoverable template");
+state.preferences.hiddenQuickMessageBuiltins = []; renderQuickMessages();
+assertQa(visibleQuickMessages().some((message) => message.builtInKey === "delayed"), "Hidden built-in message could not be restored");
+results.messageLibrary = { defaultHidden: true, recoverable: true, restored: true };
+
+// Bulk order actions use one safety snapshot and update all selected orders.
+const bulkOrderBuyers = ["Bulk Order A", "Bulk Order B"];
+performanceSale.cards = bulkOrderBuyers.map((buyer, index) => testCard(index, { status: "claimed", buyer, claimType: "claim", claimPrice: 10 + index }));
+performanceSale.orders = Object.fromEntries(bulkOrderBuyers.map((buyer) => [buyer, { status: "awaiting", shippingMethod: "PWE" }]));
+selectedOrderBuyers = new Set(bulkOrderBuyers); $("#orderBulkAction").value = "paid"; const bulkConfirm = window.confirm; window.confirm = () => true; applyBulkOrderAction(); window.confirm = bulkConfirm;
+assertQa(bulkOrderBuyers.every((buyer) => performanceSale.orders[buyer].status === "paid"), "Bulk order action did not update every selected order");
+results.bulkOrders = { selected: 2, markedPaid: true, undoSnapshot: Boolean(performanceSale.versions?.length) };
+
+// CSM view history supports Back and Forward without losing the active sale.
+$$("dialog[open]").forEach((dialog) => dialog.close()); closeQuickEdit(); viewBackStack = []; viewForwardStack = []; uiState().activeView = "sale"; showView("claims"); navigateViewHistory("back");
+assertQa(uiState().activeView === "sale", "Mouse-style Back navigation did not return to the previous CSM screen");
+navigateViewHistory("forward"); assertQa(uiState().activeView === "claims", "Mouse-style Forward navigation did not restore the next CSM screen");
+results.navigation = { back: true, forward: true, activeSalePreserved: state.activeSaleId === performanceSale.id };
+
+// Pop-out copy must await the clipboard result, hide the posted card, and acknowledge the action.
+const liveCard = performanceSale.cards[0]; liveCard.status = "available"; delete liveCard.hiddenAfterCopy; liveIndex = 0;
+let popoutCopyFinished = false; const popoutResult = await v2HandlePopoutAction({ type: "copy", cardId: liveCard.id, autoAdvance: true, requestId: "qa-popout-copy" }, async () => { await waitQa(40); liveCard.hiddenAfterCopy = true; liveCard.postedAt = new Date().toISOString(); popoutCopyFinished = true; return true; });
+assertQa(liveCard.hiddenAfterCopy && liveCard.postedAt, `Pop-out copy did not finish before the sale state synchronized: ${JSON.stringify({ result: popoutResult, hiddenAfterCopy: liveCard.hiddenAfterCopy, postedAt: liveCard.postedAt, status: liveCard.status, liveCards: liveCards().length, recentErrors: runtimeErrors.slice(-2) })}`);
+assertQa(popoutCopyFinished && popoutResult.ok, "Pop-out did not await the copy result before acknowledging success"); results.livePopout = { copied: true, advanced: true, awaitedClipboard: true };
 
 results.passed = true;
 return results;

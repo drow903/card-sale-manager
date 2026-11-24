@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("csmLive", {
   onState: (callback) => { const listener = (_event, state) => callback(state); ipcRenderer.on("live-popout:state", listener); return () => ipcRenderer.removeListener("live-popout:state", listener); },
+  onActionResult: (callback) => { const listener = (_event, result) => callback(result); ipcRenderer.on("live-popout:result", listener); return () => ipcRenderer.removeListener("live-popout:result", listener); },
   action: (action) => ipcRenderer.invoke("live-popout:action", action),
   startDrag: (filePath) => ipcRenderer.invoke("file:start-drag", filePath),
   opacity: (value) => ipcRenderer.invoke("live-popout:opacity", value),
